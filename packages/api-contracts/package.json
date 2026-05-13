@@ -1,0 +1,30 @@
+{
+  "name": "@hivemap/api-contracts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@hivemap/capture": "0.0.0",
+    "@hivemap/categories": "0.0.0",
+    "@hivemap/graph-core": "0.0.0",
+    "@hivemap/projections": "0.0.0",
+    "@hivemap/storage": "0.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

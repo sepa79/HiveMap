@@ -37,3 +37,30 @@ type ProjectionGroup = {
   categoryIds?: string[];
 };
 ```
+
+## Initial Projection Generation
+
+Overview projection:
+
+- shows a bounded set of graph nodes,
+- hides detail by default,
+- may group visible nodes,
+- includes only edges whose endpoints are visible.
+
+Dive-in projection:
+
+- focuses on one root node,
+- includes the root node,
+- includes directly connected neighbor nodes,
+- includes edges touching the root node,
+- may include category annotations as projection groups.
+
+Projection generation must not mutate graph nodes or edges.
+
+## Validation
+
+- Projection ids and names must be non-empty.
+- Root, visible node, and visible edge ids must reference existing graph items.
+- Visible edges must have both endpoints visible.
+- Group ids and labels must be non-empty.
+- Group node ids must be visible in the projection.

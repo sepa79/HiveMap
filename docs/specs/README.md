@@ -28,9 +28,11 @@ Create or update a spec before implementing the corresponding behavior:
 ## Initial Spec List
 
 - `graph-model.md`
+- `graph-commands.md`
 - `capture-policy.md`
 - `feedback-events.md`
 - `category-overlay.md`
 - `projection-model.md`
 - `mcp-tools.md`
+- `rest-api.md`
 - `storage-format.md`

@@ -7,6 +7,13 @@ They do not replace node type.
 ## Category Assignment
 
 ```ts
+type CategoryDefinition = {
+  id: string;
+  label: string;
+  description: string;
+  source: "system" | "project";
+};
+
 type CategoryAssignment = {
   id: string;
   targetType: "node" | "edge" | "projection";
@@ -40,3 +47,14 @@ Playful labels/icons such as Banana, Opera, Jester, and Lab Rat are display them
 ## Custom Categories
 
 Projects may define custom categories. Custom categories must be explicit project data, not ad hoc strings scattered through graph nodes.
+
+Custom category ids must not collide with the initial category catalog.
+
+## Validation
+
+- Category ids must be unique within the effective catalog.
+- Assignment ids must be non-empty.
+- Assignment target ids must be non-empty.
+- Assignment category ids must exist in the effective catalog.
+- Assignment targets must exist in the relevant node, edge, or projection set.
+- Unknown assignment status or provenance values are invalid.

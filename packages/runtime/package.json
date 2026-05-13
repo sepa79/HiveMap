@@ -1,0 +1,33 @@
+{
+  "name": "@hivemap/runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "pretest": "npm run build -w @hivemap/api-contracts && npm run build -w @hivemap/capture && npm run build -w @hivemap/categories && npm run build -w @hivemap/graph-core && npm run build -w @hivemap/projections && npm run build -w @hivemap/storage",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@hivemap/api-contracts": "0.0.0",
+    "@hivemap/capture": "0.0.0",
+    "@hivemap/categories": "0.0.0",
+    "@hivemap/graph-core": "0.0.0",
+    "@hivemap/projections": "0.0.0",
+    "@hivemap/storage": "0.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
