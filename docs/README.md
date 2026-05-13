@@ -22,3 +22,15 @@ Design HiveMap 1.0 around:
 - user-controlled capture policy,
 - agent-mediated interpretation,
 - saved snapshots or views for demos/history.
+
+## Canonical Docs
+
+- `../AGENTS.md`: contributor rules and SSOT order.
+- `architecture.md`: system shape and module boundaries.
+- `product/vision.md`: product intent and capture model.
+- `specs/`: contracts that implementation must follow.
+- `ai/`: command, review, Jester, and HiveMind workflow rules.
+
+## POC Boundary
+
+Use `poc/` as evidence for product learning and demo snapshots. Do not treat its file formats, Express server, or React component structure as production architecture without a recorded decision.

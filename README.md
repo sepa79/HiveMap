@@ -15,8 +15,17 @@ The POC proved the core loop:
 - `poc/` contains the delivered proof of concept.
 - `poc/data/snapshots/` contains preserved demo graph states.
 - `poc/data/category-catalog.json` contains the first category overlay model.
+- `docs/` contains the initial rules, architecture direction, and draft contracts for the real implementation.
 
 The next implementation should be designed from the POC learnings rather than by hardening the POC directly.
+
+## Project Docs
+
+- [AGENTS.md](AGENTS.md): mandatory rules for AI and human contributors.
+- [docs/architecture.md](docs/architecture.md): architecture direction.
+- [docs/product/vision.md](docs/product/vision.md): product direction.
+- [docs/specs/](docs/specs/README.md): canonical contract drafts.
+- [docs/ai/](docs/ai/COMMANDS.md): AI workflow, commands, review, and HiveMind rules.
 
 ## POC Commands
 

@@ -12,6 +12,8 @@ It should help humans and AI agents keep shared context visible without turning 
 - `Overview concepts`: high-level groupings shown first.
 - `Dive-in views`: focused subgraphs or details behind an overview concept.
 - `Category overlay`: visual/semantic labels such as confirmed truth, inference, risk, unknown, rule, experiment, or stale architecture.
+- `Feedback event`: a human gesture or comment that expresses intent for the agent to interpret.
+- `Projection`: a named visual/readable view derived from the semantic graph.
 
 ## Capture Modes
 
@@ -22,3 +24,22 @@ It should help humans and AI agents keep shared context visible without turning 
 ## Key Product Rule
 
 The human communicates intent. The agent interprets intent. The graph model changes through explicit API operations.
+
+## Category Language
+
+The initial category vocabulary is intentionally expressive:
+
+- `Banana`: confirmed human-approved truth.
+- `Opera`: AI inference or speculative interpretation.
+- `Jester`: critique or contradiction.
+- `Dumpster Fire`: known risk or dangerous shortcut.
+- `Hive`: reusable learning or proven pattern.
+- `Fog`: unknown, ambiguous, or missing evidence.
+- `Spark`: emerging idea.
+- `Law`: mandatory rule or architecture standard.
+- `Thread`: cross-system dependency or shared context.
+- `Lab Rat`: experiment or operational test.
+- `Ghost`: stale concept or abandoned direction.
+- `Siren`: critical issue or rule failure.
+
+Projects may define their own categories, but custom categories must be explicit project data.
