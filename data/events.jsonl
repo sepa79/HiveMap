@@ -1,0 +1,9 @@
+
+{"id":"558f0e16-2ab5-4bd1-b453-e687e2a3aed9","createdAt":"2026-05-13T01:00:28.026Z","type":"node_moved","payload":{"nodeId":"feedback-events","x":592.5,"y":303}}
+{"id":"24626cbb-d90d-4d6a-be39-a25ff3763619","createdAt":"2026-05-13T01:00:31.009Z","type":"node_moved","payload":{"nodeId":"feedback-events","x":650,"y":321}}
+{"id":"21b308d4-598d-4a55-9c0b-9957711875f0","createdAt":"2026-05-13T01:00:50.054Z","type":"node_moved","payload":{"nodeId":"feedback-events","x":604,"y":292}}
+{"id":"4fa29dfb-3d6c-430e-8561-ef0b31035e19","createdAt":"2026-05-13T01:04:15.069Z","type":"node_moved","payload":{"nodeId":"feedback-events","x":553,"y":294}}
+{"id":"e75dc2f9-a8b8-4968-8de1-d701a3c0fbbd","createdAt":"2026-05-13T01:04:20.064Z","type":"node_moved","payload":{"nodeId":"feedback-events","x":631,"y":167}}
+{"id":"8bfc11b1-0fe6-4a63-ba1d-5daeaba15c2d","createdAt":"2026-05-13T01:08:50.725Z","type":"node_moved","payload":{"nodeId":"feedback-events","x":614.5,"y":288.5}}
+{"id":"2aa788e7-0f47-43bc-a14c-dee1112c44e3","createdAt":"2026-05-13T01:17:40.333Z","type":"map_comment","payload":{"comment":"Operational test: agent used delegated capture to add a Conversation Map cluster from the current discussion."}}
+{"id":"a10455d5-aacc-4ff3-b0a2-117e48f73b67","createdAt":"2026-05-13T01:20:30.307Z","type":"map_comment","payload":{"comment":"Operational test promoted as the current map focus; initial POC seed nodes were removed from the active graph view."}}

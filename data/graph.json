@@ -1,0 +1,186 @@
+{
+  "nodes": [
+    {
+      "id": "conversation-map",
+      "label": "Conversation Map",
+      "type": "concept",
+      "notes": "An overview map of what the current conversation is about, not a transcript and not a flat dump of every idea."
+    },
+    {
+      "id": "overview-concepts",
+      "label": "Overview concepts",
+      "type": "concept",
+      "notes": "Large, human-scale clusters shown first so the map stays readable."
+    },
+    {
+      "id": "dive-in-views",
+      "label": "Dive-in views",
+      "type": "concept",
+      "notes": "A selected overview concept opens a focused subgraph or detail panel with more nodes, edges, notes, evidence, and questions."
+    },
+    {
+      "id": "capture-policy",
+      "label": "Capture policy",
+      "type": "decision",
+      "notes": "The user can choose explicit approval, delegated capture, or another capture rule for the current conversation."
+    },
+    {
+      "id": "agent-interpretation",
+      "label": "Agent interpretation",
+      "type": "concept",
+      "notes": "The AI turns approved or delegated conversation signal into graph changes instead of exposing manual editing as the primary workflow."
+    },
+    {
+      "id": "semantic-graph",
+      "label": "Semantic graph SSOT",
+      "type": "decision",
+      "notes": "The graph model remains the source of truth; visual grouping and layout are projections over it."
+    },
+    {
+      "id": "detail-graph",
+      "label": "Detail graph",
+      "type": "concept",
+      "notes": "The deeper graph behind one overview concept, useful when the human asks to inspect a topic."
+    },
+    {
+      "id": "human-feedback",
+      "label": "Human feedback",
+      "type": "concept",
+      "notes": "Drag, mark, select, and comment gestures tell the agent what the human meant."
+    },
+    {
+      "id": "readability-risk",
+      "label": "Flat-map overload",
+      "type": "risk",
+      "notes": "Too many peer-level nodes makes the map visually noisy and reduces usefulness."
+    },
+    {
+      "id": "snapshot-demo",
+      "label": "Saved demo snapshots",
+      "type": "evidence",
+      "notes": "Earlier POC maps are preserved under data/snapshots for tomorrow's demo."
+    },
+    {
+      "id": "category-overlay",
+      "label": "Category overlay",
+      "type": "concept",
+      "notes": "A visual/semantic layer that marks whether something is confirmed, inferred, risky, unknown, experimental, stale, mandatory, or custom."
+    },
+    {
+      "id": "trust-state",
+      "label": "Trust state",
+      "type": "concept",
+      "notes": "Categories tell humans whether a concept is approved truth, AI inference, critique, unknown, or proven learning."
+    },
+    {
+      "id": "project-map",
+      "label": "Project Map",
+      "type": "concept",
+      "notes": "The same mapping model can represent a project, where categories become more important for decisions, risks, rules, dependencies, and stale architecture."
+    },
+    {
+      "id": "custom-categories",
+      "label": "Custom categories",
+      "type": "concept",
+      "notes": "Projects can define their own labels such as Microservice, That Idiot, or Vacation plans without changing the core graph model."
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-conversation-map-overview",
+      "from": "conversation-map",
+      "to": "overview-concepts",
+      "label": "shows first"
+    },
+    {
+      "id": "e-overview-dive-in",
+      "from": "overview-concepts",
+      "to": "dive-in-views",
+      "label": "can open"
+    },
+    {
+      "id": "e-dive-in-detail",
+      "from": "dive-in-views",
+      "to": "detail-graph",
+      "label": "reveals"
+    },
+    {
+      "id": "e-capture-policy-agent",
+      "from": "capture-policy",
+      "to": "agent-interpretation",
+      "label": "guides"
+    },
+    {
+      "id": "e-agent-graph",
+      "from": "agent-interpretation",
+      "to": "semantic-graph",
+      "label": "updates"
+    },
+    {
+      "id": "e-semantic-overview",
+      "from": "semantic-graph",
+      "to": "overview-concepts",
+      "label": "projects as"
+    },
+    {
+      "id": "e-semantic-detail",
+      "from": "semantic-graph",
+      "to": "detail-graph",
+      "label": "contains"
+    },
+    {
+      "id": "e-feedback-agent",
+      "from": "human-feedback",
+      "to": "agent-interpretation",
+      "label": "clarifies intent for"
+    },
+    {
+      "id": "e-overload-overview",
+      "from": "readability-risk",
+      "to": "overview-concepts",
+      "label": "requires"
+    },
+    {
+      "id": "e-snapshot-demo",
+      "from": "snapshot-demo",
+      "to": "conversation-map",
+      "label": "preserves prior examples of"
+    },
+    {
+      "id": "e-category-overlay-conversation-map",
+      "from": "category-overlay",
+      "to": "conversation-map",
+      "label": "annotates"
+    },
+    {
+      "id": "e-category-overlay-project-map",
+      "from": "category-overlay",
+      "to": "project-map",
+      "label": "becomes critical in"
+    },
+    {
+      "id": "e-trust-state-category-overlay",
+      "from": "trust-state",
+      "to": "category-overlay",
+      "label": "is shown by"
+    },
+    {
+      "id": "e-custom-categories-category-overlay",
+      "from": "custom-categories",
+      "to": "category-overlay",
+      "label": "extend"
+    },
+    {
+      "id": "e-project-map-semantic-graph",
+      "from": "project-map",
+      "to": "semantic-graph",
+      "label": "uses"
+    },
+    {
+      "id": "e-category-overlay-overview",
+      "from": "category-overlay",
+      "to": "overview-concepts",
+      "label": "summarises state of"
+    }
+  ]
+}

@@ -1,0 +1,93 @@
+{
+  "label": "Initial POC seed map",
+  "description": "Original small HiveMap POC seed used before the operational Conversation Map test.",
+  "graph": {
+    "nodes": [
+      {
+        "id": "hivemap",
+        "label": "HiveMap",
+        "type": "concept",
+        "notes": "Visual concept graph workspace for AI conversations."
+      },
+      {
+        "id": "semantic-graph",
+        "label": "Semantic graph SSOT",
+        "type": "decision",
+        "notes": "Nodes and edges are the source of truth; the UI is only a projection."
+      },
+      {
+        "id": "intentional-capture",
+        "label": "Intentional capture",
+        "type": "decision",
+        "notes": "The agent only captures when the human asks for it."
+      },
+      {
+        "id": "react-flow-surface",
+        "label": "React Flow surface",
+        "type": "concept",
+        "notes": "Interactive canvas for showing graph and collecting feedback gestures."
+      },
+      {
+        "id": "feedback-events",
+        "label": "Feedback events",
+        "type": "concept",
+        "notes": "Human gestures are stored for the agent to interpret."
+      },
+      {
+        "id": "hivemind",
+        "label": "HiveMind",
+        "type": "evidence",
+        "notes": "Durable memory for project learnings, kept separate from HiveMap."
+      },
+      {
+        "id": "accidental-architecture",
+        "label": "Accidental 1.0 architecture",
+        "type": "risk",
+        "notes": "The POC must not harden before learnings are captured."
+      }
+    ],
+    "edges": [
+      {
+        "id": "e-hivemap-graph",
+        "from": "hivemap",
+        "to": "semantic-graph",
+        "label": "uses"
+      },
+      {
+        "id": "e-capture-graph",
+        "from": "intentional-capture",
+        "to": "semantic-graph",
+        "label": "updates"
+      },
+      {
+        "id": "e-flow-feedback",
+        "from": "react-flow-surface",
+        "to": "feedback-events",
+        "label": "emits"
+      },
+      {
+        "id": "e-feedback-graph",
+        "from": "feedback-events",
+        "to": "semantic-graph",
+        "label": "informs changes to"
+      },
+      {
+        "id": "e-hivemind-learnings",
+        "from": "hivemind",
+        "to": "accidental-architecture",
+        "label": "records learning before"
+      }
+    ]
+  },
+  "view": {
+    "nodes": [
+      { "nodeId": "hivemap", "x": 40, "y": 120 },
+      { "nodeId": "semantic-graph", "x": 340, "y": 80 },
+      { "nodeId": "intentional-capture", "x": 70, "y": 320 },
+      { "nodeId": "react-flow-surface", "x": 630, "y": 90 },
+      { "nodeId": "feedback-events", "x": 650, "y": 310 },
+      { "nodeId": "hivemind", "x": 360, "y": 460 },
+      { "nodeId": "accidental-architecture", "x": 700, "y": 500 }
+    ]
+  }
+}

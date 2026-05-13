@@ -1,0 +1,78 @@
+{
+  "categories": [
+    {
+      "id": "banana",
+      "label": "Banana",
+      "meaning": "Confirmed / human-approved truth.",
+      "use": "Use when the human explicitly approves a node, edge, decision, or statement."
+    },
+    {
+      "id": "opera",
+      "label": "Opera",
+      "meaning": "AI inference / speculative interpretation / dramatic extrapolation.",
+      "use": "Use when the agent inferred something plausible that still needs confirmation."
+    },
+    {
+      "id": "jester",
+      "label": "Jester",
+      "meaning": "Critique / contradiction / architectural skepticism / bullshit detection.",
+      "use": "Use when the map should highlight a challenge, contradiction, or skeptical read."
+    },
+    {
+      "id": "dumpster-fire",
+      "label": "Dumpster Fire",
+      "meaning": "Known risk / dangerous shortcut / entropy hotspot / technical debt.",
+      "use": "Use when a concept is already known to be dangerous or likely to fail."
+    },
+    {
+      "id": "hive",
+      "label": "Hive",
+      "meaning": "Reusable learning / organizational knowledge / proven pattern.",
+      "use": "Use for knowledge that should carry across sessions or projects."
+    },
+    {
+      "id": "fog",
+      "label": "Fog",
+      "meaning": "Unknowns / ambiguity / missing evidence / unclear ownership.",
+      "use": "Use when the map needs to preserve uncertainty instead of pretending certainty."
+    },
+    {
+      "id": "spark",
+      "label": "Spark",
+      "meaning": "New idea / emerging concept / experimental direction.",
+      "use": "Use for promising but immature concepts."
+    },
+    {
+      "id": "law",
+      "label": "Law",
+      "meaning": "Rule / governance / mandatory constraint / architecture standard.",
+      "use": "Use for non-negotiable constraints and project rules."
+    },
+    {
+      "id": "thread",
+      "label": "Thread",
+      "meaning": "Cross-system dependency / conceptual linkage / shared context.",
+      "use": "Use for relationships that connect this map to a larger system."
+    },
+    {
+      "id": "lab-rat",
+      "label": "Lab Rat",
+      "meaning": "Experimental feature / unsafe prototype / operational test.",
+      "use": "Use for POCs and tests that should not be treated as production-ready."
+    },
+    {
+      "id": "ghost",
+      "label": "Ghost",
+      "meaning": "Stale concept / abandoned direction / zombie architecture.",
+      "use": "Use for ideas that still exist in the map but should not guide current work."
+    },
+    {
+      "id": "siren",
+      "label": "Siren",
+      "meaning": "Critical alert / rule failure / security issue / major drift.",
+      "use": "Use when attention should stop and move to the flagged issue."
+    }
+  ],
+  "customCategoryExamples": ["Microservice", "That Idiot", "Vacation plans"],
+  "modelNote": "Categories are separate from core node type. A node can be a concept, decision, risk, question, or evidence while also carrying one or more category labels."
+}

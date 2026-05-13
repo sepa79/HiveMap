@@ -1,0 +1,18 @@
+{
+  "nodes": [
+    { "nodeId": "conversation-map", "x": -300, "y": 0 },
+    { "nodeId": "overview-concepts", "x": 0, "y": 0 },
+    { "nodeId": "dive-in-views", "x": 300, "y": 0 },
+    { "nodeId": "detail-graph", "x": 600, "y": 0 },
+    { "nodeId": "capture-policy", "x": -300, "y": -230 },
+    { "nodeId": "agent-interpretation", "x": 0, "y": -230 },
+    { "nodeId": "semantic-graph", "x": 300, "y": -230 },
+    { "nodeId": "human-feedback", "x": -300, "y": 230 },
+    { "nodeId": "readability-risk", "x": 0, "y": 230 },
+    { "nodeId": "snapshot-demo", "x": 300, "y": 230 },
+    { "nodeId": "category-overlay", "x": 0, "y": 470 },
+    { "nodeId": "trust-state", "x": -300, "y": 470 },
+    { "nodeId": "project-map", "x": 300, "y": 470 },
+    { "nodeId": "custom-categories", "x": 600, "y": 470 }
+  ]
+}

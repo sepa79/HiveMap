@@ -1,0 +1,181 @@
+{
+  "label": "Operational Conversation Map",
+  "description": "Focused operational test map created from delegated capture during the live conversation.",
+  "graph": {
+    "nodes": [
+      {
+        "id": "hivemap",
+        "label": "HiveMap",
+        "type": "concept",
+        "notes": "Visual concept graph workspace for AI conversations."
+      },
+      {
+        "id": "semantic-graph",
+        "label": "Semantic graph SSOT",
+        "type": "decision",
+        "notes": "Nodes and edges are the source of truth; the UI is only a projection."
+      },
+      {
+        "id": "feedback-events",
+        "label": "Feedback events",
+        "type": "concept",
+        "notes": "Human gestures are stored for the agent to interpret."
+      },
+      {
+        "id": "conversation-map",
+        "label": "Conversation Map",
+        "type": "concept",
+        "notes": "Live visualisation of what the human and AI are discussing, captured as a graph instead of a transcript."
+      },
+      {
+        "id": "capture-intent",
+        "label": "Capture intent",
+        "type": "concept",
+        "notes": "The user controls what should enter HiveMap: explicit approval, delegated judgement, or another chosen mode."
+      },
+      {
+        "id": "approved-capture-mode",
+        "label": "Approved capture mode",
+        "type": "decision",
+        "notes": "Only information explicitly confirmed by the human is saved to the map."
+      },
+      {
+        "id": "delegated-capture-mode",
+        "label": "Delegated capture mode",
+        "type": "decision",
+        "notes": "The human allows the AI agent to choose what is worth capturing for the map."
+      },
+      {
+        "id": "agent-curation",
+        "label": "Agent curation",
+        "type": "concept",
+        "notes": "The AI selects concepts and relationships that seem useful for the current reasoning task."
+      },
+      {
+        "id": "conversation-signal",
+        "label": "Conversation signal",
+        "type": "concept",
+        "notes": "Important ideas, decisions, risks, and open questions that emerge during the conversation."
+      },
+      {
+        "id": "information-flow",
+        "label": "Information flow",
+        "type": "decision",
+        "notes": "Human intent should flow through feedback and agent interpretation before mutating the graph model."
+      },
+      {
+        "id": "operational-test",
+        "label": "Operational test",
+        "type": "evidence",
+        "notes": "This map update tests whether Conversation Map is useful in a live conversation."
+      }
+    ],
+    "edges": [
+      {
+        "id": "e-hivemap-graph",
+        "from": "hivemap",
+        "to": "semantic-graph",
+        "label": "uses"
+      },
+      {
+        "id": "e-feedback-graph",
+        "from": "feedback-events",
+        "to": "semantic-graph",
+        "label": "informs changes to"
+      },
+      {
+        "id": "e-hivemap-conversation-map",
+        "from": "hivemap",
+        "to": "conversation-map",
+        "label": "can present"
+      },
+      {
+        "id": "e-conversation-map-signal",
+        "from": "conversation-map",
+        "to": "conversation-signal",
+        "label": "visualises"
+      },
+      {
+        "id": "e-capture-intent-conversation-map",
+        "from": "capture-intent",
+        "to": "conversation-map",
+        "label": "controls updates to"
+      },
+      {
+        "id": "e-approved-capture-intent",
+        "from": "approved-capture-mode",
+        "to": "capture-intent",
+        "label": "is one mode of"
+      },
+      {
+        "id": "e-delegated-capture-intent",
+        "from": "delegated-capture-mode",
+        "to": "capture-intent",
+        "label": "is one mode of"
+      },
+      {
+        "id": "e-delegated-agent-curation",
+        "from": "delegated-capture-mode",
+        "to": "agent-curation",
+        "label": "authorizes"
+      },
+      {
+        "id": "e-agent-curation-signal",
+        "from": "agent-curation",
+        "to": "conversation-signal",
+        "label": "selects from"
+      },
+      {
+        "id": "e-signal-semantic-graph",
+        "from": "conversation-signal",
+        "to": "semantic-graph",
+        "label": "becomes structured as"
+      },
+      {
+        "id": "e-information-flow-graph",
+        "from": "information-flow",
+        "to": "semantic-graph",
+        "label": "protects"
+      },
+      {
+        "id": "e-feedback-information-flow",
+        "from": "feedback-events",
+        "to": "information-flow",
+        "label": "carry human intent through"
+      },
+      {
+        "id": "e-operational-test-conversation-map",
+        "from": "operational-test",
+        "to": "conversation-map",
+        "label": "evaluates"
+      },
+      {
+        "id": "e-operational-test-delegated-capture",
+        "from": "operational-test",
+        "to": "delegated-capture-mode",
+        "label": "uses"
+      },
+      {
+        "id": "e-operational-test-information-flow",
+        "from": "operational-test",
+        "to": "information-flow",
+        "label": "checks"
+      }
+    ]
+  },
+  "view": {
+    "nodes": [
+      { "nodeId": "hivemap", "x": -260, "y": 80 },
+      { "nodeId": "semantic-graph", "x": 660, "y": 40 },
+      { "nodeId": "feedback-events", "x": 420, "y": 300 },
+      { "nodeId": "conversation-map", "x": 40, "y": 30 },
+      { "nodeId": "capture-intent", "x": 120, "y": -220 },
+      { "nodeId": "approved-capture-mode", "x": 400, "y": -330 },
+      { "nodeId": "delegated-capture-mode", "x": 400, "y": -130 },
+      { "nodeId": "agent-curation", "x": 660, "y": -220 },
+      { "nodeId": "conversation-signal", "x": 360, "y": 80 },
+      { "nodeId": "information-flow", "x": 120, "y": 300 },
+      { "nodeId": "operational-test", "x": -240, "y": -180 }
+    ]
+  }
+}
