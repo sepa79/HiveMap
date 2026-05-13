@@ -10,6 +10,7 @@ Build a local-first HiveMap alpha that proves:
 - the UI can show overview and dive-in projections,
 - feedback events can become agent proposals,
 - categories make trust/risk/uncertainty readable.
+- delegated capture can update the map at conversation speed.
 
 ## Scope
 
@@ -24,7 +25,7 @@ Build a local-first HiveMap alpha that proves:
 - Dive-in projection.
 - Proposal creation and apply/reject.
 - MCP tools for graph/projection/category/proposal operations.
-- Local persistence.
+- SQLite local persistence.
 
 ### Not Required
 
@@ -44,15 +45,16 @@ Build a local-first HiveMap alpha that proves:
 4. Agent adds nodes/edges with categories.
 5. UI shows an overview.
 6. User marks one item unclear and asks to dive in.
-7. Agent creates a proposal to regroup and add detail.
-8. User approves.
-9. Projection updates.
+7. Agent applies a delegated update or creates a proposal if the policy requires review.
+8. Projection updates.
+9. User switches to Project Map semantics when the conversation is about a project.
 10. Snapshot is saved.
 
 ## Definition Of Done
 
 - All graph mutations go through commands.
 - UI gestures create feedback events.
+- Delegated capture is the default policy.
 - Agent proposals are visible before apply when policy requires it.
 - Overview projection hides detail by default.
 - Dive-in projection reveals local detail.
@@ -68,12 +70,13 @@ Build a local-first HiveMap alpha that proves:
 - `categories`
 - `capture`
 - contract tests
+- TDD for pure behavior before apps.
 
 ### Milestone 2 — Local Runtime
 
 - persistence adapter,
-- API app,
 - MCP app,
+- API app,
 - command execution tests.
 
 ### Milestone 3 — Web UX

@@ -4,7 +4,7 @@ Draft placeholder for the first real persistence contract.
 
 ## Direction
 
-Prefer local-first SQLite for the first implementation, behind explicit storage interfaces.
+Use local-first SQLite for the first implementation, behind explicit storage interfaces.
 
 ## Required Stores
 

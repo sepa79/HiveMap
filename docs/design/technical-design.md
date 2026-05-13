@@ -20,7 +20,7 @@ packages/
   api-contracts/
 ```
 
-Start smaller if useful, but preserve these boundaries in code.
+Start with core packages and TDD. Add apps after core behavior is explicit and tested.
 
 ## Package Responsibilities
 
@@ -71,7 +71,7 @@ It reads graph data and produces projection data. It does not mutate graph seman
 
 Owns persistence adapters.
 
-Initial adapter can be file/SQLite, but it must sit behind explicit interfaces.
+Initial adapter is SQLite, behind explicit interfaces.
 
 ### `api-contracts`
 
@@ -79,15 +79,15 @@ Owns shared contract types if needed by API, MCP, and UI.
 
 ## Apps
 
-### `apps/api`
-
-HTTP API for local UI and tests.
-
 ### `apps/mcp`
 
 MCP server for AI agents.
 
 The MCP tools should be the first-class agent interface.
+
+### `apps/api`
+
+HTTP API for local UI and tests.
 
 ### `apps/web`
 
@@ -95,7 +95,7 @@ Browser UI for maps, projections, feedback, and proposal review.
 
 ## Storage First Pass
 
-Prefer SQLite for first real implementation.
+Use SQLite for first real implementation.
 
 Reasoning:
 
@@ -141,7 +141,7 @@ HTTP API:
 - `GET /categories`
 - `POST /category-assignments`
 
-MCP API:
+MCP API is primary:
 
 - `graph_get`
 - `graph_command`
@@ -152,7 +152,7 @@ MCP API:
 - `projection_create`
 - `category_assign`
 
-Avoid parallel, subtly different semantics between REST and MCP.
+Avoid parallel, subtly different semantics between REST and MCP. REST should call the same command handlers as MCP.
 
 ## Frontend First Pass
 
@@ -189,15 +189,16 @@ UI tests can come after core contracts stabilize.
 ## First Implementation Slice
 
 1. Create monorepo/workspace tooling.
-2. Implement `graph-core`.
-3. Implement `categories`.
-4. Implement `capture` event/proposal types.
-5. Implement file or SQLite storage behind explicit interfaces.
-6. Implement API command endpoint.
+2. Implement `graph-core` with tests first.
+3. Implement `categories` with stable semantic ids and tests.
+4. Implement `capture` event/proposal/policy types with delegated default.
+5. Implement `projections` overview/dive-in logic with tests.
+6. Implement SQLite storage behind explicit interfaces.
 7. Implement MCP graph tools.
-8. Implement web overview projection.
-9. Implement feedback event capture.
-10. Implement proposal review.
+8. Implement API command endpoint over the same handlers.
+9. Implement web overview projection.
+10. Implement feedback event capture.
+11. Implement proposal review.
 
 ## Risks
 
@@ -207,3 +208,4 @@ UI tests can come after core contracts stabilize.
 - Adding too much AI automation before capture policy is solid.
 - Over-designing storage before workflow is proven.
 - Losing the playful category language by over-normalizing it.
+- Encoding playful category names as stable data ids instead of keeping them as an icon/display theme.

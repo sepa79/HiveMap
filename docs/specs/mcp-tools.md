@@ -1,6 +1,6 @@
 # MCP Tools
 
-Draft MCP surface for agents.
+Draft MCP surface for agents. MCP is the primary HiveMap agent interface for alpha.
 
 ## Required Tools
 
@@ -22,3 +22,4 @@ Draft MCP surface for agents.
 - Tools must not silently create categories.
 - Proposal and apply flows must be distinguishable.
 - All graph mutations must be explicit.
+- REST endpoints, if present, must call the same command handlers as MCP tools.
