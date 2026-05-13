@@ -28,6 +28,10 @@ Design HiveMap 1.0 around:
 - `../AGENTS.md`: contributor rules and SSOT order.
 - `architecture.md`: system shape and module boundaries.
 - `product/vision.md`: product intent and capture model.
+- `design/first-pass-design.md`: first-pass design based on POC learnings.
+- `design/interaction-model.md`: human/agent interaction model.
+- `design/technical-design.md`: first technical design.
+- `design/mvp-slice.md`: first implementation slice.
 - `specs/`: contracts that implementation must follow.
 - `ai/`: command, review, Jester, and HiveMind workflow rules.
 

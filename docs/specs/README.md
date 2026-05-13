@@ -33,3 +33,4 @@ Create or update a spec before implementing the corresponding behavior:
 - `category-overlay.md`
 - `projection-model.md`
 - `mcp-tools.md`
+- `storage-format.md`

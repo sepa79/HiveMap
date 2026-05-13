@@ -24,6 +24,8 @@ The next implementation should be designed from the POC learnings rather than by
 - [AGENTS.md](AGENTS.md): mandatory rules for AI and human contributors.
 - [docs/architecture.md](docs/architecture.md): architecture direction.
 - [docs/product/vision.md](docs/product/vision.md): product direction.
+- [docs/design/first-pass-design.md](docs/design/first-pass-design.md): first-pass tool design from POC learnings.
+- [docs/design/mvp-slice.md](docs/design/mvp-slice.md): first implementation slice.
 - [docs/specs/](docs/specs/README.md): canonical contract drafts.
 - [docs/ai/](docs/ai/COMMANDS.md): AI workflow, commands, review, and HiveMind rules.
 
