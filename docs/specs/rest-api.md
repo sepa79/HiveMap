@@ -16,6 +16,7 @@ MCP is the primary agent interface. REST must call the same command handlers as 
 ## Endpoints
 
 ```text
+GET  /workspaces
 GET  /workspaces/:workspaceId
 POST /workspaces
 
@@ -39,7 +40,26 @@ POST /workspaces/:workspaceId/proposals/:proposalId/reject
 
 GET  /workspaces/:workspaceId/snapshots
 POST /workspaces/:workspaceId/snapshots
+
+GET  /workspaces/:workspaceId/scan-profiles
+GET  /workspaces/:workspaceId/scans
+POST /workspaces/:workspaceId/scans
+POST /workspaces/:workspaceId/scans/:scanId/coverage
+POST /workspaces/:workspaceId/scans/:scanId/findings
+POST /workspaces/:workspaceId/scans/:scanId/complete
+POST /workspaces/:workspaceId/scan-comparisons
+POST /workspaces/:workspaceId/findings/:findingNodeId/update
+
+POST /workspaces/:workspaceId/exports
+POST /workspace-imports
+
+POST /workspaces/:workspaceId/export-bundle
+POST /workspace-import-bundles?mode=new|replace
 ```
+
+`GET /workspaces` returns lightweight workspace records for browser selection without loading every semantic graph.
+
+The `exports` and `workspace-imports` endpoints use explicit server filesystem paths and remain suitable for local automation. The `export-bundle` and `workspace-import-bundles` endpoints transfer `application/zip` bytes directly for browser download and file upload. Browser import still requires an explicit `new` or `replace` mode; it never silently merges workspaces.
 
 ## Request / Response Direction
 
@@ -52,5 +72,6 @@ The API returns domain contract objects from:
 - `feedback-events.md`
 - `projection-model.md`
 - `storage-format.md`
+- `repository-scan.md`
 
 API-specific wrappers may add operation status and ids, but must not create duplicate DTO semantics.

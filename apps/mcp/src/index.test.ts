@@ -27,6 +27,16 @@ describe("MCP tool adapter", () => {
       "proposal_create",
       "proposal_approve",
       "proposal_apply",
+      "scan_profile_list",
+      "scan_list",
+      "scan_start",
+      "scan_record_coverage",
+      "scan_finding_create",
+      "finding_update",
+      "scan_complete",
+      "scan_compare",
+      "workspace_export_zip",
+      "workspace_import_zip",
     ]);
   });
 
@@ -132,6 +142,28 @@ describe("MCP tool adapter", () => {
         message: "Workspace not found: missing",
       },
     });
+  });
+
+  it("starts an instructed agent scan through MCP", () => {
+    createWorkspaceWithNode();
+
+    const result = handleMcpTool(runtime, "scan_start", {
+      workspaceId: "workspace-a",
+      scan: {
+        id: "scan-a",
+        profileId: "documentation-conflicts",
+        profileVersion: 1,
+        repository: { root: "/repo", branch: "main", revision: "abc123" },
+        actor: { agentId: "agent-a", tool: "codex" },
+        startedAt: "2026-07-17T10:00:00.000Z",
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.run.status).toBe("in_progress");
+      expect(result.value.instructions).toContainEqual(expect.stringContaining("Rediscover sources"));
+    }
   });
 });
 

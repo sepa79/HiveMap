@@ -17,8 +17,21 @@ import {
 } from "@hivemap/categories";
 import { validateGraph, type GraphEdge, type GraphNode, type SemanticGraph } from "@hivemap/graph-core";
 import { validateProjection, type Projection } from "@hivemap/projections";
+import { INITIAL_SCAN_PROFILES, validateScanState, type ScanProfile, type ScanRun } from "@hivemap/scans";
+import { STORAGE_SCHEMA_VERSION } from "./schema.js";
 
-export const STORAGE_SCHEMA_VERSION = "1";
+export {
+  BundleValidationError,
+  HIVEMAP_BUNDLE_FORMAT_VERSION,
+  createWorkspaceBundle,
+  parseWorkspaceBundle,
+  readWorkspaceBundle,
+  stableJson,
+  writeWorkspaceBundle,
+  type BundleManifest,
+  type WorkspaceBundle,
+} from "./bundle.js";
+export { STORAGE_SCHEMA_VERSION } from "./schema.js";
 
 export type WorkspaceRecord = {
   id: string;
@@ -45,6 +58,8 @@ export type WorkspaceState = {
   proposals: GraphProposal[];
   projections: Projection[];
   snapshots: SnapshotRecord[];
+  scanProfiles: ScanProfile[];
+  scanRuns: ScanRun[];
 };
 
 export class StorageError extends Error {
@@ -95,6 +110,21 @@ export class SqliteHiveMapStore {
       return;
     }
 
+    if (schemaVersion === "1") {
+      this.db.exec(SCAN_SCHEMA_SQL);
+      const workspaceRows = this.db.prepare("SELECT id FROM workspaces ORDER BY id").all() as Array<{ id: string }>;
+      const insertProfile = this.db.prepare(
+        "INSERT INTO scan_profiles (workspace_id, id, version, profile_json) VALUES (?, ?, ?, ?)",
+      );
+      for (const workspace of workspaceRows) {
+        for (const profile of INITIAL_SCAN_PROFILES) {
+          insertProfile.run(workspace.id, profile.id, profile.version, JSON.stringify(profile));
+        }
+      }
+      this.db.prepare("UPDATE schema_metadata SET value = ? WHERE key = 'schema_version'").run(STORAGE_SCHEMA_VERSION);
+      return;
+    }
+
     if (schemaVersion !== STORAGE_SCHEMA_VERSION) {
       throw new StorageError(`Unsupported storage schema version: ${schemaVersion}`);
     }
@@ -104,20 +134,47 @@ export class SqliteHiveMapStore {
     this.db.close();
   }
 
+  listWorkspaces(): WorkspaceRecord[] {
+    return (this.db.prepare("SELECT id, name, created_at FROM workspaces ORDER BY name, id").all() as Array<{
+      id: string;
+      name: string;
+      created_at: string;
+    }>).map((row) => ({ id: row.id, name: row.name, createdAt: row.created_at }));
+  }
+
+  workspaceExists(workspaceId: string): boolean {
+    assertNonEmpty("workspaceId", workspaceId);
+    return this.db.prepare("SELECT 1 AS found FROM workspaces WHERE id = ?").get(workspaceId) !== undefined;
+  }
+
+  deleteWorkspace(workspaceId: string): void {
+    assertNonEmpty("workspaceId", workspaceId);
+    const result = this.db.prepare("DELETE FROM workspaces WHERE id = ?").run(workspaceId);
+    if (result.changes !== 1) {
+      throw new StorageError(`Workspace not found: ${workspaceId}`);
+    }
+  }
+
   saveWorkspaceState(state: WorkspaceState): void {
     validateWorkspaceState(state);
 
     this.db.exec("BEGIN");
     try {
-      this.saveWorkspaceRecord(state.workspace);
-      this.replaceGraph(state.graphId, state.workspace.id, state.graph);
-      this.replaceCategoryCatalog(state.workspace.id, state.categoryCatalog);
-      this.replaceCategoryAssignments(state.workspace.id, state.categoryAssignments);
-      this.replaceCapturePolicy(state.workspace.id, state.capturePolicy);
-      this.replaceFeedbackEvents(state.workspace.id, state.feedbackEvents);
-      this.replaceProposals(state.workspace.id, state.proposals);
-      this.replaceProjections(state.workspace.id, state.projections);
-      this.replaceSnapshots(state.workspace.id, state.snapshots);
+      this.writeWorkspaceState(state);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  replaceWorkspaceState(state: WorkspaceState): void {
+    validateWorkspaceState(state);
+    this.db.exec("BEGIN");
+    try {
+      const result = this.db.prepare("DELETE FROM workspaces WHERE id = ?").run(state.workspace.id);
+      if (result.changes !== 1) throw new StorageError(`Workspace not found for replacement: ${state.workspace.id}`);
+      this.writeWorkspaceState(state);
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -144,6 +201,8 @@ export class SqliteHiveMapStore {
       proposals: this.loadProposals(workspaceId),
       projections,
       snapshots: this.loadSnapshots(workspaceId),
+      scanProfiles: this.loadScanProfiles(workspaceId),
+      scanRuns: this.loadScanRuns(workspaceId),
     };
 
     validateWorkspaceState(state);
@@ -155,6 +214,21 @@ export class SqliteHiveMapStore {
       .prepare("SELECT value FROM schema_metadata WHERE key = 'schema_version'")
       .get() as { value: string } | undefined;
     return row?.value;
+  }
+
+  private writeWorkspaceState(state: WorkspaceState): void {
+    this.saveWorkspaceRecord(state.workspace);
+    this.replaceGraph(state.graphId, state.workspace.id, state.graph);
+    this.deleteCategoryAssignments(state.workspace.id);
+    this.replaceCategoryCatalog(state.workspace.id, state.categoryCatalog);
+    this.insertCategoryAssignments(state.workspace.id, state.categoryAssignments);
+    this.replaceCapturePolicy(state.workspace.id, state.capturePolicy);
+    this.replaceFeedbackEvents(state.workspace.id, state.feedbackEvents);
+    this.replaceProposals(state.workspace.id, state.proposals);
+    this.replaceProjections(state.workspace.id, state.projections);
+    this.replaceSnapshots(state.workspace.id, state.snapshots);
+    this.replaceScanProfiles(state.workspace.id, state.scanProfiles);
+    this.replaceScanRuns(state.workspace.id, state.scanRuns);
   }
 
   private saveWorkspaceRecord(workspace: WorkspaceRecord): void {
@@ -253,8 +327,11 @@ export class SqliteHiveMapStore {
     return catalog;
   }
 
-  private replaceCategoryAssignments(workspaceId: string, assignments: readonly CategoryAssignment[]): void {
+  private deleteCategoryAssignments(workspaceId: string): void {
     this.db.prepare("DELETE FROM category_assignments WHERE workspace_id = ?").run(workspaceId);
+  }
+
+  private insertCategoryAssignments(workspaceId: string, assignments: readonly CategoryAssignment[]): void {
     const insert = this.db.prepare(
       "INSERT INTO category_assignments (workspace_id, id, target_type, target_id, category_id, status, provenance, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     );
@@ -503,9 +580,41 @@ export class SqliteHiveMapStore {
       return snapshot;
     });
   }
+
+  private replaceScanProfiles(workspaceId: string, profiles: readonly ScanProfile[]): void {
+    this.db.prepare("DELETE FROM scan_profiles WHERE workspace_id = ?").run(workspaceId);
+    const insert = this.db.prepare(
+      "INSERT INTO scan_profiles (workspace_id, id, version, profile_json) VALUES (?, ?, ?, ?)",
+    );
+    for (const profile of profiles) {
+      insert.run(workspaceId, profile.id, profile.version, JSON.stringify(profile));
+    }
+  }
+
+  private loadScanProfiles(workspaceId: string): ScanProfile[] {
+    const rows = this.db
+      .prepare("SELECT profile_json FROM scan_profiles WHERE workspace_id = ? ORDER BY rowid")
+      .all(workspaceId) as Array<{ profile_json: string }>;
+    return rows.map((row) => parseJson<ScanProfile>(row.profile_json));
+  }
+
+  private replaceScanRuns(workspaceId: string, runs: readonly ScanRun[]): void {
+    this.db.prepare("DELETE FROM scan_runs WHERE workspace_id = ?").run(workspaceId);
+    const insert = this.db.prepare("INSERT INTO scan_runs (workspace_id, id, run_json) VALUES (?, ?, ?)");
+    for (const run of runs) {
+      insert.run(workspaceId, run.id, JSON.stringify(run));
+    }
+  }
+
+  private loadScanRuns(workspaceId: string): ScanRun[] {
+    const rows = this.db
+      .prepare("SELECT run_json FROM scan_runs WHERE workspace_id = ? ORDER BY rowid")
+      .all(workspaceId) as Array<{ run_json: string }>;
+    return rows.map((row) => parseJson<ScanRun>(row.run_json));
+  }
 }
 
-function validateWorkspaceState(state: WorkspaceState): void {
+export function validateWorkspaceState(state: WorkspaceState): void {
   assertNonEmpty("workspace.id", state.workspace.id);
   assertNonEmpty("workspace.name", state.workspace.name);
   assertNonEmpty("workspace.createdAt", state.workspace.createdAt);
@@ -521,6 +630,7 @@ function validateWorkspaceState(state: WorkspaceState): void {
   for (const projection of state.projections) {
     validateProjection(projection, state.graph);
   }
+  validateScanState(state.scanProfiles, state.scanRuns, state.graph);
 }
 
 function createTargetIndex(graph: SemanticGraph, projections: readonly Projection[]): CategoryAssignmentTargetIndex {
@@ -694,6 +804,38 @@ CREATE TABLE IF NOT EXISTS snapshots (
   projection_id TEXT,
   graph_json TEXT NOT NULL,
   projection_json TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS scan_profiles (
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  id TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  profile_json TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, id, version)
+);
+
+CREATE TABLE IF NOT EXISTS scan_runs (
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  id TEXT NOT NULL,
+  run_json TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, id)
+);
+`;
+
+const SCAN_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS scan_profiles (
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  id TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  profile_json TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, id, version)
+);
+
+CREATE TABLE IF NOT EXISTS scan_runs (
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  id TEXT NOT NULL,
+  run_json TEXT NOT NULL,
   PRIMARY KEY (workspace_id, id)
 );
 `;

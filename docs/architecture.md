@@ -32,6 +32,7 @@ capture policy + human/agent intent
 | API/MCP | Explicit operations for agents and clients | Auto-switch protocols or hide failures |
 | UI | Render projections and emit feedback | Become the semantic editor by default |
 | Storage | Persist graph, views, snapshots, events | Invent duplicate schemas |
+| Scans | Profile agent scans, validate coverage/findings, compare immutable run evidence | Crawl repositories or replace agent interpretation |
 
 ## Data Model Direction
 

@@ -264,6 +264,60 @@ describe("api server", () => {
     expect(listResponse.status).toBe(200);
     expect(((await listResponse.json()) as { snapshots: unknown[] }).snapshots).toHaveLength(1);
   });
+
+  it("exposes scan profiles and starts an auditable scan", async () => {
+    await createWorkspace();
+
+    const profilesResponse = await fetch(`${baseUrl}/workspaces/workspace-a/scan-profiles`);
+    expect(profilesResponse.status).toBe(200);
+    expect(((await profilesResponse.json()) as { profiles: Array<{ id: string }> }).profiles.map((profile) => profile.id)).toEqual([
+      "documentation-conflicts",
+      "code-quality-review",
+    ]);
+
+    const startResponse = await postJson("/workspaces/workspace-a/scans", {
+      scan: {
+        id: "scan-a",
+        profileId: "documentation-conflicts",
+        profileVersion: 1,
+        repository: { root: "/repo", branch: "main", revision: "abc123" },
+        actor: { agentId: "agent-a", tool: "codex" },
+        startedAt: "2026-07-17T10:00:00.000Z",
+      },
+    });
+
+    expect(startResponse.status).toBe(201);
+    expect((await startResponse.json()) as unknown).toMatchObject({ run: { id: "scan-a", status: "in_progress" } });
+  });
+
+  it("lists workspaces and round-trips a browser ZIP bundle", async () => {
+    await createWorkspace();
+
+    const listResponse = await fetch(`${baseUrl}/workspaces`);
+    expect(listResponse.status).toBe(200);
+    expect(await listResponse.json()).toEqual({
+      workspaces: [{ id: "workspace-a", name: "Alpha", createdAt: "2026-05-13T21:00:00.000Z" }],
+    });
+
+    const exportResponse = await postJson("/workspaces/workspace-a/export-bundle", {
+      exportedAt: "2026-07-17T12:00:00.000Z",
+    });
+    expect(exportResponse.status).toBe(200);
+    expect(exportResponse.headers.get("content-type")).toBe("application/zip");
+    expect(exportResponse.headers.get("content-disposition")).toBe('attachment; filename="workspace-a.hivemap.zip"');
+    const zip = await exportResponse.arrayBuffer();
+    expect(new Uint8Array(zip).slice(0, 2)).toEqual(new Uint8Array([0x50, 0x4b]));
+
+    store.deleteWorkspace("workspace-a");
+    const importResponse = await fetch(`${baseUrl}/workspace-import-bundles?mode=new`, {
+      method: "POST",
+      headers: { "content-type": "application/zip" },
+      body: zip,
+    });
+    expect(importResponse.status).toBe(201);
+    expect((await importResponse.json()) as unknown).toMatchObject({ workspace: { id: "workspace-a", name: "Alpha" } });
+    expect(store.loadWorkspaceState("workspace-a").workspace.name).toBe("Alpha");
+  });
 });
 
 async function createWorkspace(): Promise<void> {

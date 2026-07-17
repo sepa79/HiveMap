@@ -15,6 +15,12 @@ export type Projection = {
   layout?: Record<string, unknown>;
 };
 
+export type ProjectionOrientationNote = {
+  title: string;
+  purpose: string;
+  usage: string[];
+};
+
 export type ProjectionGroup = {
   id: string;
   label: string;
@@ -35,6 +41,16 @@ export type DiveInProjectionInput = {
   name: string;
   rootNodeId: string;
   groups?: readonly ProjectionGroup[];
+};
+
+export type ProjectMapProjectionInput = {
+  id: string;
+  name: string;
+  type: "project-map";
+  rootNodeIds: readonly string[];
+  visibleNodeIds: readonly string[];
+  groups?: readonly ProjectionGroup[];
+  layout?: Record<string, unknown>;
 };
 
 export class ProjectionValidationError extends Error {
@@ -86,20 +102,33 @@ export function createDiveInProjection(graph: SemanticGraph, input: DiveInProjec
   assertNonEmpty("projection.name", input.name);
   assertNonEmpty("rootNodeId", input.rootNodeId);
 
-  if (!graph.nodes.some((node) => node.id === input.rootNodeId)) {
+  const rootNode = graph.nodes.find((node) => node.id === input.rootNodeId);
+  if (rootNode === undefined) {
     throw new ProjectionValidationError(`Unknown dive-in root node id: ${input.rootNodeId}`);
   }
 
   const visibleNodeIds = new Set([input.rootNodeId]);
-  const visibleEdgeIds: string[] = [];
+  const finding = rootNode.type === "finding" ? readFindingProjectionMetadata(rootNode.metadata) : undefined;
+
+  if (finding !== undefined) {
+    for (const affectedNodeId of finding.affectedNodeIds) {
+      if (!graph.nodes.some((node) => node.id === affectedNodeId)) {
+        throw new ProjectionValidationError(`Finding ${rootNode.id} references unknown affected node id: ${affectedNodeId}`);
+      }
+      visibleNodeIds.add(affectedNodeId);
+    }
+  }
 
   for (const edge of graph.edges) {
     if (edge.from === input.rootNodeId || edge.to === input.rootNodeId) {
-      visibleEdgeIds.push(edge.id);
       visibleNodeIds.add(edge.from);
       visibleNodeIds.add(edge.to);
     }
   }
+
+  const visibleEdgeIds = graph.edges
+    .filter((edge) => visibleNodeIds.has(edge.from) && visibleNodeIds.has(edge.to))
+    .map((edge) => edge.id);
 
   const projection: Projection = {
     id: input.id,
@@ -112,6 +141,67 @@ export function createDiveInProjection(graph: SemanticGraph, input: DiveInProjec
 
   if (input.groups !== undefined) {
     projection.groups = input.groups.map(cloneProjectionGroup);
+  } else if (finding !== undefined) {
+    projection.groups = [
+      { id: "finding", label: "Finding", nodeIds: [input.rootNodeId] },
+      { id: "affected-concepts", label: "Affected concepts", nodeIds: [...finding.affectedNodeIds] },
+    ].filter((group) => group.nodeIds.length > 0);
+    projection.layout = {
+      orientationNote: {
+        title: "Finding deep dive",
+        purpose: "Understand one problem, the project concepts it affects, and the evidence behind it.",
+        usage: [
+          "Read the finding first.",
+          "Inspect affected concepts beside it.",
+          "Use the sidebar for source files, claims, and the recommended action.",
+          "Use Back to return to the previous map.",
+        ],
+      } satisfies ProjectionOrientationNote,
+    };
+  }
+
+  validateProjection(projection, graph);
+  return projection;
+}
+
+function readFindingProjectionMetadata(metadata: Record<string, unknown> | undefined): { affectedNodeIds: string[] } | undefined {
+  const finding = metadata?.finding;
+  if (typeof finding !== "object" || finding === null || !("affectedNodeIds" in finding)) return undefined;
+  const affectedNodeIds = finding.affectedNodeIds;
+  if (!Array.isArray(affectedNodeIds) || affectedNodeIds.some((nodeId) => typeof nodeId !== "string" || nodeId.length === 0)) {
+    throw new ProjectionValidationError("Finding projection metadata requires non-empty string affectedNodeIds");
+  }
+  return { affectedNodeIds };
+}
+
+export function createProjectMapProjection(graph: SemanticGraph, input: ProjectMapProjectionInput): Projection {
+  validateGraph(graph);
+  assertNonEmpty("projection.id", input.id);
+  assertNonEmpty("projection.name", input.name);
+
+  if (input.visibleNodeIds.length === 0) {
+    throw new ProjectionValidationError("project map must contain at least one visible node");
+  }
+
+  const visibleNodeIds = [...input.visibleNodeIds];
+  const visibleNodeIdSet = new Set(visibleNodeIds);
+  const projection: Projection = {
+    id: input.id,
+    name: input.name,
+    type: "project-map",
+    rootNodeIds: [...input.rootNodeIds],
+    visibleNodeIds,
+    visibleEdgeIds: graph.edges
+      .filter((edge) => visibleNodeIdSet.has(edge.from) && visibleNodeIdSet.has(edge.to))
+      .map((edge) => edge.id),
+  };
+
+  if (input.groups !== undefined) {
+    projection.groups = input.groups.map(cloneProjectionGroup);
+  }
+
+  if (input.layout !== undefined) {
+    projection.layout = structuredClone(input.layout);
   }
 
   validateProjection(projection, graph);
@@ -167,6 +257,26 @@ export function validateProjection(projection: Projection, graph: SemanticGraph)
 
   if (projection.groups !== undefined) {
     validateProjectionGroups(projection.groups, visibleNodeIds);
+  }
+
+
+  validateProjectionOrientationNote(projection.layout);
+}
+
+function validateProjectionOrientationNote(layout: Record<string, unknown> | undefined): void {
+  if (layout === undefined || layout.orientationNote === undefined) return;
+  const note = layout.orientationNote;
+  if (typeof note !== "object" || note === null) {
+    throw new ProjectionValidationError("projection.layout.orientationNote must be an object");
+  }
+  if (!("title" in note) || typeof note.title !== "string" || note.title.trim().length === 0) {
+    throw new ProjectionValidationError("projection.layout.orientationNote.title must be non-empty");
+  }
+  if (!("purpose" in note) || typeof note.purpose !== "string" || note.purpose.trim().length === 0) {
+    throw new ProjectionValidationError("projection.layout.orientationNote.purpose must be non-empty");
+  }
+  if (!("usage" in note) || !Array.isArray(note.usage) || note.usage.length === 0 || note.usage.some((item) => typeof item !== "string" || item.trim().length === 0)) {
+    throw new ProjectionValidationError("projection.layout.orientationNote.usage must contain non-empty strings");
   }
 }
 

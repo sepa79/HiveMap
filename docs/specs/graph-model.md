@@ -18,6 +18,8 @@ type GraphNode = {
 };
 ```
 
+When a node correlates project knowledge, `metadata.sourceRefs` follows `project-knowledge-map.md`. Source references are typed boundary data; ad hoc document/code/HiveMind reference shapes are invalid.
+
 ## Node Type
 
 ```ts
@@ -30,7 +32,8 @@ type GraphNodeType =
   | "component"
   | "system"
   | "role"
-  | "pattern";
+  | "pattern"
+  | "finding";
 ```
 
 ## Edge
@@ -54,3 +57,4 @@ type GraphEdge = {
 - Edge endpoints must reference existing nodes.
 - Required fields must be non-empty.
 - Unknown node types are invalid unless introduced through a spec change.
+- Finding nodes must satisfy the metadata contract in `repository-scan.md`.

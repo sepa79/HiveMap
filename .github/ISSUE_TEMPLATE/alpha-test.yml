@@ -1,0 +1,73 @@
+name: HiveMap alpha test report
+description: Report setup, scan, map, ZIP, or verification feedback from a real repository test.
+title: "[Alpha test]: "
+labels:
+  - alpha-feedback
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste confidential source code, credentials, raw documents, or complete exported bundles into this issue.
+
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Test stage
+      options:
+        - Setup or local runtime
+        - MCP connection
+        - Repository scan
+        - Map review or deep dive
+        - ZIP export or import
+        - Verification scan or comparison
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, Node version, browser, and agent/client.
+      placeholder: Ubuntu 24.04, Node 22.22.2, Chrome 138, Codex
+    validations:
+      required: true
+
+  - type: input
+    id: scan
+    attributes:
+      label: Scan identity
+      description: Profile id/version and a non-confidential repository revision or description.
+      placeholder: documentation-conflicts@1 at commit abc123
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result and visible error
+      description: Include the last MCP operation when relevant, but redact confidential repository data.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Say whether a fresh retry against the same revision reproduces the problem.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Data check
+      options:
+        - label: I removed confidential source content, credentials, and sensitive bundles from this report.
+          required: true

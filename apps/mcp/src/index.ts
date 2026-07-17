@@ -10,6 +10,16 @@ import type {
   GetGraphResponse,
   GetProjectionResponse,
   ListFeedbackResponse,
+  CompareScansResponse,
+  CompleteScanResponse,
+  CreateScanFindingResponse,
+  ExportWorkspaceResponse,
+  ImportWorkspaceResponse,
+  ListScanProfilesResponse,
+  ListScanRunsResponse,
+  RecordScanCoverageResponse,
+  StartScanResponse,
+  UpdateFindingResponse,
 } from "@hivemap/api-contracts";
 import { HiveMapRuntime, RuntimeError } from "@hivemap/runtime";
 import { StorageError } from "@hivemap/storage";
@@ -27,6 +37,16 @@ export const HIVEMAP_MCP_TOOL_NAMES: readonly McpToolName[] = [
   "proposal_create",
   "proposal_approve",
   "proposal_apply",
+  "scan_profile_list",
+  "scan_list",
+  "scan_start",
+  "scan_record_coverage",
+  "scan_finding_create",
+  "finding_update",
+  "scan_complete",
+  "scan_compare",
+  "workspace_export_zip",
+  "workspace_import_zip",
 ] as const;
 
 export type McpToolResponseMap = {
@@ -40,6 +60,16 @@ export type McpToolResponseMap = {
   proposal_create: CreateProposalResponse;
   proposal_approve: import("@hivemap/api-contracts").ApproveProposalResponse;
   proposal_apply: ApplyProposalResponse;
+  scan_profile_list: ListScanProfilesResponse;
+  scan_list: ListScanRunsResponse;
+  scan_start: StartScanResponse;
+  scan_record_coverage: RecordScanCoverageResponse;
+  scan_finding_create: CreateScanFindingResponse;
+  finding_update: UpdateFindingResponse;
+  scan_complete: CompleteScanResponse;
+  scan_compare: CompareScansResponse;
+  workspace_export_zip: ExportWorkspaceResponse;
+  workspace_import_zip: ImportWorkspaceResponse;
 };
 
 export type McpToolSuccess<T extends McpToolName> = {
@@ -115,6 +145,26 @@ function dispatchMcpTool<T extends McpToolName>(
       return runtime.approveProposal(request as McpToolRequestMap["proposal_approve"]) as McpToolResponseMap[T];
     case "proposal_apply":
       return runtime.applyProposal(request as McpToolRequestMap["proposal_apply"]) as McpToolResponseMap[T];
+    case "scan_profile_list":
+      return runtime.listScanProfiles(request as McpToolRequestMap["scan_profile_list"]) as McpToolResponseMap[T];
+    case "scan_list":
+      return runtime.listScanRuns(request as McpToolRequestMap["scan_list"]) as McpToolResponseMap[T];
+    case "scan_start":
+      return runtime.startScan(request as McpToolRequestMap["scan_start"]) as McpToolResponseMap[T];
+    case "scan_record_coverage":
+      return runtime.recordScanCoverage(request as McpToolRequestMap["scan_record_coverage"]) as McpToolResponseMap[T];
+    case "scan_finding_create":
+      return runtime.createScanFinding(request as McpToolRequestMap["scan_finding_create"]) as McpToolResponseMap[T];
+    case "finding_update":
+      return runtime.updateFinding(request as McpToolRequestMap["finding_update"]) as McpToolResponseMap[T];
+    case "scan_complete":
+      return runtime.completeScan(request as McpToolRequestMap["scan_complete"]) as McpToolResponseMap[T];
+    case "scan_compare":
+      return runtime.compareScans(request as McpToolRequestMap["scan_compare"]) as McpToolResponseMap[T];
+    case "workspace_export_zip":
+      return runtime.exportWorkspace(request as McpToolRequestMap["workspace_export_zip"]) as McpToolResponseMap[T];
+    case "workspace_import_zip":
+      return runtime.importWorkspace(request as McpToolRequestMap["workspace_import_zip"]) as McpToolResponseMap[T];
   }
 }
 

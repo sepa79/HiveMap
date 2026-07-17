@@ -110,6 +110,19 @@ Initial modes:
 - `proposed`: the agent prepares updates for human approval.
 - `custom`: project-specific rule set.
 
+## Visual System
+
+HiveMap uses the shared HiveForge/HiveMind product-family visual language while retaining its own identity and content:
+
+- dark `#05070b` application canvas;
+- translucent panels and navigation surfaces with thin white borders;
+- cyan `#33e1ff` for interaction, focus, and active views;
+- amber for the HiveMap wordmark accent;
+- 52px glass top bar, compact controls, 10px control radii, and 12px panel radii;
+- Inter/system sans typography with monospace reserved for source targets and machine data.
+
+This is a presentation convention, not a runtime dependency on HiveForge or HiveMind. Semantic node types and category overlays remain explicit HiveMap data; the visual layer may color them within this shared system without changing their meaning.
+
 ## Main Views
 
 ### Conversation Map

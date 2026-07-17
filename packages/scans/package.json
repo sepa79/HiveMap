@@ -1,5 +1,5 @@
 {
-  "name": "@hivemap/storage",
+  "name": "@hivemap/scans",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -17,15 +17,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@hivemap/capture": "0.0.0",
-    "@hivemap/categories": "0.0.0",
-    "@hivemap/graph-core": "0.0.0",
-    "@hivemap/projections": "0.0.0",
-    "@hivemap/scans": "^0.0.0",
-    "fflate": "^0.8.3"
+    "@hivemap/graph-core": "0.0.0"
   },
   "devDependencies": {
-    "@types/node": "^24.10.1",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   }

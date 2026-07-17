@@ -13,7 +13,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "pretest": "npm run build -w @hivemap/api-contracts && npm run build -w @hivemap/capture && npm run build -w @hivemap/categories && npm run build -w @hivemap/graph-core && npm run build -w @hivemap/projections && npm run build -w @hivemap/storage",
+    "pretest": "npm run build -w @hivemap/api-contracts && npm run build -w @hivemap/capture && npm run build -w @hivemap/categories && npm run build -w @hivemap/graph-core && npm run build -w @hivemap/projections && npm run build -w @hivemap/scans && npm run build -w @hivemap/storage",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
@@ -23,6 +23,7 @@
     "@hivemap/categories": "0.0.0",
     "@hivemap/graph-core": "0.0.0",
     "@hivemap/projections": "0.0.0",
+    "@hivemap/scans": "^0.0.0",
     "@hivemap/storage": "0.0.0"
   },
   "devDependencies": {

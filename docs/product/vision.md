@@ -25,6 +25,12 @@ It should help humans and AI agents keep shared context visible without turning 
 
 The human communicates intent. The agent interprets intent. The graph model changes through explicit API operations.
 
+## Repository Scan Evidence
+
+HiveMap can instruct an agent to scan a changing repository through a versioned profile. The agent records explicit coverage, semantic graph changes, and first-class findings. A second completed scan can be compared with the baseline and exported as a portable, checksummed ZIP that serves both human review and machine-verifiable evidence.
+
+HiveMap does not silently crawl or judge the repository. MCP provides the recipe and validation boundary; the agent performs discovery and interpretation.
+
 ## Category Language
 
 The initial category vocabulary is intentionally expressive:

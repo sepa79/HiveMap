@@ -21,6 +21,7 @@
     "@hivemap/categories": "0.0.0",
     "@hivemap/graph-core": "0.0.0",
     "@hivemap/projections": "0.0.0",
+    "@hivemap/scans": "^0.0.0",
     "@hivemap/storage": "0.0.0"
   },
   "devDependencies": {

@@ -8,16 +8,45 @@ const GRAPH_NODE_TYPE_VALUES = [
   "system",
   "role",
   "pattern",
+  "finding",
 ] as const;
 
 export type GraphNodeType = (typeof GRAPH_NODE_TYPE_VALUES)[number];
+
+const PROJECT_SOURCE_ROLE_VALUES = [
+  "defines",
+  "implements",
+  "verifies",
+  "illustrates",
+  "decides",
+  "discusses",
+  "tracks",
+] as const;
+
+const PROJECT_SOURCE_TYPE_VALUES = ["repo-doc", "code", "test", "asset", "hivemind"] as const;
+
+export type ProjectSourceRole = (typeof PROJECT_SOURCE_ROLE_VALUES)[number];
+export type ProjectSourceType = (typeof PROJECT_SOURCE_TYPE_VALUES)[number];
+
+export type ProjectSourceRef = {
+  role: ProjectSourceRole;
+  source: ProjectSourceType;
+  target: string;
+  anchor?: string;
+  revision?: string;
+  label?: string;
+};
+
+export type GraphNodeMetadata = Record<string, unknown> & {
+  sourceRefs?: ProjectSourceRef[];
+};
 
 export type GraphNode = {
   id: string;
   label: string;
   type: GraphNodeType;
   notes?: string;
-  metadata?: Record<string, unknown>;
+  metadata?: GraphNodeMetadata;
 };
 
 export type GraphEdge = {
@@ -70,6 +99,8 @@ export type GraphCommand =
   | { id: string; type: "edge.delete"; payload: DeleteEdgePayload };
 
 const GRAPH_NODE_TYPES: ReadonlySet<string> = new Set(GRAPH_NODE_TYPE_VALUES);
+const PROJECT_SOURCE_ROLES: ReadonlySet<string> = new Set(PROJECT_SOURCE_ROLE_VALUES);
+const PROJECT_SOURCE_TYPES: ReadonlySet<string> = new Set(PROJECT_SOURCE_TYPE_VALUES);
 
 export class GraphValidationError extends Error {
   constructor(message: string) {
@@ -253,6 +284,47 @@ function validateNode(node: GraphNode): void {
   if (!GRAPH_NODE_TYPES.has(node.type)) {
     throw new GraphValidationError(`Unknown node type: ${node.type}`);
   }
+
+  if (node.metadata !== undefined) {
+    validateNodeMetadata(node.metadata);
+  }
+}
+
+function validateNodeMetadata(metadata: GraphNodeMetadata): void {
+  if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) {
+    throw new GraphValidationError("node.metadata must be an object");
+  }
+
+  if (metadata.sourceRefs === undefined) {
+    return;
+  }
+
+  if (!Array.isArray(metadata.sourceRefs)) {
+    throw new GraphValidationError("node.metadata.sourceRefs must be an array");
+  }
+
+  for (const sourceRef of metadata.sourceRefs) {
+    validateProjectSourceRef(sourceRef);
+  }
+}
+
+export function validateProjectSourceRef(sourceRef: ProjectSourceRef): void {
+  if (typeof sourceRef !== "object" || sourceRef === null || Array.isArray(sourceRef)) {
+    throw new GraphValidationError("project source reference must be an object");
+  }
+
+  if (!PROJECT_SOURCE_ROLES.has(sourceRef.role)) {
+    throw new GraphValidationError(`Unknown project source role: ${sourceRef.role}`);
+  }
+
+  if (!PROJECT_SOURCE_TYPES.has(sourceRef.source)) {
+    throw new GraphValidationError(`Unknown project source type: ${sourceRef.source}`);
+  }
+
+  assertNonEmpty("projectSourceRef.target", sourceRef.target);
+  assertOptionalNonEmpty("projectSourceRef.anchor", sourceRef.anchor);
+  assertOptionalNonEmpty("projectSourceRef.revision", sourceRef.revision);
+  assertOptionalNonEmpty("projectSourceRef.label", sourceRef.label);
 }
 
 function validateEdgeShape(edge: GraphEdge): void {
@@ -265,5 +337,11 @@ function validateEdgeShape(edge: GraphEdge): void {
 function assertNonEmpty(fieldName: string, value: string): void {
   if (value.trim().length === 0) {
     throw new GraphValidationError(`${fieldName} must be non-empty`);
+  }
+}
+
+function assertOptionalNonEmpty(fieldName: string, value: string | undefined): void {
+  if (value !== undefined) {
+    assertNonEmpty(fieldName, value);
   }
 }

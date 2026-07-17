@@ -17,6 +17,8 @@ Use local-first SQLite for the first implementation, behind explicit storage int
 - proposals,
 - projections,
 - snapshots.
+- scan profiles,
+- scan runs.
 
 ## Rules
 
@@ -24,9 +26,10 @@ Use local-first SQLite for the first implementation, behind explicit storage int
 - Storage failure must be visible.
 - No duplicate JSON shadow stores unless explicitly documented.
 - No hidden migration/fallback paths.
-- The initial implementation uses schema version `1`.
+- The scan-enabled implementation uses schema version `2`.
 - Storage initialization must create the schema explicitly.
 - Unknown schema versions are invalid.
+- Version `1` migrates explicitly to version `2` and receives the built-in scan profiles.
 
 ## Schema Version
 
@@ -40,7 +43,7 @@ CREATE TABLE schema_metadata (
 Required row:
 
 - `key = 'schema_version'`
-- `value = '1'`
+- `value = '2'`
 
 ## Core Tables
 
@@ -178,8 +181,37 @@ JSON columns are allowed only where the source spec already defines dynamic stru
 - proposal command arrays/source feedback ids,
 - projection id arrays/groups/layout,
 - immutable snapshot payloads.
+- versioned scan profiles and immutable/completing scan-run evidence.
+
+## Scan Tables
+
+```sql
+CREATE TABLE scan_profiles (
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  id TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  profile_json TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, id, version)
+);
+
+CREATE TABLE scan_runs (
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  id TEXT NOT NULL,
+  run_json TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, id)
+);
+```
+
+The semantic graph remains the active finding SSOT. Completed scan-run finding evidence is an immutable historical snapshot used for before/after proof.
+
+## Portable ZIP
+
+The ZIP format and import modes follow `repository-scan.md`. `workspace.json` is the only canonical archive entry. Every other file is checksummed generated evidence and import validates it against the canonical state.
+
+The local UI downloads and uploads the same canonical bundle bytes through REST. Browser transport does not define a second archive format and does not expose server-side filesystem paths.
+
+`replace` deletes and recreates the workspace inside one database transaction so a changed graph id cannot leave shadow graph state and a failed import cannot destroy the previous workspace.
 
 ## Open Questions
 
-- Migration policy.
-- Import/export format.
+- Long-term migration support beyond version `1` to `2`.

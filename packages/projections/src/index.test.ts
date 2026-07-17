@@ -4,6 +4,7 @@ import {
   ProjectionValidationError,
   createDiveInProjection,
   createOverviewProjection,
+  createProjectMapProjection,
   validateProjection,
   type Projection,
 } from "./index.js";
@@ -61,6 +62,47 @@ describe("overview projections", () => {
   });
 });
 
+describe("project map projections", () => {
+  it("creates a curated project map with derived visible edges and explicit groups", () => {
+    const projection = createProjectMapProjection(graph, {
+      id: "projection-project",
+      name: "Project Map",
+      type: "project-map",
+      rootNodeIds: ["node-a"],
+      visibleNodeIds: ["node-a", "node-b", "node-c"],
+      groups: [
+        { id: "group-core", label: "Core", nodeIds: ["node-a", "node-b"] },
+        { id: "group-risks", label: "Risks", nodeIds: ["node-c"] },
+      ],
+    });
+
+    expect(projection).toEqual({
+      id: "projection-project",
+      name: "Project Map",
+      type: "project-map",
+      rootNodeIds: ["node-a"],
+      visibleNodeIds: ["node-a", "node-b", "node-c"],
+      visibleEdgeIds: ["edge-ab", "edge-ac"],
+      groups: [
+        { id: "group-core", label: "Core", nodeIds: ["node-a", "node-b"] },
+        { id: "group-risks", label: "Risks", nodeIds: ["node-c"] },
+      ],
+    });
+  });
+
+  it("rejects an empty project map", () => {
+    expect(() =>
+      createProjectMapProjection(graph, {
+        id: "projection-project",
+        name: "Project Map",
+        type: "project-map",
+        rootNodeIds: [],
+        visibleNodeIds: [],
+      }),
+    ).toThrow(ProjectionValidationError);
+  });
+});
+
 describe("dive-in projections", () => {
   it("creates a local neighborhood projection around the root node", () => {
     const projection = createDiveInProjection(graph, {
@@ -87,6 +129,71 @@ describe("dive-in projections", () => {
         rootNodeId: "missing",
       }),
     ).toThrow(ProjectionValidationError);
+  });
+
+  it("creates a findings-first dive-in from affected semantic concepts", () => {
+    const findingGraph: SemanticGraph = {
+      nodes: [
+        ...graph.nodes,
+        {
+          id: "finding-a",
+          label: "Contract drift",
+          type: "finding",
+          metadata: { finding: { affectedNodeIds: ["node-a", "node-c"] } },
+        },
+      ],
+      edges: graph.edges,
+    };
+
+    expect(createDiveInProjection(findingGraph, {
+      id: "projection-finding",
+      name: "Finding Dive-In",
+      rootNodeId: "finding-a",
+    })).toEqual({
+      id: "projection-finding",
+      name: "Finding Dive-In",
+      type: "dive-in",
+      rootNodeIds: ["finding-a"],
+      visibleNodeIds: ["finding-a", "node-a", "node-c"],
+      visibleEdgeIds: ["edge-ac"],
+      groups: [
+        { id: "finding", label: "Finding", nodeIds: ["finding-a"] },
+        { id: "affected-concepts", label: "Affected concepts", nodeIds: ["node-a", "node-c"] },
+      ],
+      layout: {
+        orientationNote: {
+          title: "Finding deep dive",
+          purpose: "Understand one problem, the project concepts it affects, and the evidence behind it.",
+          usage: [
+            "Read the finding first.",
+            "Inspect affected concepts beside it.",
+            "Use the sidebar for source files, claims, and the recommended action.",
+            "Use Back to return to the previous map.",
+          ],
+        },
+      },
+    });
+  });
+
+  it("rejects a finding that references an unknown affected concept", () => {
+    const findingGraph: SemanticGraph = {
+      nodes: [
+        ...graph.nodes,
+        {
+          id: "finding-a",
+          label: "Contract drift",
+          type: "finding",
+          metadata: { finding: { affectedNodeIds: ["missing"] } },
+        },
+      ],
+      edges: graph.edges,
+    };
+
+    expect(() => createDiveInProjection(findingGraph, {
+      id: "projection-finding",
+      name: "Finding Dive-In",
+      rootNodeId: "finding-a",
+    })).toThrow("Finding finding-a references unknown affected node id: missing");
   });
 });
 
@@ -120,6 +227,20 @@ describe("projection validation", () => {
     };
 
     expect(() => validateProjection(projection, graph)).toThrow(ProjectionValidationError);
+  });
+
+  it("rejects an incomplete projection orientation note", () => {
+    const projection: Projection = {
+      id: "projection-a",
+      name: "Broken note",
+      type: "overview",
+      rootNodeIds: [],
+      visibleNodeIds: ["node-a"],
+      visibleEdgeIds: [],
+      layout: { orientationNote: { title: "Help", purpose: "Explain the view", usage: [] } },
+    };
+
+    expect(() => validateProjection(projection, graph)).toThrow("orientationNote.usage");
   });
 
   it("rejects groups that reference hidden nodes", () => {

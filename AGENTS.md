@@ -51,6 +51,7 @@ If a source conflicts, this order wins:
 - `packages/projections/`: overview, dive-in, project map, and saved view projection logic.
 - `packages/categories/`: category catalog and category assignment rules.
 - `packages/capture/`: capture policy and agent-intent event contracts.
+- `packages/scans/`: repository scan profiles, coverage, finding validation, and scan comparison.
 - `packages/storage/`: persistence adapters behind explicit interfaces.
 - `packages/api-contracts/`: REST/MCP contracts if generated/shared code is needed.
 - `docs/`: product, architecture, rules, and specs.
@@ -63,6 +64,7 @@ Do not create a package until it owns a clear concern.
 - Graph modules own graph invariants and validation only.
 - Projection modules derive views from graph data; they do not mutate graph semantics.
 - Capture modules model user/agent intent and feedback events.
+- Scan modules validate agent-executed scan evidence; they do not crawl repositories or perform IO.
 - Category modules own category definitions and category assignment validation.
 - Storage modules own IO and persistence.
 - API/MCP modules expose explicit commands and validate at boundaries.
@@ -109,6 +111,15 @@ Do not store:
 - noisy implementation steps,
 - unreviewed speculation as fact.
 
+## Project Knowledge Maps
+
+When work maps product concepts to documentation, code, tests, assets, or HiveMind evidence, read and follow:
+
+- `docs/specs/project-knowledge-map.md`
+- `docs/ai/KNOWLEDGE_MAP_WORKFLOW.md`
+
+These maps are navigation and semantic correlation layers. They must preserve the owning source of truth for every referenced concern instead of copying detailed contracts into graph notes.
+
 ## Before Editing
 
 1. Read this file.
@@ -116,6 +127,12 @@ Do not store:
 3. Read the relevant docs/specs.
 4. Inspect existing code or POC evidence before changing behavior.
 5. Identify the affected SSOT.
+
+## Repository Scans
+
+Agent-driven documentation or code scans must follow `docs/specs/repository-scan.md`. The agent performs repository discovery and interpretation; HiveMap MCP supplies the versioned profile, validates coverage and findings, persists evidence, and compares completed runs.
+
+Operational scan execution must also follow `docs/ai/REPOSITORY_SCAN_WORKFLOW.md`.
 
 ## Before Final Response Or Commit
 

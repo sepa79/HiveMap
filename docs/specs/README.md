@@ -33,6 +33,8 @@ Create or update a spec before implementing the corresponding behavior:
 - `feedback-events.md`
 - `category-overlay.md`
 - `projection-model.md`
+- `project-knowledge-map.md`
+- `repository-scan.md`
 - `mcp-tools.md`
 - `rest-api.md`
 - `storage-format.md`

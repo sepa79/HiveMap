@@ -1,15 +1,28 @@
 {
   "name": "hivemap",
   "private": true,
+  "license": "GPL-3.0-or-later",
   "type": "module",
+  "engines": {
+    "node": ">=22 <23",
+    "npm": ">=10"
+  },
+  "packageManager": "npm@10.9.7",
   "workspaces": [
     "packages/*",
     "apps/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "build": "npm run build:packages && npm run build:apps",
+    "build:packages": "npm run build -w @hivemap/graph-core && npm run build -w @hivemap/categories && npm run build -w @hivemap/capture && npm run build -w @hivemap/projections && npm run build -w @hivemap/scans && npm run build -w @hivemap/storage && npm run build -w @hivemap/api-contracts && npm run build -w @hivemap/runtime",
+    "build:apps": "npm run build -w @hivemap/api && npm run build -w @hivemap/mcp && npm run build -w @hivemap/web",
+    "dev:api": "npm run build && npm exec -w @hivemap/api -- hivemap-api",
+    "dev:web": "npm run dev -w @hivemap/web --",
+    "start:mcp": "npm run build && npm exec -w @hivemap/mcp -- hivemap-mcp",
+    "test": "npm run build:packages && npm run test:workspaces",
+    "test:workspaces": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "verify": "npm run build && npm run typecheck && npm run test:workspaces"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

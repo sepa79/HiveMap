@@ -34,6 +34,9 @@ Design HiveMap 1.0 around:
 - `design/mvp-slice.md`: first implementation slice.
 - `specs/`: contracts that implementation must follow.
 - `ai/`: command, review, Jester, and HiveMind workflow rules.
+- `ai/KNOWLEDGE_MAP_WORKFLOW.md`: repeatable workflow for correlating concepts with docs, code, tests, assets, and HiveMind.
+- `specs/repository-scan.md`: repeatable agent scans, finding evidence, before/after comparison, and portable ZIP bundles.
+- `ai/REPOSITORY_SCAN_WORKFLOW.md`: agent procedure for executing, verifying, importing, and repeating a scan.
 
 ## POC Boundary
 

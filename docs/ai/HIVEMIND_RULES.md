@@ -37,3 +37,5 @@ HiveMind is durable project memory for HiveMap work. HiveMap itself should remai
 3. Capture durable decisions/learnings.
 4. Link relevant repo files.
 5. Close context.
+
+For Project Knowledge Maps, HiveMind contributes decisions, rationale, learnings, risks, and open threads. Store only explicit references and bounded summaries in HiveMap; do not copy raw transcripts or turn HiveMind history into current product truth.

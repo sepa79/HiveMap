@@ -73,6 +73,54 @@ describe("validateGraph", () => {
 
     expect(() => validateGraph(graph)).toThrow(GraphValidationError);
   });
+
+  it("accepts typed project source references in node metadata", () => {
+    const graph: SemanticGraph = {
+      nodes: [
+        {
+          id: "focus-cognition",
+          label: "Focus/Cognition",
+          type: "concept",
+          metadata: {
+            sourceRefs: [
+              {
+                role: "defines",
+                source: "repo-doc",
+                target: "docs/specs/signal-rock-perception-ui.md",
+                anchor: "Focus and Cognition",
+              },
+              {
+                role: "implements",
+                source: "code",
+                target: "apps/the-probe/src/ui/perception-cognition.ts",
+              },
+            ],
+          },
+        },
+      ],
+      edges: [],
+    };
+
+    expect(() => validateGraph(graph)).not.toThrow();
+  });
+
+  it("rejects unknown project source reference values", () => {
+    const graph = {
+      nodes: [
+        {
+          id: "focus-cognition",
+          label: "Focus/Cognition",
+          type: "concept",
+          metadata: {
+            sourceRefs: [{ role: "guesses", source: "wiki", target: " " }],
+          },
+        },
+      ],
+      edges: [],
+    } as unknown as SemanticGraph;
+
+    expect(() => validateGraph(graph)).toThrow(GraphValidationError);
+  });
 });
 
 describe("applyGraphCommand", () => {

@@ -42,6 +42,16 @@ describe("HiveMap MCP SDK server", () => {
       "proposal_create",
       "proposal_approve",
       "proposal_apply",
+      "scan_profile_list",
+      "scan_list",
+      "scan_start",
+      "scan_record_coverage",
+      "scan_finding_create",
+      "finding_update",
+      "scan_complete",
+      "scan_compare",
+      "workspace_export_zip",
+      "workspace_import_zip",
     ]);
   });
 

@@ -12,6 +12,8 @@ import {
   validateCreateSnapshotRequest,
   validateCreateWorkspaceRequest,
   validateGetProjectionRequest,
+  validateExportWorkspaceBundleRequest,
+  validateImportWorkspaceBundleRequest,
   validateRecordFeedbackRequest,
   type McpToolName,
   type McpToolRequestMap,
@@ -136,6 +138,18 @@ describe("api contracts", () => {
         },
       }),
     ).not.toThrow();
+  });
+
+  it("validates browser ZIP bundle boundaries", () => {
+    expect(() =>
+      validateExportWorkspaceBundleRequest({
+        workspaceId: "workspace-a",
+        exportedAt: "2026-07-17T12:00:00.000Z",
+      }),
+    ).not.toThrow();
+    expect(() => validateImportWorkspaceBundleRequest({ bytes: new Uint8Array(), mode: "new" })).toThrow(
+      "bytes must contain a ZIP bundle",
+    );
   });
 
   it("keeps MCP tool request map tied to explicit tool names", () => {
