@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ProjectSourceRef } from "@hivemap/graph-core";
 
 import {
+  CODE_QUALITY_PROFILE,
   DOCUMENTATION_CONFLICTS_PROFILE,
   ScanValidationError,
   compareCompletedScans,
@@ -21,6 +22,27 @@ const sourceB: ProjectSourceRef = { role: "implements", source: "code", target: 
 describe("repository scans", () => {
   it("validates the built-in documentation profile", () => {
     expect(() => validateScanProfile(DOCUMENTATION_CONFLICTS_PROFILE)).not.toThrow();
+  });
+
+  it("validates the built-in code quality profile and technical finding kinds", () => {
+    expect(() => validateScanProfile(CODE_QUALITY_PROFILE)).not.toThrow();
+
+    for (const kind of ["architecture-risk", "runtime-risk", "authority-gap", "test-gap", "deployment-risk"] as const) {
+      const node = createFindingNode("scan-a", {
+        id: `finding-${kind}`,
+        label: `Technical ${kind}`,
+        notes: `The scan found a ${kind}.`,
+        fingerprint: `technical-${kind}`,
+        kind,
+        severity: "high",
+        confidence: "high",
+        criterionIds: ["contract-drift"],
+        sources: [{ sourceRef: sourceB, claim: `The implementation exposes a ${kind}.` }],
+        affectedNodeIds: [],
+      });
+
+      expect(() => validateFindingNode(node)).not.toThrow();
+    }
   });
 
   it("requires complete, non-overlapping coverage", () => {

@@ -110,6 +110,8 @@ only after every criterion and required output is accounted for. Do not modify t
 target repository.
 ```
 
+For technical repository reviews, use the same workflow with `code-quality-review@1`. That profile supports finding kinds such as `architecture-risk`, `runtime-risk`, `authority-gap`, `test-gap`, and `deployment-risk` in addition to documentation-oriented conflict and drift kinds.
+
 Expected workflow:
 
 1. The agent calls `project_create` or uses an existing workspace.

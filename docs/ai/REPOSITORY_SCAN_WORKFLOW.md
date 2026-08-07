@@ -22,7 +22,7 @@ Coverage is evidence of what the agent considered. A source that was not discove
 ## Map And Record Findings
 
 1. Use explicit `graph_command` operations to map bounded concepts and relationships.
-2. Call `scan_finding_create` for conflicts, stale claims, missing ownership, implementation drift, broken references, or quality problems.
+2. Call `scan_finding_create` for bounded problems. Documentation scans commonly use conflicts, stale claims, missing ownership, implementation drift, broken references, or quality problems. Technical scans should use precise kinds such as architecture-risk, runtime-risk, authority-gap, test-gap, or deployment-risk when those better describe the cleanup.
 3. Give every finding a stable semantic fingerprint that should recur across scans when the same problem remains.
 4. Attach exact source references, bounded claims, criterion ids, affected concepts, severity, confidence, and a recommended action.
 5. Conflict findings require at least two claims.

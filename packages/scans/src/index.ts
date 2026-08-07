@@ -63,6 +63,11 @@ export const FINDING_KIND_VALUES = [
   "duplicate-authority",
   "implementation-drift",
   "quality-problem",
+  "architecture-risk",
+  "runtime-risk",
+  "authority-gap",
+  "test-gap",
+  "deployment-risk",
 ] as const;
 export type FindingKind = (typeof FINDING_KIND_VALUES)[number];
 
@@ -237,6 +242,7 @@ export const CODE_QUALITY_PROFILE: ScanProfile = {
     "Rediscover code and tests from the profile rules for every run.",
     "Map components and boundaries before recording local symptoms.",
     "Attach code symbols, tests, and contract sources to every finding.",
+    "Use technical finding kinds such as architecture-risk, runtime-risk, authority-gap, test-gap, and deployment-risk when they describe the problem more precisely than documentation-oriented kinds.",
     "Separate verified defects from risks and missing evidence.",
   ],
   scope: {

@@ -790,7 +790,12 @@ label {
 .map-card-tag-conflict,
 .map-card-tag-stale,
 .map-card-tag-broken-reference,
-.map-card-tag-ambiguous {
+.map-card-tag-ambiguous,
+.map-card-tag-architecture-risk,
+.map-card-tag-runtime-risk,
+.map-card-tag-authority-gap,
+.map-card-tag-test-gap,
+.map-card-tag-deployment-risk {
   background: rgba(51, 225, 255, 0.07);
   border-color: rgba(51, 225, 255, 0.34);
   color: var(--accent-strong);

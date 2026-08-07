@@ -25,7 +25,20 @@ export type GraphNode = {
 
 export type FindingMetadata = {
   fingerprint: string;
-  kind: "conflict" | "stale" | "missing" | "ambiguous" | "broken-reference" | "duplicate-authority" | "implementation-drift" | "quality-problem";
+  kind:
+    | "conflict"
+    | "stale"
+    | "missing"
+    | "ambiguous"
+    | "broken-reference"
+    | "duplicate-authority"
+    | "implementation-drift"
+    | "quality-problem"
+    | "architecture-risk"
+    | "runtime-risk"
+    | "authority-gap"
+    | "test-gap"
+    | "deployment-risk";
   severity: "low" | "normal" | "high" | "critical";
   confidence: "low" | "medium" | "high";
   status: "open" | "acknowledged" | "proposed-fix" | "resolved" | "accepted" | "unverifiable";
