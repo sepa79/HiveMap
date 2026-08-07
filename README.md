@@ -90,6 +90,12 @@ Restart or reconnect the agent after changing its MCP configuration. The MCP pro
 
 HiveMap does not scan files by itself. The connected agent reads the target repository, follows the selected HiveMap scan profile, and submits explicit coverage, graph, projection, and finding operations through MCP.
 
+When the agent does not already know the canonical `workspaceId`, the intended discovery flow is:
+
+1. call `workspace_list` with an optional search query;
+2. call `workspace_resolve` with the selected id, slug, or exact name;
+3. use the returned canonical `workspaceId` for `graph_get`, scan tools, and the rest of the session.
+
 ## Run a Documentation Review
 
 The following is a concrete repository-review use case. It is the most fully documented alpha workflow, but it is only one way to use HiveMap.
@@ -114,13 +120,14 @@ For technical repository reviews, use the same workflow with `code-quality-revie
 
 Expected workflow:
 
-1. The agent calls `project_create` or uses an existing workspace.
-2. It selects a versioned profile with `scan_profile_list`.
-3. `scan_start` returns the exact discovery rules and completion checklist.
-4. The agent reads the repository and records coverage and evidence-backed findings.
-5. The agent creates readable overview and deep-dive projections.
-6. `scan_complete` rejects incomplete coverage, criteria, or outputs.
-7. Refresh or load the workspace in the UI to review the map.
+1. The agent calls `workspace_list` and `workspace_resolve` if the workspace is not already known.
+2. It calls `project_create` or uses the resolved existing workspace.
+3. It selects a versioned profile with `scan_profile_list`.
+4. `scan_start` returns the exact discovery rules and completion checklist.
+5. The agent reads the repository and records coverage and evidence-backed findings.
+6. The agent creates readable overview and deep-dive projections.
+7. `scan_complete` rejects incomplete coverage, criteria, or outputs.
+8. Refresh or load the workspace in the UI to review the map.
 
 The canonical agent procedure is [Repository Scan Workflow](docs/ai/REPOSITORY_SCAN_WORKFLOW.md). The underlying contract is [Repository Scan Contract](docs/specs/repository-scan.md).
 

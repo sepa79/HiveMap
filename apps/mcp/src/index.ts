@@ -1,6 +1,9 @@
 import type {
   McpToolName,
   McpToolRequestMap,
+  GetWorkspaceSummaryResponse,
+  ListWorkspaceSummariesResponse,
+  ResolveWorkspaceResponse,
   ApplyGraphCommandsResponse,
   ApplyProposalResponse,
   AssignCategoryResponse,
@@ -27,6 +30,9 @@ import { StorageError } from "@hivemap/storage";
 export type { McpToolName } from "@hivemap/api-contracts";
 
 export const HIVEMAP_MCP_TOOL_NAMES: readonly McpToolName[] = [
+  "workspace_list",
+  "workspace_get",
+  "workspace_resolve",
   "project_create",
   "graph_get",
   "graph_command",
@@ -50,6 +56,9 @@ export const HIVEMAP_MCP_TOOL_NAMES: readonly McpToolName[] = [
 ] as const;
 
 export type McpToolResponseMap = {
+  workspace_list: ListWorkspaceSummariesResponse;
+  workspace_get: GetWorkspaceSummaryResponse;
+  workspace_resolve: ResolveWorkspaceResponse;
   project_create: CreateWorkspaceResponse;
   graph_get: GetGraphResponse;
   graph_command: ApplyGraphCommandsResponse;
@@ -84,6 +93,7 @@ export type McpToolFailure = {
   error: {
     code: string;
     message: string;
+    details?: unknown;
   };
 };
 
@@ -125,6 +135,12 @@ function dispatchMcpTool<T extends McpToolName>(
   request: McpToolRequestMap[T],
 ): McpToolResponseMap[T] {
   switch (tool) {
+    case "workspace_list":
+      return runtime.listWorkspaceSummaries(request as McpToolRequestMap["workspace_list"]) as McpToolResponseMap[T];
+    case "workspace_get":
+      return runtime.getWorkspaceSummary(request as McpToolRequestMap["workspace_get"]) as McpToolResponseMap[T];
+    case "workspace_resolve":
+      return runtime.resolveWorkspace(request as McpToolRequestMap["workspace_resolve"]) as McpToolResponseMap[T];
     case "project_create":
       return runtime.createWorkspace(request as McpToolRequestMap["project_create"]) as McpToolResponseMap[T];
     case "graph_get":
@@ -168,13 +184,13 @@ function dispatchMcpTool<T extends McpToolName>(
   }
 }
 
-function normalizeToolError(error: unknown): { code: string; message: string } {
+function normalizeToolError(error: unknown): { code: string; message: string; details?: unknown } {
   if (error instanceof StorageError) {
     return { code: "STORAGE_ERROR", message: error.message };
   }
 
   if (error instanceof RuntimeError) {
-    return { code: "RUNTIME_ERROR", message: error.message };
+    return { code: error.code, message: error.message, details: error.details };
   }
 
   if (error instanceof Error) {

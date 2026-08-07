@@ -16,7 +16,7 @@ beforeEach(async () => {
   store = new SqliteHiveMapStore(new DatabaseSync(":memory:"));
   store.initialize();
   server = createHiveMapMcpServer(new HiveMapRuntime({ store }));
-  client = new Client({ name: "hivemap-test-client", version: "0.0.0" });
+  client = new Client({ name: "hivemap-test-client", version: "0.1.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
 });
@@ -32,6 +32,9 @@ describe("HiveMap MCP SDK server", () => {
     const result = await client.listTools();
 
     expect(result.tools.map((tool) => tool.name)).toEqual([
+      "workspace_list",
+      "workspace_get",
+      "workspace_resolve",
       "project_create",
       "graph_get",
       "graph_command",
@@ -61,8 +64,10 @@ describe("HiveMap MCP SDK server", () => {
       arguments: {
         workspace: {
           id: "workspace-a",
+          slug: "alpha",
           name: "Alpha",
           createdAt: "2026-05-13T21:00:00.000Z",
+          updatedAt: "2026-05-13T21:00:00.000Z",
         },
       },
     });
@@ -73,9 +78,37 @@ describe("HiveMap MCP SDK server", () => {
       value: {
         workspace: {
           id: "workspace-a",
+          slug: "alpha",
           name: "Alpha",
           createdAt: "2026-05-13T21:00:00.000Z",
+          updatedAt: "2026-05-13T21:00:00.000Z",
         },
+      },
+    });
+
+    const listResult = await client.callTool({
+      name: "workspace_list",
+      arguments: { query: "alp" },
+    });
+
+    expect(listResult.structuredContent).toEqual({
+      ok: true,
+      tool: "workspace_list",
+      value: {
+        items: [{ id: "workspace-a", slug: "alpha", name: "Alpha", updatedAt: "2026-05-13T21:00:00.000Z" }],
+      },
+    });
+
+    const resolveResult = await client.callTool({
+      name: "workspace_resolve",
+      arguments: { ref: "alpha" },
+    });
+
+    expect(resolveResult.structuredContent).toEqual({
+      ok: true,
+      tool: "workspace_resolve",
+      value: {
+        workspace: { id: "workspace-a", slug: "alpha", name: "Alpha", updatedAt: "2026-05-13T21:00:00.000Z" },
       },
     });
 

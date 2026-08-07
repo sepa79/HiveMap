@@ -179,8 +179,11 @@ export type SnapshotRecord = {
 export type WorkspaceState = {
   workspace: {
     id: string;
+    slug?: string;
     name: string;
+    archived?: boolean;
     createdAt: string;
+    updatedAt?: string;
   };
   graph: SemanticGraph;
   categoryAssignments: CategoryAssignment[];

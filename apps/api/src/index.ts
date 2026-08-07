@@ -303,7 +303,7 @@ function writeError(response: ServerResponse, error: unknown): void {
   }
 
   if (error instanceof RuntimeError) {
-    writeJson(response, 404, { error: { code: "RUNTIME_ERROR", message: error.message } });
+    writeJson(response, 404, { error: { code: error.code, message: error.message, details: error.details } });
     return;
   }
 

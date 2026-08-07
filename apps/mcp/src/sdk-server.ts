@@ -7,6 +7,9 @@ import { HiveMapRuntime } from "@hivemap/runtime";
 import { handleMcpTool, type McpToolFailure, type McpToolName, type McpToolResponseMap } from "./index.js";
 
 const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
+  workspace_list: "List local HiveMap workspaces without loading their graphs so an agent can discover the right workspace first.",
+  workspace_get: "Read one canonical lightweight workspace record by workspace id.",
+  workspace_resolve: "Resolve a workspace ref by canonical id, slug, or exact name and return the canonical workspace record.",
   project_create: "Create one explicit HiveMap workspace with built-in repository scan profiles.",
   graph_get: "Read the canonical semantic graph for a workspace.",
   graph_command: "Apply explicit typed commands to the canonical semantic graph.",
@@ -32,14 +35,31 @@ const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
 export function createHiveMapMcpServer(runtime: HiveMapRuntime): McpServer {
   const server = new McpServer({
     name: "hivemap",
-    version: "0.0.0",
+    version: "0.1.0",
+  });
+
+  registerTool(server, runtime, "workspace_list", {
+    query: z.string().optional(),
+    limit: z.number().int().positive().optional(),
+    includeArchived: z.boolean().optional(),
+  });
+
+  registerTool(server, runtime, "workspace_get", {
+    workspaceId: z.string(),
+  });
+
+  registerTool(server, runtime, "workspace_resolve", {
+    ref: z.string(),
   });
 
   registerTool(server, runtime, "project_create", {
     workspace: z.object({
       id: z.string(),
+      slug: z.string().optional(),
       name: z.string(),
+      archived: z.boolean().optional(),
       createdAt: z.string(),
+      updatedAt: z.string().optional(),
     }),
   });
 

@@ -35,8 +35,11 @@ export { STORAGE_SCHEMA_VERSION } from "./schema.js";
 
 export type WorkspaceRecord = {
   id: string;
+  slug?: string;
   name: string;
+  archived?: boolean;
   createdAt: string;
+  updatedAt?: string;
 };
 
 export type SnapshotRecord = {
@@ -112,6 +115,7 @@ export class SqliteHiveMapStore {
 
     if (schemaVersion === "1") {
       this.db.exec(SCAN_SCHEMA_SQL);
+      this.db.exec(WORKSPACE_DISCOVERY_SCHEMA_SQL);
       const workspaceRows = this.db.prepare("SELECT id FROM workspaces ORDER BY id").all() as Array<{ id: string }>;
       const insertProfile = this.db.prepare(
         "INSERT INTO scan_profiles (workspace_id, id, version, profile_json) VALUES (?, ?, ?, ?)",
@@ -121,6 +125,12 @@ export class SqliteHiveMapStore {
           insertProfile.run(workspace.id, profile.id, profile.version, JSON.stringify(profile));
         }
       }
+      this.db.prepare("UPDATE schema_metadata SET value = ? WHERE key = 'schema_version'").run(STORAGE_SCHEMA_VERSION);
+      return;
+    }
+
+    if (schemaVersion === "2") {
+      this.db.exec(WORKSPACE_DISCOVERY_SCHEMA_SQL);
       this.db.prepare("UPDATE schema_metadata SET value = ? WHERE key = 'schema_version'").run(STORAGE_SCHEMA_VERSION);
       return;
     }
@@ -135,11 +145,21 @@ export class SqliteHiveMapStore {
   }
 
   listWorkspaces(): WorkspaceRecord[] {
-    return (this.db.prepare("SELECT id, name, created_at FROM workspaces ORDER BY name, id").all() as Array<{
+    return (this.db
+      .prepare("SELECT id, slug, name, archived, created_at, updated_at FROM workspaces ORDER BY name, id")
+      .all() as Array<{
       id: string;
+      slug: NullableString;
       name: string;
+      archived: number;
       created_at: string;
-    }>).map((row) => ({ id: row.id, name: row.name, createdAt: row.created_at }));
+      updated_at: NullableString;
+    }>).map(rowToWorkspaceRecord);
+  }
+
+  getWorkspaceRecord(workspaceId: string): WorkspaceRecord {
+    assertNonEmpty("workspaceId", workspaceId);
+    return this.loadWorkspaceRecord(workspaceId);
   }
 
   workspaceExists(workspaceId: string): boolean {
@@ -234,22 +254,31 @@ export class SqliteHiveMapStore {
   private saveWorkspaceRecord(workspace: WorkspaceRecord): void {
     this.db
       .prepare(
-        "INSERT INTO workspaces (id, name, created_at) VALUES (?, ?, ?) " +
-          "ON CONFLICT(id) DO UPDATE SET name = excluded.name, created_at = excluded.created_at",
+        "INSERT INTO workspaces (id, slug, name, archived, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) " +
+          "ON CONFLICT(id) DO UPDATE SET slug = excluded.slug, name = excluded.name, archived = excluded.archived, created_at = excluded.created_at, updated_at = excluded.updated_at",
       )
-      .run(workspace.id, workspace.name, workspace.createdAt);
+      .run(
+        workspace.id,
+        workspace.slug ?? null,
+        workspace.name,
+        workspace.archived === true ? 1 : 0,
+        workspace.createdAt,
+        workspace.updatedAt ?? null,
+      );
   }
 
   private loadWorkspaceRecord(workspaceId: string): WorkspaceRecord {
     const row = this.db
-      .prepare("SELECT id, name, created_at FROM workspaces WHERE id = ?")
-      .get(workspaceId) as { id: string; name: string; created_at: string } | undefined;
+      .prepare("SELECT id, slug, name, archived, created_at, updated_at FROM workspaces WHERE id = ?")
+      .get(workspaceId) as
+      | { id: string; slug: NullableString; name: string; archived: number; created_at: string; updated_at: NullableString }
+      | undefined;
 
     if (row === undefined) {
       throw new StorageError(`Workspace not found: ${workspaceId}`);
     }
 
-    return { id: row.id, name: row.name, createdAt: row.created_at };
+    return rowToWorkspaceRecord(row);
   }
 
   private replaceGraph(graphId: string, workspaceId: string, graph: SemanticGraph): void {
@@ -615,9 +644,7 @@ export class SqliteHiveMapStore {
 }
 
 export function validateWorkspaceState(state: WorkspaceState): void {
-  assertNonEmpty("workspace.id", state.workspace.id);
-  assertNonEmpty("workspace.name", state.workspace.name);
-  assertNonEmpty("workspace.createdAt", state.workspace.createdAt);
+  validateWorkspaceRecord(state.workspace);
   assertNonEmpty("graphId", state.graphId);
   validateGraph(state.graph);
   validateCategoryCatalog(state.categoryCatalog);
@@ -679,6 +706,35 @@ function stringifyNullable(value: unknown): string | null {
   return value === undefined ? null : JSON.stringify(value);
 }
 
+function rowToWorkspaceRecord(row: {
+  id: string;
+  slug: NullableString;
+  name: string;
+  archived: number;
+  created_at: string;
+  updated_at: NullableString;
+}): WorkspaceRecord {
+  const workspace: WorkspaceRecord = {
+    id: row.id,
+    name: row.name,
+    createdAt: row.created_at,
+  };
+
+  if (row.slug !== null) {
+    workspace.slug = row.slug;
+  }
+
+  if (row.archived !== 0) {
+    workspace.archived = true;
+  }
+
+  if (row.updated_at !== null) {
+    workspace.updatedAt = row.updated_at;
+  }
+
+  return workspace;
+}
+
 function parseJson<T>(value: string): T {
   return JSON.parse(value) as T;
 }
@@ -686,6 +742,20 @@ function parseJson<T>(value: string): T {
 function assertNonEmpty(fieldName: string, value: string): void {
   if (value.trim().length === 0) {
     throw new StorageError(`${fieldName} must be non-empty`);
+  }
+}
+
+function validateWorkspaceRecord(workspace: WorkspaceRecord): void {
+  assertNonEmpty("workspace.id", workspace.id);
+  assertNonEmpty("workspace.name", workspace.name);
+  assertNonEmpty("workspace.createdAt", workspace.createdAt);
+
+  if (workspace.slug !== undefined) {
+    assertNonEmpty("workspace.slug", workspace.slug);
+  }
+
+  if (workspace.updatedAt !== undefined) {
+    assertNonEmpty("workspace.updatedAt", workspace.updatedAt);
   }
 }
 
@@ -699,8 +769,11 @@ CREATE TABLE IF NOT EXISTS schema_metadata (
 
 CREATE TABLE IF NOT EXISTS workspaces (
   id TEXT PRIMARY KEY,
+  slug TEXT UNIQUE,
   name TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  archived INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS graphs (
@@ -838,4 +911,11 @@ CREATE TABLE IF NOT EXISTS scan_runs (
   run_json TEXT NOT NULL,
   PRIMARY KEY (workspace_id, id)
 );
+`;
+
+const WORKSPACE_DISCOVERY_SCHEMA_SQL = `
+ALTER TABLE workspaces ADD COLUMN slug TEXT;
+ALTER TABLE workspaces ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE workspaces ADD COLUMN updated_at TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS workspaces_slug_unique ON workspaces(slug) WHERE slug IS NOT NULL;
 `;

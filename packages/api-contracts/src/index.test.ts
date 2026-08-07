@@ -11,10 +11,13 @@ import {
   validateCreateProposalRequest,
   validateCreateSnapshotRequest,
   validateCreateWorkspaceRequest,
+  validateGetWorkspaceSummaryRequest,
   validateGetProjectionRequest,
   validateExportWorkspaceBundleRequest,
   validateImportWorkspaceBundleRequest,
+  validateListWorkspaceSummariesRequest,
   validateRecordFeedbackRequest,
+  validateResolveWorkspaceRequest,
   type McpToolName,
   type McpToolRequestMap,
 } from "./index.js";
@@ -25,11 +28,21 @@ describe("api contracts", () => {
       validateCreateWorkspaceRequest({
         workspace: {
           id: "workspace-a",
+          slug: "alpha",
           name: "Alpha",
+          archived: false,
           createdAt: "2026-05-13T21:00:00.000Z",
+          updatedAt: "2026-05-13T22:00:00.000Z",
         },
       }),
     ).not.toThrow();
+  });
+
+  it("validates workspace discovery requests", () => {
+    expect(() => validateListWorkspaceSummariesRequest({ query: "alpha", limit: 10, includeArchived: true })).not.toThrow();
+    expect(() => validateGetWorkspaceSummaryRequest({ workspaceId: "workspace-a" })).not.toThrow();
+    expect(() => validateResolveWorkspaceRequest({ ref: "alpha" })).not.toThrow();
+    expect(() => validateListWorkspaceSummariesRequest({ limit: 0 })).toThrow("limit must be a positive integer");
   });
 
   it("rejects missing workspace ids for graph commands", () => {

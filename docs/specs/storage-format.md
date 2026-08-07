@@ -26,10 +26,11 @@ Use local-first SQLite for the first implementation, behind explicit storage int
 - Storage failure must be visible.
 - No duplicate JSON shadow stores unless explicitly documented.
 - No hidden migration/fallback paths.
-- The scan-enabled implementation uses schema version `2`.
+- The workspace-discovery-enabled implementation uses schema version `3`.
 - Storage initialization must create the schema explicitly.
 - Unknown schema versions are invalid.
 - Version `1` migrates explicitly to version `2` and receives the built-in scan profiles.
+- Version `2` migrates explicitly to version `3` and receives workspace discovery metadata columns.
 
 ## Schema Version
 
@@ -43,15 +44,18 @@ CREATE TABLE schema_metadata (
 Required row:
 
 - `key = 'schema_version'`
-- `value = '2'`
+- `value = '3'`
 
 ## Core Tables
 
 ```sql
 CREATE TABLE workspaces (
   id TEXT PRIMARY KEY,
+  slug TEXT UNIQUE,
   name TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  archived INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT
 );
 
 CREATE TABLE graphs (
@@ -212,6 +216,10 @@ The local UI downloads and uploads the same canonical bundle bytes through REST.
 
 `replace` deletes and recreates the workspace inside one database transaction so a changed graph id cannot leave shadow graph state and a failed import cannot destroy the previous workspace.
 
+## Workspace Discovery Metadata
+
+`workspaces.slug`, `workspaces.archived`, and `workspaces.updated_at` support lightweight workspace discovery without loading full graphs. They are metadata only; the semantic graph remains the source of truth for workspace contents.
+
 ## Open Questions
 
-- Long-term migration support beyond version `1` to `2`.
+- Long-term migration support beyond version `3`.

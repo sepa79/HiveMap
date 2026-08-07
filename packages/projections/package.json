@@ -1,6 +1,6 @@
 {
   "name": "@hivemap/projections",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -17,7 +17,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@hivemap/graph-core": "0.0.0"
+    "@hivemap/graph-core": "0.1.0"
   },
   "devDependencies": {
     "typescript": "^5.9.3",

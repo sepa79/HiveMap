@@ -46,12 +46,46 @@ export type OperationError = {
 
 export type ApiResult<T> = OperationResult<T> | OperationError;
 
+export type WorkspaceSummary = {
+  id: string;
+  slug?: string;
+  name: string;
+  archived?: boolean;
+  updatedAt?: string;
+};
+
 export type CreateWorkspaceRequest = {
   workspace: WorkspaceRecord;
 };
 
 export type CreateWorkspaceResponse = {
   workspace: WorkspaceRecord;
+};
+
+export type ListWorkspaceSummariesRequest = {
+  query?: string;
+  limit?: number;
+  includeArchived?: boolean;
+};
+
+export type ListWorkspaceSummariesResponse = {
+  items: WorkspaceSummary[];
+};
+
+export type GetWorkspaceSummaryRequest = {
+  workspaceId: string;
+};
+
+export type GetWorkspaceSummaryResponse = {
+  workspace: WorkspaceSummary;
+};
+
+export type ResolveWorkspaceRequest = {
+  ref: string;
+};
+
+export type ResolveWorkspaceResponse = {
+  workspace: WorkspaceSummary;
 };
 
 export type GetWorkspaceResponse = {
@@ -235,6 +269,9 @@ export type ImportWorkspaceBundleRequest = { bytes: Uint8Array; mode: "new" | "r
 export type ImportWorkspaceBundleResponse = ImportWorkspaceResponse;
 
 export type McpToolName =
+  | "workspace_list"
+  | "workspace_get"
+  | "workspace_resolve"
   | "project_create"
   | "graph_get"
   | "graph_command"
@@ -257,6 +294,9 @@ export type McpToolName =
   | "workspace_import_zip";
 
 export type McpToolRequestMap = {
+  workspace_list: ListWorkspaceSummariesRequest;
+  workspace_get: GetWorkspaceSummaryRequest;
+  workspace_resolve: ResolveWorkspaceRequest;
   project_create: CreateWorkspaceRequest;
   graph_get: GetGraphRequest;
   graph_command: ApplyGraphCommandsRequest;
@@ -316,9 +356,25 @@ export class ApiContractValidationError extends Error {
 }
 
 export function validateCreateWorkspaceRequest(request: CreateWorkspaceRequest): void {
-  assertNonEmpty("workspace.id", request.workspace.id);
-  assertNonEmpty("workspace.name", request.workspace.name);
-  assertDate("workspace.createdAt", request.workspace.createdAt);
+  validateWorkspaceRecordInput(request.workspace);
+}
+
+export function validateListWorkspaceSummariesRequest(request: ListWorkspaceSummariesRequest): void {
+  if (request.query !== undefined) {
+    assertNonEmpty("query", request.query);
+  }
+
+  if (request.limit !== undefined && (!Number.isInteger(request.limit) || request.limit < 1)) {
+    throw new ApiContractValidationError("limit must be a positive integer");
+  }
+}
+
+export function validateGetWorkspaceSummaryRequest(request: GetWorkspaceSummaryRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+}
+
+export function validateResolveWorkspaceRequest(request: ResolveWorkspaceRequest): void {
+  assertNonEmpty("ref", request.ref);
 }
 
 export function validateGetGraphRequest(request: GetGraphRequest): void {
@@ -469,5 +525,19 @@ function assertDate(fieldName: string, value: string): void {
 
   if (Number.isNaN(Date.parse(value))) {
     throw new ApiContractValidationError(`${fieldName} must be a valid date string`);
+  }
+}
+
+function validateWorkspaceRecordInput(workspace: WorkspaceRecord): void {
+  assertNonEmpty("workspace.id", workspace.id);
+  assertNonEmpty("workspace.name", workspace.name);
+  assertDate("workspace.createdAt", workspace.createdAt);
+
+  if (workspace.slug !== undefined) {
+    assertNonEmpty("workspace.slug", workspace.slug);
+  }
+
+  if (workspace.updatedAt !== undefined) {
+    assertDate("workspace.updatedAt", workspace.updatedAt);
   }
 }

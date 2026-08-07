@@ -57,7 +57,7 @@ POST /workspaces/:workspaceId/export-bundle
 POST /workspace-import-bundles?mode=new|replace
 ```
 
-`GET /workspaces` returns lightweight workspace records for browser selection without loading every semantic graph.
+`GET /workspaces` returns lightweight workspace records for browser selection without loading every semantic graph. Records may include optional discovery metadata such as `slug`, `archived`, and `updatedAt`.
 
 The `exports` and `workspace-imports` endpoints use explicit server filesystem paths and remain suitable for local automation. The `export-bundle` and `workspace-import-bundles` endpoints transfer `application/zip` bytes directly for browser download and file upload. Browser import still requires an explicit `new` or `replace` mode; it never silently merges workspaces.
 

@@ -17,6 +17,9 @@ beforeEach(() => {
 describe("MCP tool adapter", () => {
   it("exposes the required alpha tool names", () => {
     expect(HIVEMAP_MCP_TOOL_NAMES).toEqual([
+      "workspace_list",
+      "workspace_get",
+      "workspace_resolve",
       "project_create",
       "graph_get",
       "graph_command",
@@ -48,8 +51,10 @@ describe("MCP tool adapter", () => {
     const createResult = handleMcpTool(runtime, "project_create", {
       workspace: {
         id: "workspace-a",
+        slug: "alpha",
         name: "Alpha",
         createdAt: "2026-05-13T21:00:00.000Z",
+        updatedAt: "2026-05-13T21:00:00.000Z",
       },
     });
 
@@ -59,8 +64,10 @@ describe("MCP tool adapter", () => {
       value: {
         workspace: {
           id: "workspace-a",
+          slug: "alpha",
           name: "Alpha",
           createdAt: "2026-05-13T21:00:00.000Z",
+          updatedAt: "2026-05-13T21:00:00.000Z",
         },
       },
     });
@@ -144,6 +151,71 @@ describe("MCP tool adapter", () => {
     });
   });
 
+  it("discovers and resolves workspaces through MCP tools", () => {
+    handleMcpTool(runtime, "project_create", {
+      workspace: {
+        id: "workspace-a",
+        slug: "caravanworld",
+        name: "Caravan World",
+        createdAt: "2026-05-13T21:00:00.000Z",
+        updatedAt: "2026-07-17T10:00:00.000Z",
+      },
+    });
+
+    expect(handleMcpTool(runtime, "workspace_list", { query: "caravan" })).toEqual({
+      ok: true,
+      tool: "workspace_list",
+      value: {
+        items: [{ id: "workspace-a", slug: "caravanworld", name: "Caravan World", updatedAt: "2026-07-17T10:00:00.000Z" }],
+      },
+    });
+
+    expect(handleMcpTool(runtime, "workspace_resolve", { ref: "caravanworld" })).toEqual({
+      ok: true,
+      tool: "workspace_resolve",
+      value: {
+        workspace: { id: "workspace-a", slug: "caravanworld", name: "Caravan World", updatedAt: "2026-07-17T10:00:00.000Z" },
+      },
+    });
+  });
+
+  it("returns machine-readable ambiguity details for workspace resolution", () => {
+    handleMcpTool(runtime, "project_create", {
+      workspace: {
+        id: "workspace-a",
+        slug: "alpha-a",
+        name: "Alpha",
+        createdAt: "2026-05-13T21:00:00.000Z",
+        updatedAt: "2026-05-13T21:00:00.000Z",
+      },
+    });
+    handleMcpTool(runtime, "project_create", {
+      workspace: {
+        id: "workspace-b",
+        slug: "alpha-b",
+        name: "Alpha",
+        createdAt: "2026-05-13T21:00:00.000Z",
+        updatedAt: "2026-05-13T21:00:00.000Z",
+      },
+    });
+
+    expect(handleMcpTool(runtime, "workspace_resolve", { ref: "Alpha" })).toEqual({
+      ok: false,
+      tool: "workspace_resolve",
+      error: {
+        code: "workspace_ambiguous",
+        message: "Workspace reference is ambiguous: Alpha",
+        details: {
+          ref: "Alpha",
+          candidates: [
+            { id: "workspace-a", slug: "alpha-a", name: "Alpha", updatedAt: "2026-05-13T21:00:00.000Z" },
+            { id: "workspace-b", slug: "alpha-b", name: "Alpha", updatedAt: "2026-05-13T21:00:00.000Z" },
+          ],
+        },
+      },
+    });
+  });
+
   it("starts an instructed agent scan through MCP", () => {
     createWorkspaceWithNode();
 
@@ -171,8 +243,10 @@ function createWorkspaceWithNode(): void {
   handleMcpTool(runtime, "project_create", {
     workspace: {
       id: "workspace-a",
+      slug: "alpha",
       name: "Alpha",
       createdAt: "2026-05-13T21:00:00.000Z",
+      updatedAt: "2026-05-13T21:00:00.000Z",
     },
   });
   handleMcpTool(runtime, "graph_command", {

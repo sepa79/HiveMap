@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 
 import {
+  validateGetWorkspaceSummaryRequest,
+  validateListWorkspaceSummariesRequest,
+  validateResolveWorkspaceRequest,
   validateApplyGraphCommandsRequest,
   validateApplyProposalRequest,
   validateApproveProposalRequest,
@@ -37,6 +40,8 @@ import {
   type CreateSnapshotResponse,
   type CreateWorkspaceRequest,
   type CreateWorkspaceResponse,
+  type GetWorkspaceSummaryRequest,
+  type GetWorkspaceSummaryResponse,
   type GetCategoriesResponse,
   type GetGraphRequest,
   type GetGraphResponse,
@@ -68,16 +73,21 @@ import {
   type ImportWorkspaceBundleRequest,
   type ImportWorkspaceBundleResponse,
   type ListWorkspacesResponse,
+  type ListWorkspaceSummariesRequest,
+  type ListWorkspaceSummariesResponse,
   type ListScanProfilesRequest,
   type ListScanProfilesResponse,
   type ListScanRunsRequest,
   type ListScanRunsResponse,
   type RecordScanCoverageRequest,
   type RecordScanCoverageResponse,
+  type ResolveWorkspaceRequest,
+  type ResolveWorkspaceResponse,
   type StartScanRequest,
   type StartScanResponse,
   type UpdateFindingRequest,
   type UpdateFindingResponse,
+  type WorkspaceSummary,
 } from "@hivemap/api-contracts";
 import { applyApprovedProposal, approvePendingProposal, DEFAULT_CAPTURE_POLICY, rejectPendingProposal } from "@hivemap/capture";
 import { INITIAL_CATEGORY_CATALOG } from "@hivemap/categories";
@@ -100,6 +110,7 @@ import {
   stableJson,
   writeWorkspaceBundle,
   type SqliteHiveMapStore,
+  type WorkspaceRecord,
   type WorkspaceState,
 } from "@hivemap/storage";
 
@@ -108,9 +119,14 @@ export type HiveMapRuntimeOptions = {
 };
 
 export class RuntimeError extends Error {
-  constructor(message: string) {
+  readonly code: string;
+  readonly details?: unknown;
+
+  constructor(message: string, options?: { code?: string; details?: unknown }) {
     super(message);
     this.name = "RuntimeError";
+    this.code = options?.code ?? "RUNTIME_ERROR";
+    this.details = options?.details;
   }
 }
 
@@ -126,6 +142,55 @@ export class HiveMapRuntime {
     const state = createInitialWorkspaceState(request);
     this.store.saveWorkspaceState(state);
     return { workspace: state.workspace };
+  }
+
+  listWorkspaceSummaries(request: ListWorkspaceSummariesRequest): ListWorkspaceSummariesResponse {
+    validateListWorkspaceSummariesRequest(request);
+    const query = request.query?.trim();
+    const items = this.store
+      .listWorkspaces()
+      .filter((workspace) => request.includeArchived === true || workspace.archived !== true)
+      .map(toWorkspaceSummary)
+      .filter((workspace) => query === undefined || scoreWorkspaceSummaryMatch(workspace, query) > 0)
+      .sort((left, right) => compareWorkspaceSummaries(left, right, query))
+      .slice(0, request.limit);
+    return { items };
+  }
+
+  getWorkspaceSummary(request: GetWorkspaceSummaryRequest): GetWorkspaceSummaryResponse {
+    validateGetWorkspaceSummaryRequest(request);
+    return { workspace: toWorkspaceSummary(this.store.getWorkspaceRecord(request.workspaceId)) };
+  }
+
+  resolveWorkspace(request: ResolveWorkspaceRequest): ResolveWorkspaceResponse {
+    validateResolveWorkspaceRequest(request);
+    const ref = request.ref.trim();
+    const candidates = this.store.listWorkspaces();
+    const exactId = candidates.find((workspace) => workspace.id === ref);
+    if (exactId !== undefined) {
+      return { workspace: toWorkspaceSummary(exactId) };
+    }
+
+    const normalizedRef = normalizeWorkspaceRef(ref);
+    const exactSlugMatches = candidates.filter((workspace) => workspace.slug !== undefined && normalizeWorkspaceRef(workspace.slug) === normalizedRef);
+    const exactSlugMatch = exactSlugMatches[0];
+    if (exactSlugMatch !== undefined && exactSlugMatches.length === 1) {
+      return { workspace: toWorkspaceSummary(exactSlugMatch) };
+    }
+    if (exactSlugMatches.length > 1) {
+      throw createWorkspaceAmbiguousError(ref, exactSlugMatches);
+    }
+
+    const exactNameMatches = candidates.filter((workspace) => normalizeWorkspaceRef(workspace.name) === normalizedRef);
+    const exactNameMatch = exactNameMatches[0];
+    if (exactNameMatch !== undefined && exactNameMatches.length === 1) {
+      return { workspace: toWorkspaceSummary(exactNameMatch) };
+    }
+    if (exactNameMatches.length > 1) {
+      throw createWorkspaceAmbiguousError(ref, exactNameMatches);
+    }
+
+    throw createWorkspaceNotFoundError(ref);
   }
 
   listWorkspaces(): ListWorkspacesResponse {
@@ -430,12 +495,97 @@ function createInitialWorkspaceState(request: CreateWorkspaceRequest): Workspace
   };
 }
 
+function toWorkspaceSummary(workspace: WorkspaceRecord): WorkspaceSummary {
+  const summary: WorkspaceSummary = {
+    id: workspace.id,
+    name: workspace.name,
+  };
+  if (workspace.slug !== undefined) {
+    summary.slug = workspace.slug;
+  }
+  if (workspace.archived === true) {
+    summary.archived = true;
+  }
+  if (workspace.updatedAt !== undefined) {
+    summary.updatedAt = workspace.updatedAt;
+  }
+  return summary;
+}
+
 function createTargetIndex(state: WorkspaceState) {
   return {
     nodeIds: state.graph.nodes.map((node) => node.id),
     edgeIds: state.graph.edges.map((edge) => edge.id),
     projectionIds: state.projections.map((projection) => projection.id),
   };
+}
+
+function normalizeWorkspaceRef(value: string): string {
+  return value.trim().toLocaleLowerCase();
+}
+
+function scoreWorkspaceSummaryMatch(workspace: WorkspaceSummary, query: string): number {
+  const normalizedQuery = normalizeWorkspaceRef(query);
+  const values = [workspace.id, workspace.slug, workspace.name]
+    .filter((value): value is string => value !== undefined)
+    .map(normalizeWorkspaceRef);
+
+  if (values.some((value) => value === normalizedQuery)) {
+    return 3;
+  }
+
+  if (values.some((value) => value.startsWith(normalizedQuery))) {
+    return 2;
+  }
+
+  if (values.some((value) => value.includes(normalizedQuery))) {
+    return 1;
+  }
+
+  return 0;
+}
+
+function compareWorkspaceSummaries(left: WorkspaceSummary, right: WorkspaceSummary, query?: string): number {
+  const leftArchived = left.archived === true ? 1 : 0;
+  const rightArchived = right.archived === true ? 1 : 0;
+  if (leftArchived !== rightArchived) {
+    return leftArchived - rightArchived;
+  }
+
+  const leftScore = query === undefined ? 0 : scoreWorkspaceSummaryMatch(left, query);
+  const rightScore = query === undefined ? 0 : scoreWorkspaceSummaryMatch(right, query);
+  if (leftScore !== rightScore) {
+    return rightScore - leftScore;
+  }
+
+  const leftUpdatedAt = Date.parse(left.updatedAt ?? "");
+  const rightUpdatedAt = Date.parse(right.updatedAt ?? "");
+  if (!Number.isNaN(leftUpdatedAt) || !Number.isNaN(rightUpdatedAt)) {
+    if (Number.isNaN(leftUpdatedAt)) return 1;
+    if (Number.isNaN(rightUpdatedAt)) return -1;
+    if (leftUpdatedAt !== rightUpdatedAt) return rightUpdatedAt - leftUpdatedAt;
+  }
+
+  const nameOrder = left.name.localeCompare(right.name);
+  if (nameOrder !== 0) {
+    return nameOrder;
+  }
+
+  return left.id.localeCompare(right.id);
+}
+
+function createWorkspaceNotFoundError(ref: string): RuntimeError {
+  return new RuntimeError(`Workspace not found: ${ref}`, {
+    code: "workspace_not_found",
+    details: { ref },
+  });
+}
+
+function createWorkspaceAmbiguousError(ref: string, candidates: readonly WorkspaceRecord[]): RuntimeError {
+  return new RuntimeError(`Workspace reference is ambiguous: ${ref}`, {
+    code: "workspace_ambiguous",
+    details: { ref, candidates: candidates.map(toWorkspaceSummary) },
+  });
 }
 
 function findById<T extends { id: string }>(items: readonly T[], id: string, label: string): T {

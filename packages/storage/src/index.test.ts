@@ -27,8 +27,10 @@ function createState(): WorkspaceState {
   return {
     workspace: {
       id: "workspace-a",
+      slug: "alpha-workspace",
       name: "Alpha Workspace",
       createdAt: "2026-05-13T21:00:00.000Z",
+      updatedAt: "2026-05-13T21:00:00.000Z",
     },
     graphId: "graph-a",
     graph: {
@@ -107,7 +109,7 @@ describe("SqliteHiveMapStore", () => {
     store.initialize();
 
     const state = store.loadWorkspaceState;
-    expect(STORAGE_SCHEMA_VERSION).toBe("2");
+    expect(STORAGE_SCHEMA_VERSION).toBe("3");
     expect(state).toBeTypeOf("function");
 
     store.close();
@@ -125,8 +127,15 @@ describe("SqliteHiveMapStore", () => {
 
     store.initialize();
 
-    expect((database.prepare("SELECT value FROM schema_metadata WHERE key = 'schema_version'").get() as { value: string }).value).toBe("2");
+    expect((database.prepare("SELECT value FROM schema_metadata WHERE key = 'schema_version'").get() as { value: string }).value).toBe("3");
     expect((database.prepare("SELECT COUNT(*) AS count FROM scan_profiles WHERE workspace_id = 'legacy'").get() as { count: number }).count).toBe(2);
+    expect(
+      database.prepare("SELECT slug, archived, updated_at FROM workspaces WHERE id = 'legacy'").get() as {
+        slug: string | null;
+        archived: number;
+        updated_at: string | null;
+      },
+    ).toEqual({ slug: null, archived: 0, updated_at: null });
     store.close();
   });
 
@@ -148,8 +157,30 @@ describe("SqliteHiveMapStore", () => {
     store.saveWorkspaceState(createState());
 
     expect(store.listWorkspaces()).toEqual([
-      { id: "workspace-a", name: "Alpha Workspace", createdAt: "2026-05-13T21:00:00.000Z" },
+      {
+        id: "workspace-a",
+        slug: "alpha-workspace",
+        name: "Alpha Workspace",
+        createdAt: "2026-05-13T21:00:00.000Z",
+        updatedAt: "2026-05-13T21:00:00.000Z",
+      },
     ]);
+
+    store.close();
+  });
+
+  it("returns one workspace record without loading its graph", () => {
+    const store = new SqliteHiveMapStore(new DatabaseSync(":memory:"));
+    store.initialize();
+    store.saveWorkspaceState(createState());
+
+    expect(store.getWorkspaceRecord("workspace-a")).toEqual({
+      id: "workspace-a",
+      slug: "alpha-workspace",
+      name: "Alpha Workspace",
+      createdAt: "2026-05-13T21:00:00.000Z",
+      updatedAt: "2026-05-13T21:00:00.000Z",
+    });
 
     store.close();
   });

@@ -23,8 +23,10 @@ describe("HiveMapRuntime", () => {
     const response = runtime.createWorkspace({
       workspace: {
         id: "workspace-a",
+        slug: "alpha",
         name: "Alpha",
         createdAt: "2026-05-13T21:00:00.000Z",
+        updatedAt: "2026-05-13T21:00:00.000Z",
       },
     });
 
@@ -32,8 +34,59 @@ describe("HiveMapRuntime", () => {
     expect(runtime.getWorkspace("workspace-a").state.capturePolicy.mode).toBe("delegated");
   });
 
+  it("lists workspaces with query, archived filtering, and limit", () => {
+    seedWorkspaceFixture({ id: "workspace-a", slug: "caravanworld", name: "Caravan World", updatedAt: "2026-07-17T10:00:00.000Z" });
+    seedWorkspaceFixture({ id: "workspace-b", slug: "caravan-archive", name: "Caravan Archive", archived: true, updatedAt: "2026-07-16T10:00:00.000Z" });
+    seedWorkspaceFixture({ id: "workspace-c", slug: "caravan-lab", name: "Caravan Lab", updatedAt: "2026-07-18T10:00:00.000Z" });
+
+    expect(runtime.listWorkspaceSummaries({ query: "caravan", includeArchived: false, limit: 1 })).toEqual({
+      items: [{ id: "workspace-c", slug: "caravan-lab", name: "Caravan Lab", updatedAt: "2026-07-18T10:00:00.000Z" }],
+    });
+  });
+
+  it("resolves a workspace by slug to its canonical id", () => {
+    seedWorkspaceFixture({ id: "workspace-a", slug: "caravanworld", name: "Caravan World" });
+
+    expect(runtime.resolveWorkspace({ ref: "caravanworld" })).toEqual({
+      workspace: { id: "workspace-a", slug: "caravanworld", name: "Caravan World", updatedAt: "2026-05-13T21:00:00.000Z" },
+    });
+  });
+
+  it("fails clearly when workspace resolution finds no match", () => {
+    seedWorkspaceFixture({ id: "workspace-a", slug: "alpha", name: "Alpha" });
+
+    expect(() => runtime.resolveWorkspace({ ref: "missing" })).toThrow("Workspace not found: missing");
+    try {
+      runtime.resolveWorkspace({ ref: "missing" });
+      throw new Error("expected workspace_not_found");
+    } catch (error) {
+      expect(error).toMatchObject({ code: "workspace_not_found", details: { ref: "missing" } });
+    }
+  });
+
+  it("fails clearly when workspace resolution is ambiguous by name", () => {
+    seedWorkspaceFixture({ id: "workspace-a", slug: "alpha-a", name: "Alpha" });
+    seedWorkspaceFixture({ id: "workspace-b", slug: "alpha-b", name: "Alpha" });
+
+    try {
+      runtime.resolveWorkspace({ ref: "Alpha" });
+      throw new Error("expected workspace_ambiguous");
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "workspace_ambiguous",
+        details: {
+          ref: "Alpha",
+          candidates: [
+            { id: "workspace-a", slug: "alpha-a", name: "Alpha", updatedAt: "2026-05-13T21:00:00.000Z" },
+            { id: "workspace-b", slug: "alpha-b", name: "Alpha", updatedAt: "2026-05-13T21:00:00.000Z" },
+          ],
+        },
+      });
+    }
+  });
+
   it("applies graph commands and creates projections over the same state", () => {
-    createWorkspace();
+    seedWorkspaceFixture();
     runtime.applyGraphCommands({
       workspaceId: "workspace-a",
       commands: [
@@ -54,7 +107,7 @@ describe("HiveMapRuntime", () => {
   });
 
   it("creates a project map projection through the shared runtime", () => {
-    createWorkspace();
+    seedWorkspaceFixture();
     runtime.applyGraphCommands({
       workspaceId: "workspace-a",
       commands: [
@@ -83,7 +136,7 @@ describe("HiveMapRuntime", () => {
   });
 
   it("records feedback without mutating graph", () => {
-    createWorkspace();
+    seedWorkspaceFixture();
     runtime.recordFeedback({
       workspaceId: "workspace-a",
       feedbackEvent: {
@@ -99,7 +152,7 @@ describe("HiveMapRuntime", () => {
   });
 
   it("approves and applies proposals explicitly", () => {
-    createWorkspace();
+    seedWorkspaceFixture();
     runtime.createProposal({
       workspaceId: "workspace-a",
       proposal: {
@@ -128,7 +181,7 @@ describe("HiveMapRuntime", () => {
   });
 
   it("creates immutable snapshots from current graph and projection", () => {
-    createWorkspace();
+    seedWorkspaceFixture();
     runtime.applyGraphCommands({
       workspaceId: "workspace-a",
       commands: [
@@ -159,7 +212,7 @@ describe("HiveMapRuntime", () => {
   });
 
   it("runs two agent scans and compares resolved findings as evidence", () => {
-    createWorkspace();
+    seedWorkspaceFixture();
     runtime.applyGraphCommands({
       workspaceId: "workspace-a",
       commands: [{ id: "concept-a", type: "node.create", payload: { node: { id: "concept-a", label: "Ownership", type: "concept" } } }],
@@ -218,7 +271,7 @@ describe("HiveMapRuntime", () => {
   });
 
   it("exports and imports a complete workspace ZIP without semantic drift", () => {
-    createWorkspace();
+    seedWorkspaceFixture();
     const directory = mkdtempSync(join(tmpdir(), "hivemap-runtime-"));
     const bundlePath = join(directory, "workspace.hivemap.zip");
     try {
@@ -238,7 +291,7 @@ describe("HiveMapRuntime", () => {
   });
 
   it("does not bypass non-delegated capture when an agent creates a finding", () => {
-    createWorkspace();
+    seedWorkspaceFixture();
     const state = store.loadWorkspaceState("workspace-a");
     store.saveWorkspaceState({ ...state, capturePolicy: { id: "capture-policy-default", mode: "proposed" } });
     startDocumentationScan("scan-proposed", "rev-a");
@@ -264,12 +317,25 @@ describe("HiveMapRuntime", () => {
   });
 });
 
-function createWorkspace(): void {
+function seedWorkspaceFixture(
+  workspace: Partial<{
+    id: string;
+    slug: string;
+    name: string;
+    archived: boolean;
+    createdAt: string;
+    updatedAt: string;
+  }> = {},
+): void {
+  // Tests seed their own isolated in-memory workspace records; no external DB state is used.
   runtime.createWorkspace({
     workspace: {
-      id: "workspace-a",
-      name: "Alpha",
-      createdAt: "2026-05-13T21:00:00.000Z",
+      id: workspace.id ?? "workspace-a",
+      ...(workspace.slug === undefined ? {} : { slug: workspace.slug }),
+      name: workspace.name ?? "Alpha",
+      ...(workspace.archived === undefined ? {} : { archived: workspace.archived }),
+      createdAt: workspace.createdAt ?? "2026-05-13T21:00:00.000Z",
+      updatedAt: workspace.updatedAt ?? "2026-05-13T21:00:00.000Z",
     },
   });
 }
