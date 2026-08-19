@@ -1,0 +1,72 @@
+{
+  "project_id": "hivemap",
+  "profile_ref": "base@v1",
+  "catalog_source_url": null,
+  "applied_at": "2026-08-19T14:13:38.974Z",
+  "files": [
+    {
+      "target": "AGENTS.md",
+      "sha256": "60cb648e34533f732b03e9c05d71c16774faf45b55651b10d90b672f9c756705"
+    },
+    {
+      "target": "BOOTSTRAP_PROMPT.md",
+      "sha256": "d70fc2646dfd49b4950b2f154d4b186498a4adf1f9a79c91e5fa8f187ce4bd83"
+    },
+    {
+      "target": "BOOTSTRAP_PROMPT_SIMPLE.md",
+      "sha256": "6d54a7d3b45db3ffb9fa044222225b7204e846b5b6ffe80e10aa9d3bb81f0dcb"
+    },
+    {
+      "target": "docs/ARCHITECTURE.md",
+      "sha256": "656292748a79f7aca219cbb2e8af1fe9581769f4c46cab7a5a0f780a5f8d7ab5"
+    },
+    {
+      "target": "docs/adr/README.md",
+      "sha256": "aa700cb7127e97a72422c6d8d4688b27914b6fa957228b631a7d195158158fc9"
+    },
+    {
+      "target": "docs/ai/AI_HATS.md",
+      "sha256": "6ab6176b25895c6922f487c9be6ffe8cd8bbf3ea75ec75a153825542ba043914"
+    },
+    {
+      "target": "docs/ai/COMMANDS.md",
+      "sha256": "f982fc24ea8ea035b40296649de842264e074120c8c793542ccb6cf12e2296ae"
+    },
+    {
+      "target": "docs/ai/EVIDENCE_TEMPLATE.md",
+      "sha256": "07e6bbb49741c210aa2443bebce2f3814fce62589d3d731ae32a625c89b413aa"
+    },
+    {
+      "target": "docs/ai/HIVEMIND_RULES.md",
+      "sha256": "bf16264af4f245ae218734dd8205b637233cb6b71d48311c66a8b506d399c668"
+    },
+    {
+      "target": "docs/ai/JESTER_CHECKS.md",
+      "sha256": "a8aa4b6e1d94ce278b590636e57fe2931bb15d9e72350d29b1f680a71d85d432"
+    },
+    {
+      "target": "docs/ai/LESSONS_LEARNED.md",
+      "sha256": "4d730aa2ee9e7b33078bc0209c711fd3b19f2a7e6783dd160a47835e1c7eea5f"
+    },
+    {
+      "target": "docs/ai/PROJECT_CONTEXT.md",
+      "sha256": "e3ec5728cecd42c475cd4be76fc3142f7b98a91019da8cc359cfa7a1bf4e7a29"
+    },
+    {
+      "target": "docs/ai/PR_PREPARATION.md",
+      "sha256": "31ed636907d45704d85ce3d6044dccbc4534816b72ccc4c05e836884ecb10d3c"
+    },
+    {
+      "target": "docs/ai/REVIEW_CHECKS.md",
+      "sha256": "3bfa1279cfe14a685b3684573a50fa27c14b66a4a5f46cba95885f85d80f4565"
+    },
+    {
+      "target": "docs/ai/TASK_TEMPLATE.md",
+      "sha256": "451f34482d8410b7ff9b08dbfd471dca3bb030cf49dc9c6f8431dfe9dbc27c06"
+    },
+    {
+      "target": "docs/specs/README.md",
+      "sha256": "2115a31b6900b3954fb6f244e3bc3af7297cc1f50a08a7a048ab0eb9e5e5782e"
+    }
+  ]
+}
