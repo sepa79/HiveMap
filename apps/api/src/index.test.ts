@@ -1,31 +1,30 @@
-import { DatabaseSync } from "node:sqlite";
-import { AddressInfo } from "node:net";
+import { mkdtempSync, rmSync } from "node:fs";
+import type { IncomingHttpHeaders, ServerResponse } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { SqliteHiveMapStore } from "@hivemap/storage";
+import { type EmbeddingProvider, type RepositoryIndexExecutor } from "@hivemap/runtime";
+import { InMemoryHiveMapStore } from "@hivemap/storage";
 
-import { createApiServer } from "./index.js";
+import { createApiRequestHandler, type ApiRequestHandler } from "./index.js";
 
-let store: SqliteHiveMapStore;
-let server: ReturnType<typeof createApiServer>;
-let baseUrl: string;
+let store: InMemoryHiveMapStore;
+let handleRequest: ApiRequestHandler;
 
 beforeEach(async () => {
-  store = new SqliteHiveMapStore(new DatabaseSync(":memory:"));
-  store.initialize();
-  server = createApiServer({ store });
-  await new Promise<void>((resolve) => {
-    server.listen(0, "127.0.0.1", resolve);
+  store = new InMemoryHiveMapStore();
+  await store.initialize();
+  handleRequest = createApiRequestHandler({
+    store,
+    embeddingProviders: { test: createTestEmbeddingProvider() },
+    repositoryIndexExecutor: createTestRepositoryIndexExecutor(),
   });
-  const address = server.address() as AddressInfo;
-  baseUrl = `http://127.0.0.1:${address.port}`;
 });
 
 afterEach(async () => {
-  await new Promise<void>((resolve, reject) => {
-    server.close((error) => (error === undefined ? resolve() : reject(error)));
-  });
-  store.close();
+  await store.close();
 });
 
 describe("api server", () => {
@@ -39,7 +38,7 @@ describe("api server", () => {
     });
 
     expect(createResponse.status).toBe(201);
-    expect(await createResponse.json()).toEqual({
+    expect(parseJson(createResponse)).toEqual({
       workspace: {
         id: "workspace-a",
         name: "Alpha",
@@ -47,9 +46,9 @@ describe("api server", () => {
       },
     });
 
-    const graphResponse = await fetch(`${baseUrl}/workspaces/workspace-a/graph`);
+    const graphResponse = await request(handleRequest, "/workspaces/workspace-a/graph");
     expect(graphResponse.status).toBe(200);
-    expect(await graphResponse.json()).toEqual({ graph: { nodes: [], edges: [] } });
+    expect(parseJson(graphResponse)).toEqual({ graph: { nodes: [], edges: [] } });
   });
 
   it("applies graph commands through graph-core", async () => {
@@ -66,10 +65,180 @@ describe("api server", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
+    expect(parseJson(response)).toEqual({
       graph: {
         nodes: [{ id: "node-a", label: "Alpha", type: "concept" }],
         edges: [],
+      },
+    });
+  });
+
+  it("starts and reads repository index jobs through REST", async () => {
+    await createWorkspace();
+
+    const createResponse = await postJson("/workspaces/workspace-a/repository-indexes", {
+      index: {
+        id: "repo-index-a",
+        repositoryUrl: "https://example.com/org/repo.git",
+        requestedRef: "main",
+        mode: "safe",
+        requestedAt: "2026-08-20T12:00:00.000Z",
+        actor: {
+          agentId: "codex",
+          tool: "mcp",
+        },
+      },
+    });
+
+    expect(createResponse.status).toBe(201);
+    expect(parseJson(createResponse)).toEqual({
+      index: {
+        id: "repo-index-a",
+        workspaceId: "workspace-a",
+        repositoryUrl: "https://example.com/org/repo.git",
+        requestedRef: "main",
+        mode: "safe",
+        stage: "requested",
+        requestedAt: "2026-08-20T12:00:00.000Z",
+        updatedAt: "2026-08-20T12:00:00.000Z",
+        actor: {
+          agentId: "codex",
+          tool: "mcp",
+        },
+      },
+    });
+
+    const listResponse = await request(handleRequest, "/workspaces/workspace-a/repository-indexes");
+    expect(listResponse.status).toBe(200);
+    expect(parseJson(listResponse)).toEqual({
+      indexes: [
+        {
+          id: "repo-index-a",
+          workspaceId: "workspace-a",
+          repositoryUrl: "https://example.com/org/repo.git",
+          requestedRef: "main",
+          mode: "safe",
+          stage: "requested",
+          requestedAt: "2026-08-20T12:00:00.000Z",
+          updatedAt: "2026-08-20T12:00:00.000Z",
+          actor: {
+            agentId: "codex",
+            tool: "mcp",
+          },
+        },
+      ],
+    });
+
+    const getResponse = await request(handleRequest, "/workspaces/workspace-a/repository-indexes/repo-index-a");
+    expect(getResponse.status).toBe(200);
+    expect(parseJson(getResponse)).toEqual({
+      index: {
+        id: "repo-index-a",
+        workspaceId: "workspace-a",
+        repositoryUrl: "https://example.com/org/repo.git",
+        requestedRef: "main",
+        mode: "safe",
+        stage: "requested",
+        requestedAt: "2026-08-20T12:00:00.000Z",
+        updatedAt: "2026-08-20T12:00:00.000Z",
+        actor: {
+          agentId: "codex",
+          tool: "mcp",
+        },
+      },
+    });
+  });
+
+  it("executes a repository index and searches it through REST", async () => {
+    await createWorkspace();
+    const startResponse = await postJson("/workspaces/workspace-a/repository-indexes", {
+      index: {
+        id: "repo-index-a",
+        repositoryUrl: "/fixtures/repo",
+        requestedRef: "main",
+        mode: "safe",
+        requestedAt: "2026-08-20T12:00:00.000Z",
+        actor: {
+          agentId: "codex",
+          tool: "mcp",
+        },
+      },
+    });
+    expect(startResponse.status).toBe(201);
+
+    const executeResponse = await postJson("/workspaces/workspace-a/repository-indexes/repo-index-a/execute", {});
+    expect(executeResponse.status).toBe(200);
+    expect(parseJson(executeResponse)).toEqual({
+      index: expect.objectContaining({
+        id: "repo-index-a",
+        stage: "completed",
+        resolvedCommit: expect.stringMatching(/^[0-9a-f]{40}$/),
+        stats: {
+          fileCount: 3,
+          chunkCount: 2,
+          indexedBytes: 208,
+        },
+      }),
+    });
+
+    const searchResponse = await request(
+      handleRequest,
+      "/workspaces/workspace-a/repository-indexes/repo-index-a/search?query=single%20source%20truth&limit=5",
+    );
+    expect(searchResponse.status).toBe(200);
+    expect(parseJson(searchResponse)).toEqual({
+      indexId: "repo-index-a",
+      query: "single source truth",
+      hits: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "chunk",
+          filePath: "docs/architecture.md",
+          sourceKind: "documentation",
+        }),
+      ]),
+    });
+  });
+
+  it("rejects action routes with unexpected extra path segments", async () => {
+    await createWorkspace();
+    const startResponse = await postJson("/workspaces/workspace-a/repository-indexes", {
+      index: {
+        id: "repo-index-a",
+        repositoryUrl: "/fixtures/repo",
+        requestedRef: "main",
+        mode: "safe",
+        requestedAt: "2026-08-20T12:00:00.000Z",
+        actor: {
+          agentId: "codex",
+          tool: "mcp",
+        },
+      },
+    });
+    expect(startResponse.status).toBe(201);
+
+    const response = await postJson("/workspaces/workspace-a/repository-indexes/repo-index-a/execute/extra", {});
+
+    expect(response.status).toBe(404);
+    expect(parseJson(response)).toEqual({
+      error: {
+        code: "ROUTE_NOT_FOUND",
+        message: "Unknown route: POST /workspaces/workspace-a/repository-indexes/repo-index-a/execute/extra",
+      },
+    });
+  });
+
+  it("returns a stable 400 for malformed JSON bodies", async () => {
+    const response = await request(handleRequest, "/workspaces", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: Buffer.from('{"workspace":', "utf8"),
+    });
+
+    expect(response.status).toBe(400);
+    expect(parseJson(response)).toEqual({
+      error: {
+        code: "INVALID_JSON",
+        message: "Request body must be valid JSON",
       },
     });
   });
@@ -87,7 +256,7 @@ describe("api server", () => {
     });
 
     expect(response.status).toBe(201);
-    expect(await response.json()).toEqual({
+    expect(parseJson(response)).toEqual({
       feedbackEvents: [
         {
           id: "feedback-a",
@@ -98,8 +267,8 @@ describe("api server", () => {
       ],
     });
 
-    const graphResponse = await fetch(`${baseUrl}/workspaces/workspace-a/graph`);
-    expect(await graphResponse.json()).toEqual({ graph: { nodes: [], edges: [] } });
+    const graphResponse = await request(handleRequest, "/workspaces/workspace-a/graph");
+    expect(parseJson(graphResponse)).toEqual({ graph: { nodes: [], edges: [] } });
   });
 
   it("creates projections over existing graph ids", async () => {
@@ -114,7 +283,7 @@ describe("api server", () => {
     });
 
     expect(response.status).toBe(201);
-    expect(await response.json()).toEqual({
+    expect(parseJson(response)).toEqual({
       projection: {
         id: "projection-a",
         name: "Overview",
@@ -141,7 +310,7 @@ describe("api server", () => {
     });
 
     expect(response.status).toBe(201);
-    expect(await response.json()).toEqual({
+    expect(parseJson(response)).toEqual({
       assignments: [
         {
           id: "assignment-a",
@@ -150,6 +319,138 @@ describe("api server", () => {
           categoryId: "confirmed",
           status: "active",
           provenance: "human",
+        },
+      ],
+    });
+  });
+
+  it("stores concept embeddings and lists similar concepts through REST", async () => {
+    await createWorkspaceWithNode();
+
+    await postJson("/workspaces/workspace-a/commands", {
+      commands: [
+        {
+          id: "cmd-b",
+          type: "node.create",
+          payload: { node: { id: "node-b", label: "Beta", notes: "near alpha", type: "concept" } },
+        },
+        {
+          id: "cmd-c",
+          type: "node.create",
+          payload: { node: { id: "node-c", label: "Gamma", notes: "far alpha", type: "concept" } },
+        },
+      ],
+    });
+
+    const upsertResponse = await postJson("/workspaces/workspace-a/concepts/node-a/embedding", {
+      embedding: {
+        model: "nomic-embed-text",
+        values: [1, 0],
+        updatedAt: "2026-08-19T22:20:00.000Z",
+      },
+    });
+    expect(upsertResponse.status).toBe(201);
+
+    await postJson("/workspaces/workspace-a/concepts/node-b/embedding", {
+      embedding: {
+        model: "nomic-embed-text",
+        values: [0.9, 0.1],
+        updatedAt: "2026-08-19T22:20:00.000Z",
+      },
+    });
+    await postJson("/workspaces/workspace-a/concepts/node-c/embedding", {
+      embedding: {
+        model: "nomic-embed-text",
+        values: [0, 1],
+        updatedAt: "2026-08-19T22:20:00.000Z",
+      },
+    });
+
+    const similarResponse = await request(
+      handleRequest,
+      "/workspaces/workspace-a/concepts/node-a/similar?model=nomic-embed-text&limit=2&minScore=0",
+    );
+    expect(similarResponse.status).toBe(200);
+    expect(parseJson(similarResponse)).toEqual({
+      sourceNodeId: "node-a",
+      model: "nomic-embed-text",
+      matches: [
+        {
+          nodeId: "node-b",
+          label: "Beta",
+          score: expect.any(Number),
+          updatedAt: "2026-08-19T22:20:00.000Z",
+        },
+        {
+          nodeId: "node-c",
+          label: "Gamma",
+          score: expect.any(Number),
+          updatedAt: "2026-08-19T22:20:00.000Z",
+        },
+      ],
+    });
+  });
+
+  it("refreshes and backfills concept embeddings through REST", async () => {
+    await createWorkspaceWithNode();
+
+    await postJson("/workspaces/workspace-a/commands", {
+      commands: [
+        {
+          id: "cmd-b",
+          type: "node.create",
+          payload: { node: { id: "node-b", label: "Beta", notes: "near alpha", type: "concept" } },
+        },
+      ],
+    });
+
+    const refreshResponse = await postJson("/workspaces/workspace-a/concepts/node-a/embedding-refresh", {
+      model: "test:nomic-embed-text",
+    });
+    expect(refreshResponse.status).toBe(200);
+    expect(parseJson(refreshResponse)).toEqual({
+      embedding: {
+        workspaceId: "workspace-a",
+        nodeId: "node-a",
+        model: "test:nomic-embed-text",
+        dimensions: 2,
+        contentDigest: expect.any(String),
+        updatedAt: expect.any(String),
+      },
+      provider: "test",
+      status: "refreshed",
+    });
+
+    const backfillResponse = await postJson("/workspaces/workspace-a/concept-embeddings/backfill", {
+      model: "test:nomic-embed-text",
+    });
+    expect(backfillResponse.status).toBe(200);
+    expect(parseJson(backfillResponse)).toEqual({
+      workspaceId: "workspace-a",
+      model: "test:nomic-embed-text",
+      provider: "test",
+      summary: {
+        totalConcepts: 2,
+        selectedConcepts: 2,
+        refreshed: 1,
+        unchanged: 1,
+      },
+      results: [
+        {
+          nodeId: "node-a",
+          label: "Alpha",
+          status: "unchanged",
+          dimensions: 2,
+          contentDigest: expect.any(String),
+          updatedAt: expect.any(String),
+        },
+        {
+          nodeId: "node-b",
+          label: "Beta",
+          status: "refreshed",
+          dimensions: 2,
+          contentDigest: expect.any(String),
+          updatedAt: expect.any(String),
         },
       ],
     });
@@ -169,7 +470,7 @@ describe("api server", () => {
     });
 
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({
+    expect(parseJson(response)).toEqual({
       error: {
         code: "GraphValidationError",
         message: "Edge edge-a references missing source node: missing",
@@ -200,7 +501,7 @@ describe("api server", () => {
 
     const approveResponse = await postJson("/workspaces/workspace-a/proposals/proposal-a/approve", {});
     expect(approveResponse.status).toBe(200);
-    expect(await approveResponse.json()).toEqual({
+    expect(parseJson(approveResponse)).toEqual({
       proposal: {
         id: "proposal-a",
         createdAt: "2026-05-13T21:02:00.000Z",
@@ -219,7 +520,7 @@ describe("api server", () => {
 
     const applyResponse = await postJson("/workspaces/workspace-a/proposals/proposal-a/apply", {});
     expect(applyResponse.status).toBe(200);
-    expect((await applyResponse.json()) as unknown).toMatchObject({
+    expect(parseJson(applyResponse) as unknown).toMatchObject({
       graph: {
         nodes: [{ id: "node-a", label: "Alpha", type: "concept" }],
         edges: [],
@@ -231,46 +532,13 @@ describe("api server", () => {
     });
   });
 
-  it("creates and lists snapshots from a projection", async () => {
-    await createWorkspaceWithNode();
-    const projectionResponse = await postJson("/workspaces/workspace-a/projections", {
-      input: {
-        id: "projection-a",
-        name: "Overview",
-        maxNodes: 1,
-      },
-    });
-    expect(projectionResponse.status).toBe(201);
-
-    const snapshotResponse = await postJson("/workspaces/workspace-a/snapshots", {
-      snapshot: {
-        id: "snapshot-a",
-        createdAt: "2026-05-13T21:05:00.000Z",
-        projectionId: "projection-a",
-      },
-    });
-    expect(snapshotResponse.status).toBe(201);
-    expect((await snapshotResponse.json()) as unknown).toMatchObject({
-      snapshot: {
-        id: "snapshot-a",
-        projectionId: "projection-a",
-        graph: {
-          nodes: [{ id: "node-a", label: "Alpha", type: "concept" }],
-        },
-      },
-    });
-
-    const listResponse = await fetch(`${baseUrl}/workspaces/workspace-a/snapshots`);
-    expect(listResponse.status).toBe(200);
-    expect(((await listResponse.json()) as { snapshots: unknown[] }).snapshots).toHaveLength(1);
-  });
-
   it("exposes scan profiles and starts an auditable scan", async () => {
     await createWorkspace();
+    await createCompletedRepositoryIndex();
 
-    const profilesResponse = await fetch(`${baseUrl}/workspaces/workspace-a/scan-profiles`);
+    const profilesResponse = await request(handleRequest, "/workspaces/workspace-a/scan-profiles");
     expect(profilesResponse.status).toBe(200);
-    expect(((await profilesResponse.json()) as { profiles: Array<{ id: string }> }).profiles.map((profile) => profile.id)).toEqual([
+    expect((parseJson<{ profiles: Array<{ id: string }> }>(profilesResponse).profiles.map((profile) => profile.id))).toEqual([
       "documentation-conflicts",
       "code-quality-review",
     ]);
@@ -280,22 +548,54 @@ describe("api server", () => {
         id: "scan-a",
         profileId: "documentation-conflicts",
         profileVersion: 1,
-        repository: { root: "/repo", branch: "main", revision: "abc123" },
+        repositoryIndexId: "repo-index-scan",
         actor: { agentId: "agent-a", tool: "codex" },
         startedAt: "2026-07-17T10:00:00.000Z",
       },
     });
 
     expect(startResponse.status).toBe(201);
-    expect((await startResponse.json()) as unknown).toMatchObject({ run: { id: "scan-a", status: "in_progress" } });
+    expect(parseJson(startResponse) as unknown).toMatchObject({
+      run: {
+        id: "scan-a",
+        status: "in_progress",
+        repository: {
+          repositoryIndexId: "repo-index-scan",
+          root: "index:repo-index-scan",
+          branch: "main",
+        },
+        coverage: {
+          included: ["docs/architecture.md"],
+        },
+      },
+    });
+  });
+
+  it("returns repository evidence candidates through REST", async () => {
+    await createWorkspace();
+    await createCompletedRepositoryIndex();
+
+    const response = await request(
+      handleRequest,
+      "/workspaces/workspace-a/repository-indexes/repo-index-scan/evidence-candidates?profileId=documentation-conflicts&profileVersion=1&criterionId=broken-references",
+    );
+
+    expect(response.status).toBe(200);
+    expect(parseJson(response)).toEqual({
+      indexId: "repo-index-scan",
+      profileId: "documentation-conflicts",
+      profileVersion: 1,
+      criterionId: "broken-references",
+      candidates: [],
+    });
   });
 
   it("lists workspaces and round-trips a browser ZIP bundle", async () => {
     await createWorkspace();
 
-    const listResponse = await fetch(`${baseUrl}/workspaces`);
+    const listResponse = await request(handleRequest, "/workspaces");
     expect(listResponse.status).toBe(200);
-    expect(await listResponse.json()).toEqual({
+    expect(parseJson(listResponse)).toEqual({
       workspaces: [{ id: "workspace-a", name: "Alpha", createdAt: "2026-05-13T21:00:00.000Z" }],
     });
 
@@ -303,20 +603,20 @@ describe("api server", () => {
       exportedAt: "2026-07-17T12:00:00.000Z",
     });
     expect(exportResponse.status).toBe(200);
-    expect(exportResponse.headers.get("content-type")).toBe("application/zip");
-    expect(exportResponse.headers.get("content-disposition")).toBe('attachment; filename="workspace-a.hivemap.zip"');
-    const zip = await exportResponse.arrayBuffer();
+    expect(exportResponse.headers["content-type"]).toBe("application/zip");
+    expect(exportResponse.headers["content-disposition"]).toBe('attachment; filename="workspace-a.hivemap.zip"');
+    const zip = exportResponse.body;
     expect(new Uint8Array(zip).slice(0, 2)).toEqual(new Uint8Array([0x50, 0x4b]));
 
-    store.deleteWorkspace("workspace-a");
-    const importResponse = await fetch(`${baseUrl}/workspace-import-bundles?mode=new`, {
+    await store.deleteWorkspace("workspace-a");
+    const importResponse = await request(handleRequest, "/workspace-import-bundles?mode=new", {
       method: "POST",
       headers: { "content-type": "application/zip" },
       body: zip,
     });
     expect(importResponse.status).toBe(201);
-    expect((await importResponse.json()) as unknown).toMatchObject({ workspace: { id: "workspace-a", name: "Alpha" } });
-    expect(store.loadWorkspaceState("workspace-a").workspace.name).toBe("Alpha");
+    expect(parseJson(importResponse) as unknown).toMatchObject({ workspace: { id: "workspace-a", name: "Alpha" } });
+    expect((await store.loadWorkspaceState("workspace-a")).workspace.name).toBe("Alpha");
   });
 });
 
@@ -345,10 +645,184 @@ async function createWorkspaceWithNode(): Promise<void> {
   expect(response.status).toBe(200);
 }
 
+async function createCompletedRepositoryIndex(): Promise<void> {
+  const startResponse = await postJson("/workspaces/workspace-a/repository-indexes", {
+    index: {
+      id: "repo-index-scan",
+      repositoryUrl: "/fixtures/repo",
+      requestedRef: "main",
+      mode: "safe",
+      requestedAt: "2026-08-20T12:00:00.000Z",
+      actor: {
+        agentId: "codex",
+        tool: "mcp",
+      },
+    },
+  });
+  expect(startResponse.status).toBe(201);
+
+  const executeResponse = await postJson("/workspaces/workspace-a/repository-indexes/repo-index-scan/execute", {});
+  expect(executeResponse.status).toBe(200);
+}
+
+function createTestEmbeddingProvider(): EmbeddingProvider {
+  return {
+    id: "test",
+    async embed(request) {
+      return request.inputs.map((input) => (input.includes("Alpha") ? [1, 0] : [0.9, 0.1]));
+    },
+  };
+}
+
+function createTestRepositoryIndexExecutor(): RepositoryIndexExecutor {
+  return async ({ workspaceId, indexId }) => ({
+    resolvedCommit: "0123456789abcdef0123456789abcdef01234567",
+    files: [
+      {
+        workspaceId,
+        indexId,
+        path: "docs/architecture.md",
+        language: "markdown",
+        sourceKind: "documentation",
+        contentHash: "hash-doc",
+        byteSize: 96,
+      },
+      {
+        workspaceId,
+        indexId,
+        path: "src/index.ts",
+        language: "typescript",
+        sourceKind: "code",
+        contentHash: "hash-src",
+        byteSize: 82,
+      },
+      {
+        workspaceId,
+        indexId,
+        path: "package.json",
+        language: "json",
+        sourceKind: "config",
+        contentHash: "hash-package",
+        byteSize: 30,
+      },
+    ],
+    chunks: [
+      {
+        workspaceId,
+        indexId,
+        id: "chunk-doc",
+        filePath: "docs/architecture.md",
+        language: "markdown",
+        sourceKind: "documentation",
+        startLine: 1,
+        endLine: 3,
+        text: "The system keeps a single source of truth for ownership and concept evidence.",
+        contentHash: "chunk-hash-doc",
+      },
+      {
+        workspaceId,
+        indexId,
+        id: "chunk-src",
+        filePath: "src/index.ts",
+        language: "typescript",
+        sourceKind: "code",
+        startLine: 1,
+        endLine: 3,
+        text: "export function describeOwnership() { return 'ownership is tracked in one place'; }",
+        contentHash: "chunk-hash-src",
+      },
+    ],
+    stats: {
+      fileCount: 3,
+      chunkCount: 2,
+      indexedBytes: 208,
+    },
+  });
+}
+
 async function postJson(pathname: string, body: unknown): Promise<Response> {
-  return fetch(`${baseUrl}${pathname}`, {
+  return request(handleRequest, pathname, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+type Response = {
+  status: number;
+  headers: IncomingHttpHeaders;
+  body: Buffer;
+};
+
+async function request(
+  handleRequest: ApiRequestHandler,
+  pathname: string,
+  init: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: Buffer | string;
+  } = {},
+): Promise<Response> {
+  const request = new MockRequest(init.method ?? "GET", pathname, init.body);
+  const response = new MockResponse();
+  handleRequest(request as never, response as never);
+  await response.done;
+  return { status: response.statusCode, headers: response.headers, body: response.body };
+}
+
+function parseJson<T>(response: Response): T {
+  return JSON.parse(response.body.toString("utf8")) as T;
+}
+
+class MockRequest extends Readable {
+  readonly method: string;
+  readonly url: string;
+  private bodySent = false;
+  private readonly body: Buffer | string | undefined;
+
+  constructor(method: string, url: string, body?: Buffer | string) {
+    super();
+    this.method = method;
+    this.url = url;
+    this.body = body;
+  }
+
+  override _read(): void {
+    if (this.bodySent) {
+      return;
+    }
+    this.bodySent = true;
+    if (this.body !== undefined) {
+      this.push(this.body);
+    }
+    this.push(null);
+  }
+}
+
+class MockResponse {
+  statusCode = 200;
+  headers: IncomingHttpHeaders = {};
+  private readonly chunks: Buffer[] = [];
+  private resolveDone!: () => void;
+  readonly done = new Promise<void>((resolve) => {
+    this.resolveDone = resolve;
+  });
+
+  writeHead(statusCode: number, headers: IncomingHttpHeaders): ServerResponse {
+    this.statusCode = statusCode;
+    this.headers = headers;
+    return this as never;
+  }
+
+  end(chunk?: Buffer | string): this {
+    if (chunk !== undefined) {
+      this.chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    this.resolveDone();
+    return this;
+  }
+
+  get body(): Buffer {
+    return Buffer.concat(this.chunks);
+  }
 }

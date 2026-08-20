@@ -1,13 +1,12 @@
-import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 
 import { DEFAULT_CAPTURE_POLICY } from "@hivemap/capture";
 import { INITIAL_CATEGORY_CATALOG } from "@hivemap/categories";
+import type { SemanticGraph } from "@hivemap/graph-core";
 import { createOverviewProjection } from "@hivemap/projections";
 import { INITIAL_SCAN_PROFILES } from "@hivemap/scans";
 
-import { STORAGE_SCHEMA_VERSION, SqliteHiveMapStore, StorageError, type WorkspaceState } from "./index.js";
-import type { SemanticGraph } from "@hivemap/graph-core";
+import { InMemoryHiveMapStore, StorageError, type WorkspaceState } from "./index.js";
 
 const graph: SemanticGraph = {
   nodes: [
@@ -86,77 +85,44 @@ function createState(): WorkspaceState {
       },
     ],
     projections: [projection],
-    snapshots: [
-      {
-        id: "snapshot-a",
-        createdAt: "2026-05-13T21:03:00.000Z",
-        projectionId: "projection-a",
-        graph: {
-          nodes: [...graph.nodes],
-          edges: [...graph.edges],
-        },
-        projection,
-      },
-    ],
     scanProfiles: INITIAL_SCAN_PROFILES,
     scanRuns: [],
   };
 }
 
-describe("SqliteHiveMapStore", () => {
-  it("initializes schema version 2", () => {
-    const store = new SqliteHiveMapStore(new DatabaseSync(":memory:"));
-    store.initialize();
-
-    const state = store.loadWorkspaceState;
-    expect(STORAGE_SCHEMA_VERSION).toBe("3");
-    expect(state).toBeTypeOf("function");
-
-    store.close();
-  });
-
-  it("migrates schema version 1 and seeds scan profiles for existing workspaces", () => {
-    const database = new DatabaseSync(":memory:");
-    database.exec(`
-      CREATE TABLE schema_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      INSERT INTO schema_metadata (key, value) VALUES ('schema_version', '1');
-      CREATE TABLE workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL);
-      INSERT INTO workspaces (id, name, created_at) VALUES ('legacy', 'Legacy', '2026-05-13T21:00:00.000Z');
-    `);
-    const store = new SqliteHiveMapStore(database);
-
-    store.initialize();
-
-    expect((database.prepare("SELECT value FROM schema_metadata WHERE key = 'schema_version'").get() as { value: string }).value).toBe("3");
-    expect((database.prepare("SELECT COUNT(*) AS count FROM scan_profiles WHERE workspace_id = 'legacy'").get() as { count: number }).count).toBe(2);
-    expect(
-      database.prepare("SELECT slug, archived, updated_at FROM workspaces WHERE id = 'legacy'").get() as {
-        slug: string | null;
-        archived: number;
-        updated_at: string | null;
-      },
-    ).toEqual({ slug: null, archived: 0, updated_at: null });
-    store.close();
-  });
-
-  it("persists and loads workspace state", () => {
-    const store = new SqliteHiveMapStore(new DatabaseSync(":memory:"));
-    store.initialize();
+describe("InMemoryHiveMapStore", () => {
+  it("persists and loads workspace state", async () => {
+    const store = new InMemoryHiveMapStore();
+    await store.initialize();
 
     const state = createState();
-    store.saveWorkspaceState(state);
+    await store.saveWorkspaceState(state);
 
-    expect(store.loadWorkspaceState("workspace-a")).toEqual(state);
+    await expect(store.loadWorkspaceState("workspace-a")).resolves.toEqual(state);
 
-    store.close();
+    await store.close();
   });
 
-  it("lists workspace records without loading their graphs", () => {
-    const store = new SqliteHiveMapStore(new DatabaseSync(":memory:"));
-    store.initialize();
-    store.saveWorkspaceState(createState());
+  it("returns cloned state instead of exposing internal mutable references", async () => {
+    const store = new InMemoryHiveMapStore();
+    await store.initialize();
 
-    expect(store.listWorkspaces()).toEqual([
+    const state = createState();
+    await store.saveWorkspaceState(state);
+    state.workspace.name = "Mutated Outside";
+    state.graph.nodes[0]!.label = "Changed Outside";
+
+    const loaded = await store.loadWorkspaceState("workspace-a");
+    expect(loaded.workspace.name).toBe("Alpha Workspace");
+    expect(loaded.graph.nodes[0]).toEqual({ id: "node-a", label: "Alpha", type: "concept" });
+  });
+
+  it("lists workspace records without loading their graphs", async () => {
+    const store = new InMemoryHiveMapStore();
+    await store.initialize();
+    await store.saveWorkspaceState(createState());
+
+    await expect(store.listWorkspaces()).resolves.toEqual([
       {
         id: "workspace-a",
         slug: "alpha-workspace",
@@ -165,32 +131,28 @@ describe("SqliteHiveMapStore", () => {
         updatedAt: "2026-05-13T21:00:00.000Z",
       },
     ]);
-
-    store.close();
   });
 
-  it("returns one workspace record without loading its graph", () => {
-    const store = new SqliteHiveMapStore(new DatabaseSync(":memory:"));
-    store.initialize();
-    store.saveWorkspaceState(createState());
+  it("returns one workspace record without loading its graph", async () => {
+    const store = new InMemoryHiveMapStore();
+    await store.initialize();
+    await store.saveWorkspaceState(createState());
 
-    expect(store.getWorkspaceRecord("workspace-a")).toEqual({
+    await expect(store.getWorkspaceRecord("workspace-a")).resolves.toEqual({
       id: "workspace-a",
       slug: "alpha-workspace",
       name: "Alpha Workspace",
       createdAt: "2026-05-13T21:00:00.000Z",
       updatedAt: "2026-05-13T21:00:00.000Z",
     });
-
-    store.close();
   });
 
-  it("replaces a catalog after assignments already reference it", () => {
-    const store = new SqliteHiveMapStore(new DatabaseSync(":memory:"));
-    store.initialize();
+  it("replaces a catalog after assignments already reference it", async () => {
+    const store = new InMemoryHiveMapStore();
+    await store.initialize();
 
     const state = createState();
-    store.saveWorkspaceState(state);
+    await store.saveWorkspaceState(state);
     const nextState: WorkspaceState = {
       ...state,
       categoryAssignments: [
@@ -206,57 +168,249 @@ describe("SqliteHiveMapStore", () => {
       ],
     };
 
-    expect(() => store.saveWorkspaceState(nextState)).not.toThrow();
-    expect(store.loadWorkspaceState("workspace-a").categoryAssignments).toEqual(nextState.categoryAssignments);
-
-    store.close();
+    await expect(store.saveWorkspaceState(nextState)).resolves.toBeUndefined();
+    await expect(store.loadWorkspaceState("workspace-a")).resolves.toMatchObject({
+      categoryAssignments: nextState.categoryAssignments,
+    });
   });
 
-  it("fails when loading a missing workspace", () => {
-    const store = new SqliteHiveMapStore(new DatabaseSync(":memory:"));
-    store.initialize();
+  it("fails when loading a missing workspace", async () => {
+    const store = new InMemoryHiveMapStore();
+    await store.initialize();
 
-    expect(() => store.loadWorkspaceState("missing")).toThrow(StorageError);
-
-    store.close();
+    await expect(store.loadWorkspaceState("missing")).rejects.toThrow(StorageError);
   });
 
-  it("reports workspace existence and deletes explicitly", () => {
-    const store = new SqliteHiveMapStore(new DatabaseSync(":memory:"));
-    store.initialize();
-    store.saveWorkspaceState(createState());
+  it("reports workspace existence and deletes explicitly", async () => {
+    const store = new InMemoryHiveMapStore();
+    await store.initialize();
+    await store.saveWorkspaceState(createState());
 
-    expect(store.workspaceExists("workspace-a")).toBe(true);
-    store.deleteWorkspace("workspace-a");
-    expect(store.workspaceExists("workspace-a")).toBe(false);
-    expect(() => store.deleteWorkspace("workspace-a")).toThrow(StorageError);
-
-    store.close();
+    await expect(store.workspaceExists("workspace-a")).resolves.toBe(true);
+    await store.deleteWorkspace("workspace-a");
+    await expect(store.workspaceExists("workspace-a")).resolves.toBe(false);
+    await expect(store.deleteWorkspace("workspace-a")).rejects.toThrow(StorageError);
   });
 
-  it("atomically replaces a workspace even when its graph id changes", () => {
-    const store = new SqliteHiveMapStore(new DatabaseSync(":memory:"));
-    store.initialize();
+  it("persists repository index job records outside canonical workspace state", async () => {
+    const store = new InMemoryHiveMapStore();
+    await store.initialize();
+    await store.saveWorkspaceState(createState());
+
+    await store.upsertRepositoryIndex({
+      id: "repo-index-a",
+      workspaceId: "workspace-a",
+      repositoryUrl: "https://example.com/org/repo.git",
+      requestedRef: "main",
+      mode: "safe",
+      stage: "requested",
+      requestedAt: "2026-08-20T12:00:00.000Z",
+      updatedAt: "2026-08-20T12:00:00.000Z",
+      actor: {
+        agentId: "codex",
+        tool: "mcp",
+      },
+    });
+
+    await expect(store.getRepositoryIndex("workspace-a", "repo-index-a")).resolves.toEqual({
+      id: "repo-index-a",
+      workspaceId: "workspace-a",
+      repositoryUrl: "https://example.com/org/repo.git",
+      requestedRef: "main",
+      mode: "safe",
+      stage: "requested",
+      requestedAt: "2026-08-20T12:00:00.000Z",
+      updatedAt: "2026-08-20T12:00:00.000Z",
+      actor: {
+        agentId: "codex",
+        tool: "mcp",
+      },
+    });
+    await expect(store.listRepositoryIndexes("workspace-a")).resolves.toHaveLength(1);
+    await expect(store.loadWorkspaceState("workspace-a")).resolves.toMatchObject({
+      workspace: { id: "workspace-a" },
+      scanRuns: [],
+    });
+  });
+
+  it("stores repository index files and chunks and searches them", async () => {
+    const store = new InMemoryHiveMapStore();
+    await store.initialize();
+    await store.saveWorkspaceState(createState());
+    await store.upsertRepositoryIndex({
+      id: "repo-index-a",
+      workspaceId: "workspace-a",
+      repositoryUrl: "/tmp/repo",
+      mode: "safe",
+      stage: "completed",
+      requestedAt: "2026-08-20T12:00:00.000Z",
+      updatedAt: "2026-08-20T12:05:00.000Z",
+      completedAt: "2026-08-20T12:05:00.000Z",
+      actor: {
+        agentId: "codex",
+        tool: "mcp",
+      },
+      stats: {
+        fileCount: 1,
+        chunkCount: 1,
+        indexedBytes: 128,
+      },
+    });
+
+    await store.replaceRepositoryIndexContents(
+      "workspace-a",
+      "repo-index-a",
+      [
+        {
+          workspaceId: "workspace-a",
+          indexId: "repo-index-a",
+          path: "docs/architecture.md",
+          language: "markdown",
+          sourceKind: "documentation",
+          contentHash: "hash-a",
+          byteSize: 128,
+        },
+      ],
+      [
+        {
+          workspaceId: "workspace-a",
+          indexId: "repo-index-a",
+          id: "chunk-a",
+          filePath: "docs/architecture.md",
+          language: "markdown",
+          sourceKind: "documentation",
+          startLine: 1,
+          endLine: 3,
+          text: "The system keeps a single source of truth for ownership.",
+          contentHash: "chunk-hash-a",
+        },
+      ],
+    );
+
+    await expect(store.searchRepositoryIndex("workspace-a", "repo-index-a", "single source truth", 5)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "chunk",
+          filePath: "docs/architecture.md",
+          sourceKind: "documentation",
+        }),
+      ]),
+    );
+
+    await store.replaceRepositoryIndexContents(
+      "workspace-a",
+      "repo-index-a",
+      [
+        {
+          workspaceId: "workspace-a",
+          indexId: "repo-index-a",
+          path: "docs/replacement.md",
+          language: "markdown",
+          sourceKind: "documentation",
+          contentHash: "hash-b",
+          byteSize: 96,
+        },
+      ],
+      [
+        {
+          workspaceId: "workspace-a",
+          indexId: "repo-index-a",
+          id: "chunk-b",
+          filePath: "docs/replacement.md",
+          language: "markdown",
+          sourceKind: "documentation",
+          startLine: 1,
+          endLine: 2,
+          text: "Replacement evidence only.",
+          contentHash: "chunk-hash-b",
+        },
+      ],
+    );
+
+    await expect(store.searchRepositoryIndex("workspace-a", "repo-index-a", "single source truth", 5)).resolves.toEqual([]);
+    await expect(store.searchRepositoryIndex("workspace-a", "repo-index-a", "Replacement evidence", 5)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "chunk",
+          filePath: "docs/replacement.md",
+        }),
+      ]),
+    );
+  });
+
+  it("rejects repository index contents whose ownership does not match the replace target", async () => {
+    const store = new InMemoryHiveMapStore();
+    await store.initialize();
+    await store.saveWorkspaceState(createState());
+    await store.upsertRepositoryIndex({
+      id: "repo-index-a",
+      workspaceId: "workspace-a",
+      repositoryUrl: "/tmp/repo",
+      mode: "safe",
+      stage: "completed",
+      requestedAt: "2026-08-20T12:00:00.000Z",
+      updatedAt: "2026-08-20T12:05:00.000Z",
+      completedAt: "2026-08-20T12:05:00.000Z",
+      actor: {
+        agentId: "codex",
+        tool: "mcp",
+      },
+      stats: {
+        fileCount: 1,
+        chunkCount: 1,
+        indexedBytes: 128,
+      },
+    });
+
+    await expect(
+      store.replaceRepositoryIndexContents(
+        "workspace-a",
+        "repo-index-a",
+        [
+          {
+            workspaceId: "workspace-a",
+            indexId: "repo-index-b",
+            path: "docs/architecture.md",
+            language: "markdown",
+            sourceKind: "documentation",
+            contentHash: "hash-a",
+            byteSize: 128,
+          },
+        ],
+        [],
+      ),
+    ).rejects.toThrow("repository file ownership must match replaceRepositoryIndexContents target");
+  });
+
+  it("atomically replaces a workspace even when its graph id changes", async () => {
+    const store = new InMemoryHiveMapStore();
+    await store.initialize();
     const state = createState();
-    store.saveWorkspaceState(state);
+    await store.saveWorkspaceState(state);
     const replacement: WorkspaceState = {
       ...state,
       workspace: { ...state.workspace, name: "Replacement" },
       graphId: "replacement-graph",
     };
 
-    store.replaceWorkspaceState(replacement);
+    await store.replaceWorkspaceState(replacement);
 
-    expect(store.loadWorkspaceState("workspace-a")).toEqual(replacement);
-    store.close();
+    await expect(store.loadWorkspaceState("workspace-a")).resolves.toEqual(replacement);
   });
 
-  it("rejects invalid workspace state before writing", () => {
-    const store = new SqliteHiveMapStore(new DatabaseSync(":memory:"));
-    store.initialize();
+  it("rejects replacement when the workspace does not exist", async () => {
+    const store = new InMemoryHiveMapStore();
+    await store.initialize();
+
+    await expect(store.replaceWorkspaceState(createState())).rejects.toThrow("Workspace not found for replacement: workspace-a");
+  });
+
+  it("rejects invalid workspace state before writing", async () => {
+    const store = new InMemoryHiveMapStore();
+    await store.initialize();
     const state = createState();
 
-    expect(() =>
+    await expect(
       store.saveWorkspaceState({
         ...state,
         categoryAssignments: [
@@ -270,10 +424,8 @@ describe("SqliteHiveMapStore", () => {
           },
         ],
       }),
-    ).toThrow();
+    ).rejects.toThrow();
 
-    expect(() => store.loadWorkspaceState("workspace-a")).toThrow(StorageError);
-
-    store.close();
+    await expect(store.loadWorkspaceState("workspace-a")).rejects.toThrow(StorageError);
   });
 });
