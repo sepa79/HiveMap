@@ -19,7 +19,7 @@
     "build:apps": "npm run build -w @hivemap/api && npm run build -w @hivemap/mcp && npm run build -w @hivemap/web",
     "dev:api": "npm run build && npm exec -w @hivemap/api -- hivemap-api",
     "dev:web": "npm run dev -w @hivemap/web --",
-    "start:mcp": "npm run build && npm exec -w @hivemap/mcp -- hivemap-mcp",
+    "dev:hiveforge": "bash tools/hiveforge-dev-loop.sh",
     "test": "npm run build:packages && npm run test:workspaces",
     "test:workspaces": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",

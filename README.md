@@ -8,6 +8,10 @@ Repository review is one supported workflow, not the definition of the product. 
 
 The current alpha is intended for local evaluation on real repositories. It is not a hosted multi-user service.
 
+The next implementation track moves HiveMap toward a self-contained Postgres-backed container runtime, validated locally in Docker and then through HiveForge. The repository now includes the Postgres runtime adapter, Postgres-only application entrypoints, focused Postgres integration coverage, and a working single-image local Docker runtime for the API, built web UI, and bundled Postgres.
+
+The intended local experience is one container that runs HiveMap with its bundled dependencies rather than a user-managed database/file-path setup.
+
 ## What You Can Test
 
 - capture the important concepts, questions, decisions, and relationships from an AI conversation;
@@ -34,11 +38,11 @@ npm ci
 npm run verify
 ```
 
-`npm run verify` runs the same tests, typecheck, and build used by CI. Node 22 may print an experimental warning for `node:sqlite`; HiveMap does not suppress it.
+`npm run verify` runs the same tests, typecheck, and build used by CI.
 
 ## Quick Start
 
-HiveMap uses one local SQLite database shared by the REST API and MCP server.
+HiveMap now runs locally against Postgres. You can either use the direct dev flow with an explicit Postgres connection string or the bundled local Docker runtime.
 
 Clone and build:
 
@@ -48,13 +52,12 @@ cd HiveMap
 nvm use
 npm ci
 npm run build
-mkdir -p .hivemap
 ```
 
 Start the API in the first terminal:
 
 ```bash
-npm run dev:api -- --db "$PWD/.hivemap/local.sqlite" --port 8787
+HIVEMAP_POSTGRES_URL='postgres://postgres:postgres@127.0.0.1:5432/hivemap' npm run dev:api -- --port 8787
 ```
 
 Start the web UI in the second terminal:
@@ -65,11 +68,53 @@ npm run dev:web
 
 Open `http://127.0.0.1:5175/`.
 
+If you want one HTTP process to serve both API and built frontend, build the web app first and then start the API:
+
+```bash
+npm run build -w @hivemap/web
+HIVEMAP_POSTGRES_URL='postgres://postgres:postgres@127.0.0.1:5432/hivemap' npm run dev:api -- --port 8787
+```
+
+With `apps/web/dist` present, the API now auto-serves that build on the same port.
+
+A working single-image Docker path exists as well:
+
+```bash
+docker compose up --build
+```
+
+That path bundles Postgres with the API and built web assets in one container, with optional persistence mounted at `./.local/hivemap-postgres`. Local Docker smoke coverage has been exercised for workspace create, graph mutation, projection read/write, and ZIP download/import. Plugin bundling and local model-serving dependencies remain a follow-up inside the same container track.
+
+For the current Forgejo-backed development loop on `192.168.88.50`, the repo also carries:
+
+```bash
+npm run dev:hiveforge
+```
+
+That command snapshots the current working tree into a temporary clone, force-pushes the stable Forgejo branch `hivemap-dev-loop`, and pushes both a moving `dev-latest` image tag and an immutable timestamped tag to the local registry. It prepares the exact `gitRef` and image values needed for the next HiveForge deploy/update step on the shared `swarm` environment.
+
+For the `docker-swarm` profile, set both:
+
+```bash
+HIVEMAP_DATA_BIND_SOURCE=/opt/pockethive-data/hivemap/data
+HIVEMAP_SWARM_PLACEMENT_CONSTRAINT='node.hostname == docker-swarm-mgr-1'
+```
+
+The bind source is the exact local Postgres path on the swarm node. The placement constraint is required because that path is node-local; without it, Swarm can reschedule HiveMap onto a different node and break persistence. This `.50` + `/opt/pockethive-data/hivemap/data` setup is temporary development infrastructure only. The older `HIVEFORGE_BIND_SOURCE_DIR` fallback still works, but it derives a nested `<dir>/state/postgres/data` path and is mainly there for backward compatibility with the first HiveForge slice.
+
 The server binds to `127.0.0.1` intentionally. Do not expose this alpha directly to a network: it has no authentication or authorization layer.
 
-## Connect an Agent Through MCP
+Provider-backed concept embeddings are now available as explicit runtime operations. If you run a local Ollama server, set:
 
-Build HiveMap first, then add a stdio MCP server to your agent configuration. Replace both example paths with absolute paths on your machine:
+```bash
+HIVEMAP_OLLAMA_BASE_URL=http://127.0.0.1:11434
+```
+
+Then use model refs such as `ollama:nomic-embed-text` through REST or MCP for one-node refresh and workspace backfill. These operations are explicit and synchronous in the current slice; graph mutations do not silently regenerate embeddings.
+
+## Legacy Local MCP Adapter
+
+The repo still carries a legacy local stdio MCP adapter for development workflows that explicitly need agent wiring before the hosted/container MCP shape exists. It is transitional and not part of the target local runtime contract. Replace the example path with an absolute path on your machine:
 
 ```json
 {
@@ -78,15 +123,15 @@ Build HiveMap first, then add a stdio MCP server to your agent configuration. Re
       "command": "node",
       "args": [
         "/absolute/path/to/HiveMap/apps/mcp/dist/stdio.js",
-        "--db",
-        "/absolute/path/to/HiveMap/.hivemap/local.sqlite"
+        "--postgres-url",
+        "postgres://postgres:postgres@127.0.0.1:5432/hivemap"
       ]
     }
   }
 }
 ```
 
-Restart or reconnect the agent after changing its MCP configuration. The MCP process and REST API must point to the same SQLite file if you want agent changes to appear in the open UI.
+Restart or reconnect the agent after changing its MCP configuration. The MCP adapter and REST API must point at the same Postgres database if you want agent changes to appear in the open UI.
 
 HiveMap does not scan files by itself. The connected agent reads the target repository, follows the selected HiveMap scan profile, and submits explicit coverage, graph, projection, and finding operations through MCP.
 
@@ -137,6 +182,15 @@ Select the workspace in the UI and click **Export ZIP**. The archive contains th
 
 Send the `.hivemap.zip` to another tester. They can start a clean HiveMap checkout, open the UI, choose whether the import creates a new workspace or explicitly replaces the same workspace, and click **Import ZIP**. Import never silently merges or rewrites workspace IDs.
 
+For terminal-driven imports against a running API, the repo also carries:
+
+```bash
+tools/import-workspace-bundle.sh \
+  --api-base-url http://127.0.0.1:8787 \
+  --mode new \
+  .hivemap/exports/caravanworld-supervised-regional-goal-current-2026-08-05T0010Z.hivemap.zip
+```
+
 Treat exported ZIPs as project data. They may contain repository paths, claims, findings, and evidence references; inspect them before sharing outside the intended group.
 
 ## Verify Documentation Fixes
@@ -172,21 +226,28 @@ GitHub offers a structured **HiveMap alpha test report** issue form with these f
 |---|---|
 | `npm ci` | Install exactly the locked dependencies |
 | `npm run verify` | Run tests, typecheck, and production builds |
-| `npm run dev:api -- --db <path> --port 8787` | Build and start the local REST API |
+| `HIVEMAP_POSTGRES_URL=... npm run dev:api -- --port 8787` | Build and start the local REST API |
 | `npm run dev:web` | Start the UI on `127.0.0.1:5175` |
-| `npm run start:mcp -- --db <path>` | Build and run the MCP server manually |
+| `npm run dev:hiveforge` | Snapshot the current tree to local Forgejo and push dev image tags for HiveForge |
 
-If port 5175 is already occupied, HiveMap fails instead of silently moving to another port. Stop the conflicting process and retry. If the UI is empty after an agent scan, verify that API and MCP use the exact same absolute database path.
+If port 5175 is already occupied, HiveMap fails instead of silently moving to another port. Stop the conflicting process and retry. If the UI is empty after an agent scan, verify that API and MCP use the exact same Postgres database.
+
+If you explicitly need the legacy local MCP adapter, run it directly instead of using a root shortcut:
+
+```bash
+npm run build -w @hivemap/mcp
+npm exec -w @hivemap/mcp -- hivemap-mcp --postgres-url 'postgres://postgres:postgres@127.0.0.1:5432/hivemap'
+```
 
 ## Project Structure
 
 - `apps/api/`: local REST boundary used by the UI;
-- `apps/mcp/`: stdio MCP boundary used by agents;
+- `apps/mcp/`: legacy local stdio MCP adapter kept only as transitional development tooling;
 - `apps/web/`: React/React Flow review UI;
 - `packages/graph-core/`: semantic graph and invariants;
 - `packages/projections/`: overview and deep-dive view derivation;
 - `packages/scans/`: scan profiles, lifecycle, evidence, and comparison;
-- `packages/storage/`: SQLite persistence and portable ZIP bundles;
+- `packages/storage/`: Postgres runtime persistence and portable ZIP bundles;
 - `docs/specs/`: canonical contracts;
 - `docs/ai/`: agent workflows, commands, and review checks;
 - `poc/`: preserved proof-of-concept evidence, not the 1.0 architecture.
@@ -205,5 +266,15 @@ HiveMap is licensed under `GPL-3.0-or-later`, matching PocketHive. See [LICENSE]
 - no silent merge during ZIP import;
 - manual graph editing is emergency tooling, not the primary workflow;
 - semantic graph data is the source of truth; UI maps are projections.
+
+## Next Runtime Direction
+
+Planned next steps for the runtime are:
+
+1. extend the one-container local runtime to include the remaining bundled dependencies such as plugins and local model-serving pieces,
+2. integrate that runtime shape with HiveForge,
+3. revisit hosted MCP after the storage/runtime/deployment base is stable.
+
+Embeddings and vector-assisted features are intentionally deferred from that base runtime track.
 
 CI runs a dependency audit and full verification on every pull request and every push to `main` using Node.js 22.

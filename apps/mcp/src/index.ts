@@ -1,6 +1,9 @@
 import type {
   McpToolName,
   McpToolRequestMap,
+  BackfillConceptEmbeddingsResponse,
+  ExecuteRepositoryIndexResponse,
+  GetScanProfileOverlayHelpResponse,
   GetWorkspaceSummaryResponse,
   ListWorkspaceSummariesResponse,
   ResolveWorkspaceResponse,
@@ -11,8 +14,13 @@ import type {
   CreateProposalResponse,
   CreateWorkspaceResponse,
   GetGraphResponse,
+  GetRepositoryIndexResponse,
+  ListRepositoryEvidenceCandidatesResponse,
   GetProjectionResponse,
+  ListSimilarConceptsResponse,
   ListFeedbackResponse,
+  ListRepositoryIndexesResponse,
+  SearchRepositoryIndexResponse,
   CompareScansResponse,
   CompleteScanResponse,
   CreateScanFindingResponse,
@@ -21,8 +29,10 @@ import type {
   ListScanProfilesResponse,
   ListScanRunsResponse,
   RecordScanCoverageResponse,
+  RefreshConceptEmbeddingResponse,
   StartScanResponse,
   UpdateFindingResponse,
+  UpsertConceptEmbeddingResponse,
 } from "@hivemap/api-contracts";
 import { HiveMapRuntime, RuntimeError } from "@hivemap/runtime";
 import { StorageError } from "@hivemap/storage";
@@ -35,6 +45,17 @@ export const HIVEMAP_MCP_TOOL_NAMES: readonly McpToolName[] = [
   "workspace_resolve",
   "project_create",
   "graph_get",
+  "repository_index_list",
+  "repository_index_get",
+  "repository_index_start",
+  "repository_index_execute",
+  "repository_search",
+  "repository_evidence_candidates",
+  "scan_profile_overlay_help",
+  "concept_embedding_upsert",
+  "concept_embedding_refresh",
+  "concept_embedding_backfill",
+  "concept_similar_list",
   "graph_command",
   "category_assign",
   "projection_get",
@@ -61,6 +82,17 @@ export type McpToolResponseMap = {
   workspace_resolve: ResolveWorkspaceResponse;
   project_create: CreateWorkspaceResponse;
   graph_get: GetGraphResponse;
+  repository_index_list: ListRepositoryIndexesResponse;
+  repository_index_get: GetRepositoryIndexResponse;
+  repository_index_start: import("@hivemap/api-contracts").StartRepositoryIndexResponse;
+  repository_index_execute: ExecuteRepositoryIndexResponse;
+  repository_search: SearchRepositoryIndexResponse;
+  repository_evidence_candidates: ListRepositoryEvidenceCandidatesResponse;
+  scan_profile_overlay_help: GetScanProfileOverlayHelpResponse;
+  concept_embedding_upsert: UpsertConceptEmbeddingResponse;
+  concept_embedding_refresh: RefreshConceptEmbeddingResponse;
+  concept_embedding_backfill: BackfillConceptEmbeddingsResponse;
+  concept_similar_list: ListSimilarConceptsResponse;
   graph_command: ApplyGraphCommandsResponse;
   category_assign: AssignCategoryResponse;
   projection_get: GetProjectionResponse;
@@ -106,13 +138,13 @@ export class McpToolValidationError extends Error {
   }
 }
 
-export function handleMcpTool<T extends McpToolName>(
+export async function handleMcpTool<T extends McpToolName>(
   runtime: HiveMapRuntime,
   tool: T,
   request: McpToolRequestMap[T],
-): McpToolResult<T> {
+): Promise<McpToolResult<T>> {
   try {
-    const value = dispatchMcpTool(runtime, tool, request);
+    const value = await dispatchMcpTool(runtime, tool, request);
     return { ok: true, tool, value } as McpToolSuccess<T>;
   } catch (error) {
     return {
@@ -129,58 +161,84 @@ export function assertKnownMcpTool(tool: string): asserts tool is McpToolName {
   }
 }
 
-function dispatchMcpTool<T extends McpToolName>(
+async function dispatchMcpTool<T extends McpToolName>(
   runtime: HiveMapRuntime,
   tool: T,
   request: McpToolRequestMap[T],
-): McpToolResponseMap[T] {
+): Promise<McpToolResponseMap[T]> {
   switch (tool) {
     case "workspace_list":
-      return runtime.listWorkspaceSummaries(request as McpToolRequestMap["workspace_list"]) as McpToolResponseMap[T];
+      return (await runtime.listWorkspaceSummaries(request as McpToolRequestMap["workspace_list"])) as McpToolResponseMap[T];
     case "workspace_get":
-      return runtime.getWorkspaceSummary(request as McpToolRequestMap["workspace_get"]) as McpToolResponseMap[T];
+      return (await runtime.getWorkspaceSummary(request as McpToolRequestMap["workspace_get"])) as McpToolResponseMap[T];
     case "workspace_resolve":
-      return runtime.resolveWorkspace(request as McpToolRequestMap["workspace_resolve"]) as McpToolResponseMap[T];
+      return (await runtime.resolveWorkspace(request as McpToolRequestMap["workspace_resolve"])) as McpToolResponseMap[T];
     case "project_create":
-      return runtime.createWorkspace(request as McpToolRequestMap["project_create"]) as McpToolResponseMap[T];
+      return (await runtime.createWorkspace(request as McpToolRequestMap["project_create"])) as McpToolResponseMap[T];
     case "graph_get":
-      return runtime.getGraph(request as McpToolRequestMap["graph_get"]) as McpToolResponseMap[T];
+      return (await runtime.getGraph(request as McpToolRequestMap["graph_get"])) as McpToolResponseMap[T];
+    case "repository_index_list":
+      return (await runtime.listRepositoryIndexes(request as McpToolRequestMap["repository_index_list"])) as McpToolResponseMap[T];
+    case "repository_index_get":
+      return (await runtime.getRepositoryIndex(request as McpToolRequestMap["repository_index_get"])) as McpToolResponseMap[T];
+    case "repository_index_start":
+      return (await runtime.startRepositoryIndex(request as McpToolRequestMap["repository_index_start"])) as McpToolResponseMap[T];
+    case "repository_index_execute":
+      return (await runtime.executeRepositoryIndex(request as McpToolRequestMap["repository_index_execute"])) as McpToolResponseMap[T];
+    case "repository_search":
+      return (await runtime.searchRepositoryIndex(request as McpToolRequestMap["repository_search"])) as McpToolResponseMap[T];
+    case "repository_evidence_candidates":
+      return (await runtime.listRepositoryEvidenceCandidates(
+        request as McpToolRequestMap["repository_evidence_candidates"],
+      )) as McpToolResponseMap[T];
+    case "scan_profile_overlay_help":
+      return (await runtime.getScanProfileOverlayHelp(
+        request as McpToolRequestMap["scan_profile_overlay_help"],
+      )) as McpToolResponseMap[T];
+    case "concept_embedding_upsert":
+      return (await runtime.upsertConceptEmbedding(request as McpToolRequestMap["concept_embedding_upsert"])) as McpToolResponseMap[T];
+    case "concept_embedding_refresh":
+      return (await runtime.refreshConceptEmbedding(request as McpToolRequestMap["concept_embedding_refresh"])) as McpToolResponseMap[T];
+    case "concept_embedding_backfill":
+      return (await runtime.backfillConceptEmbeddings(request as McpToolRequestMap["concept_embedding_backfill"])) as McpToolResponseMap[T];
+    case "concept_similar_list":
+      return (await runtime.listSimilarConcepts(request as McpToolRequestMap["concept_similar_list"])) as McpToolResponseMap[T];
     case "graph_command":
-      return runtime.applyGraphCommands(request as McpToolRequestMap["graph_command"]) as McpToolResponseMap[T];
+      return (await runtime.applyGraphCommands(request as McpToolRequestMap["graph_command"])) as McpToolResponseMap[T];
     case "category_assign":
-      return runtime.assignCategory(request as McpToolRequestMap["category_assign"]) as McpToolResponseMap[T];
+      return (await runtime.assignCategory(request as McpToolRequestMap["category_assign"])) as McpToolResponseMap[T];
     case "projection_get":
-      return runtime.getProjection(request as McpToolRequestMap["projection_get"]) as McpToolResponseMap[T];
+      return (await runtime.getProjection(request as McpToolRequestMap["projection_get"])) as McpToolResponseMap[T];
     case "projection_create":
-      return runtime.createProjection(request as McpToolRequestMap["projection_create"]) as McpToolResponseMap[T];
+      return (await runtime.createProjection(request as McpToolRequestMap["projection_create"])) as McpToolResponseMap[T];
     case "feedback_list":
-      return runtime.listFeedback(request as McpToolRequestMap["feedback_list"]) as McpToolResponseMap[T];
+      return (await runtime.listFeedback(request as McpToolRequestMap["feedback_list"])) as McpToolResponseMap[T];
     case "proposal_create":
-      return runtime.createProposal(request as McpToolRequestMap["proposal_create"]) as McpToolResponseMap[T];
+      return (await runtime.createProposal(request as McpToolRequestMap["proposal_create"])) as McpToolResponseMap[T];
     case "proposal_approve":
-      return runtime.approveProposal(request as McpToolRequestMap["proposal_approve"]) as McpToolResponseMap[T];
+      return (await runtime.approveProposal(request as McpToolRequestMap["proposal_approve"])) as McpToolResponseMap[T];
     case "proposal_apply":
-      return runtime.applyProposal(request as McpToolRequestMap["proposal_apply"]) as McpToolResponseMap[T];
+      return (await runtime.applyProposal(request as McpToolRequestMap["proposal_apply"])) as McpToolResponseMap[T];
     case "scan_profile_list":
-      return runtime.listScanProfiles(request as McpToolRequestMap["scan_profile_list"]) as McpToolResponseMap[T];
+      return (await runtime.listScanProfiles(request as McpToolRequestMap["scan_profile_list"])) as McpToolResponseMap[T];
     case "scan_list":
-      return runtime.listScanRuns(request as McpToolRequestMap["scan_list"]) as McpToolResponseMap[T];
+      return (await runtime.listScanRuns(request as McpToolRequestMap["scan_list"])) as McpToolResponseMap[T];
     case "scan_start":
-      return runtime.startScan(request as McpToolRequestMap["scan_start"]) as McpToolResponseMap[T];
+      return (await runtime.startScan(request as McpToolRequestMap["scan_start"])) as McpToolResponseMap[T];
     case "scan_record_coverage":
-      return runtime.recordScanCoverage(request as McpToolRequestMap["scan_record_coverage"]) as McpToolResponseMap[T];
+      return (await runtime.recordScanCoverage(request as McpToolRequestMap["scan_record_coverage"])) as McpToolResponseMap[T];
     case "scan_finding_create":
-      return runtime.createScanFinding(request as McpToolRequestMap["scan_finding_create"]) as McpToolResponseMap[T];
+      return (await runtime.createScanFinding(request as McpToolRequestMap["scan_finding_create"])) as McpToolResponseMap[T];
     case "finding_update":
-      return runtime.updateFinding(request as McpToolRequestMap["finding_update"]) as McpToolResponseMap[T];
+      return (await runtime.updateFinding(request as McpToolRequestMap["finding_update"])) as McpToolResponseMap[T];
     case "scan_complete":
-      return runtime.completeScan(request as McpToolRequestMap["scan_complete"]) as McpToolResponseMap[T];
+      return (await runtime.completeScan(request as McpToolRequestMap["scan_complete"])) as McpToolResponseMap[T];
     case "scan_compare":
-      return runtime.compareScans(request as McpToolRequestMap["scan_compare"]) as McpToolResponseMap[T];
+      return (await runtime.compareScans(request as McpToolRequestMap["scan_compare"])) as McpToolResponseMap[T];
     case "workspace_export_zip":
-      return runtime.exportWorkspace(request as McpToolRequestMap["workspace_export_zip"]) as McpToolResponseMap[T];
+      return (await runtime.exportWorkspace(request as McpToolRequestMap["workspace_export_zip"])) as McpToolResponseMap[T];
     case "workspace_import_zip":
-      return runtime.importWorkspace(request as McpToolRequestMap["workspace_import_zip"]) as McpToolResponseMap[T];
+      return (await runtime.importWorkspace(request as McpToolRequestMap["workspace_import_zip"])) as McpToolResponseMap[T];
   }
 }
 

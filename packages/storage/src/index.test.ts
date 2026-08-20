@@ -285,7 +285,35 @@ describe("InMemoryHiveMapStore", () => {
           contentHash: "chunk-hash-a",
         },
       ],
+      [
+        {
+          workspaceId: "workspace-a",
+          indexId: "repo-index-a",
+          key: "symbol-a",
+          filePath: "docs/architecture.md",
+          language: "markdown",
+          name: "Architecture",
+          qualifiedName: "Architecture",
+          kind: "heading",
+          startLine: 1,
+          startColumn: 0,
+          endLine: 1,
+          endColumn: 12,
+          isExported: false,
+          isPublic: false,
+          producerTool: "test",
+          producerVersion: "1",
+        },
+      ],
     );
+
+    await expect(store.listRepositoryIndexSymbols("workspace-a", "repo-index-a")).resolves.toEqual([
+      expect.objectContaining({
+        key: "symbol-a",
+        filePath: "docs/architecture.md",
+        qualifiedName: "Architecture",
+      }),
+    ]);
 
     await expect(store.searchRepositoryIndex("workspace-a", "repo-index-a", "single source truth", 5)).resolves.toEqual(
       expect.arrayContaining([
@@ -325,9 +353,35 @@ describe("InMemoryHiveMapStore", () => {
           contentHash: "chunk-hash-b",
         },
       ],
+      [
+        {
+          workspaceId: "workspace-a",
+          indexId: "repo-index-a",
+          key: "symbol-b",
+          filePath: "docs/replacement.md",
+          language: "markdown",
+          name: "Replacement",
+          qualifiedName: "Replacement",
+          kind: "heading",
+          startLine: 1,
+          startColumn: 0,
+          endLine: 1,
+          endColumn: 11,
+          isExported: false,
+          isPublic: false,
+          producerTool: "test",
+          producerVersion: "1",
+        },
+      ],
     );
 
     await expect(store.searchRepositoryIndex("workspace-a", "repo-index-a", "single source truth", 5)).resolves.toEqual([]);
+    await expect(store.listRepositoryIndexSymbols("workspace-a", "repo-index-a")).resolves.toEqual([
+      expect.objectContaining({
+        key: "symbol-b",
+        filePath: "docs/replacement.md",
+      }),
+    ]);
     await expect(store.searchRepositoryIndex("workspace-a", "repo-index-a", "Replacement evidence", 5)).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -378,8 +432,38 @@ describe("InMemoryHiveMapStore", () => {
           },
         ],
         [],
+        [],
       ),
     ).rejects.toThrow("repository file ownership must match replaceRepositoryIndexContents target");
+
+    await expect(
+      store.replaceRepositoryIndexContents(
+        "workspace-a",
+        "repo-index-a",
+        [],
+        [],
+        [
+          {
+            workspaceId: "workspace-a",
+            indexId: "repo-index-b",
+            key: "symbol-a",
+            filePath: "docs/architecture.md",
+            language: "markdown",
+            name: "Architecture",
+            qualifiedName: "Architecture",
+            kind: "heading",
+            startLine: 1,
+            startColumn: 0,
+            endLine: 1,
+            endColumn: 12,
+            isExported: false,
+            isPublic: false,
+            producerTool: "test",
+            producerVersion: "1",
+          },
+        ],
+      ),
+    ).rejects.toThrow("repository symbol ownership must match replaceRepositoryIndexContents target");
   });
 
   it("atomically replaces a workspace even when its graph id changes", async () => {

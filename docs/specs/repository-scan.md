@@ -4,7 +4,8 @@ Repository scans are agent-executed, auditable work units that populate a HiveMa
 
 ## Ownership
 
-- The agent discovers and reads repository sources, interprets criteria, and submits explicit graph and finding operations.
+- The repository indexer discovers repository files and derives bounded scan coverage from the selected completed repository index.
+- The agent reads bounded scan sources/evidence packets, interprets criteria, and submits explicit graph and finding operations.
 - The scan domain owns profiles, run lifecycle, coverage, finding metadata, and comparison semantics.
 - The semantic graph owns active findings. A finding is a graph node with type `finding`.
 - Completed scan evidence is immutable historical evidence, not a second active finding store.
@@ -28,18 +29,34 @@ Profiles describe repeatable discovery rules. They must not freeze the file inve
 
 The MVP includes `documentation-conflicts@1` and `code-quality-review@1` profiles in every new workspace.
 
+An optional repository-local overlay may refine a built-in profile without changing the canonical workspace scan profile definition. In the current phase, the overlay path is `.hivemap/scan-profiles/<profile>.yaml`, where `<profile>` is the MCP-exposed overlay stem for the selected profile. The overlay appends repository-specific include and exclude globs to the built-in scope.
+
+Overlay rules are explicit:
+
+- the overlay is resolved from the selected indexed repository revision, not from an untracked local working-tree file outside that revision;
+- missing overlay means built-in profile defaults remain active;
+- invalid overlay fails `scan.start` and `repository_evidence_candidates` clearly;
+- agents should discover the overlay contract through HiveMap MCP `scan_profile_overlay_help` instead of guessing file shape from repo docs.
+
 ## Scan Run Lifecycle
 
 ```text
 scan.start
+  -> resolve completed repository index + derive coverage
   -> in_progress run + resolved profile and instructions
-  -> scan.record_coverage
+  -> optional repository_evidence_candidates retrieval per criterion
+  -> optional scan.record_coverage adjustment
   -> graph commands and scan.finding_create/update
   -> scan.complete validation
   -> immutable evidence snapshot
 ```
 
-A run identifies the repository root, optional repository URL, branch, source revision, optional dirty-worktree digest, agent, tool, and timestamps.
+A run identifies the completed repository index when present, a synthetic runtime repository root, optional repository URL, requested branch/ref when known, source revision, optional dirty-worktree digest, agent, tool, and timestamps.
+
+Start requires:
+
+- one explicit completed `repositoryIndexId`;
+- non-empty discovered and included source inventories derived from the selected repository index and effective profile rules.
 
 Completion requires:
 
@@ -56,7 +73,11 @@ Completed runs cannot be modified.
 
 Coverage records discovered source targets, included source targets, excluded targets with reasons, and failed targets with reasons.
 
-The next scan repeats profile discovery against the current repository. Prior coverage is evidence and a comparison baseline, not the current inventory.
+The next scan repeats profile discovery against the selected completed repository index. Prior coverage is evidence and a comparison baseline, not the current inventory.
+
+When HiveMap can pre-select bounded evidence candidates for a criterion, the candidate packets are the preferred review unit. Coverage remains the bounded repository inventory and fallback source set, not a mandate that the agent must reread every included file on every run.
+
+`scan_start` and `repository_evidence_candidates` also return overlay resolution metadata and a coverage summary so the agent can tell whether built-in defaults or repository-local overrides were applied before interpreting results.
 
 ## Finding Node
 
@@ -127,4 +148,4 @@ Import modes are explicit: `new` fails if the workspace exists; `replace` replac
 
 ## Repeatability
 
-Every export includes the selected profile, original coverage, repository identity, scan criteria, and exact MCP operation sequence required to repeat the scan. The repeat scan must rediscover sources from profile rules and compare the new completed run with the imported baseline.
+Every export includes the selected profile, original coverage, repository identity, scan criteria, and exact MCP operation sequence required to repeat the scan. The repeat scan must resolve or create a completed repository index, derive coverage from that index during `scan_start`, and compare the new completed run with the imported baseline. Explicit coverage override remains available only when the derived inventory needs correction.

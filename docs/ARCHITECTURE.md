@@ -28,9 +28,9 @@ HiveMap turns intentional human/agent collaboration into a persistent semantic g
 The runtime shape is local-first:
 
 ```text
-human -> web UI -> REST API \
-                          -> shared runtime -> SQLite store -> ZIP export/import
-agent -> MCP stdio ------/
+human -> web UI or built web served by API -> REST API \
+                                             -> shared runtime -> Postgres store -> ZIP export/import
+agent -> temporary MCP stdio adapter ------/
 
 shared runtime -> graph core
 shared runtime -> projections
@@ -44,9 +44,9 @@ shared runtime -> scan validation/evidence
 |---|---|---|
 | `apps/web` | Render projections and collect feedback/proposal intent | React/React Flow UI |
 | `apps/api` | Local browser/test boundary | Uses the same runtime handlers as MCP |
-| `apps/mcp` | Agent-facing tool boundary | Current stdio-only transport |
+| `apps/mcp` | Agent-facing tool boundary | Transitional stdio adapter during runtime migration |
 | `packages/runtime` | Shared service layer | Owns orchestration, not transport |
-| `packages/storage` | SQLite and ZIP bundle persistence | Current alpha store |
+| `packages/storage` | Postgres runtime store, test in-memory store, and ZIP bundle persistence | Runtime persistence is Postgres-only |
 | `packages/scans` | Versioned scan profiles, evidence, findings, comparisons | Agent-executed workflow validation |
 
 ## Boundaries
@@ -66,7 +66,7 @@ Important persisted state:
 - semantic graph
 - category catalog and assignments
 - capture policy, feedback, and proposals
-- projections and snapshots
+- projections and portable exports
 - scan profiles, runs, coverage, findings, and comparisons
 - portable bundle bytes for `.hivemap.zip`
 
@@ -84,14 +84,14 @@ Canonical contracts live under `docs/specs/`. The most important ones today are:
 
 ## Runtime / deployment
 
-Current supported runtime is local single-user Node.js:
+Current runtime direction in code is local single-user Node.js on Postgres:
 
 - API on `127.0.0.1:8787`
-- web dev server on `127.0.0.1:5175`
-- MCP server as a local stdio process
-- one shared SQLite file under `.hivemap/`
+- web dev server on `127.0.0.1:5175`, or built web assets served by the API on the same port
+- MCP stdio only as a temporary adapter
+- one shared Postgres database selected through `HIVEMAP_POSTGRES_URL`
 
-Hosted/containerized and Streamable HTTP MCP shapes are future work, not current repository behavior.
+Hosted/containerized and Streamable HTTP MCP shapes are still future work, but the repository no longer treats SQLite as the primary runtime path.
 
 ## Observability
 
@@ -104,7 +104,7 @@ There is no mature metrics/auth/ops stack yet.
 
 ## Failure modes
 
-- API and MCP pointing at different SQLite paths creates apparent state drift.
+- API and MCP pointing at different Postgres databases creates apparent state drift.
 - Exposing the current API beyond localhost is unsafe because auth is absent.
 - Incomplete scan coverage or missing declared outputs must fail completion.
 - Treating POC artifacts as 1.0 SSOT creates architectural drift.

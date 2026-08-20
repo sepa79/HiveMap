@@ -26,7 +26,6 @@ import {
   Loader2,
   MessageSquarePlus,
   Plus,
-  Save,
   Search,
   Tags,
   Upload,
@@ -44,7 +43,6 @@ import {
   createOverview,
   createProjectMap,
   createProposal,
-  createSnapshot,
   createWorkspace,
   downloadWorkspaceBundle,
   getWorkspace,
@@ -579,21 +577,6 @@ function App() {
     });
   }
 
-  function handleSaveSnapshot(): void {
-    if (selectedProjection === null) {
-      return;
-    }
-
-    void run(async () => {
-      await createSnapshot(workspaceId, {
-        id: `snapshot-${Date.now()}`,
-        createdAt: new Date().toISOString(),
-        projectionId: selectedProjection.id,
-      });
-      await refresh();
-    });
-  }
-
   function handleFindingFeedback(intent: "acknowledge_finding" | "resolve_finding"): void {
     if (selectedNode?.type !== "finding") {
       return;
@@ -836,10 +819,6 @@ function App() {
             <Tags size={16} />
             Confirm
           </button>
-          <button type="button" onClick={handleSaveSnapshot} disabled={selectedProjection === null}>
-            <Save size={16} />
-            Snapshot
-          </button>
         </section>
 
         <section className="panel">
@@ -1075,21 +1054,6 @@ function App() {
           )}
         </section>
 
-        <section className="panel proposal-list">
-          <div className="panel-heading">Snapshots</div>
-          {(state?.snapshots.length ?? 0) === 0 ? (
-            <p className="muted">No snapshots</p>
-          ) : (
-            state?.snapshots.map((snapshot) => (
-              <article key={snapshot.id} className="snapshot-item">
-                <strong>{snapshot.id}</strong>
-                <span>{new Date(snapshot.createdAt).toLocaleString()}</span>
-                <span>{snapshot.projection.name}</span>
-              </article>
-            ))
-          )}
-        </section>
-
         {error !== null && (
           <div className="error-panel">
             <AlertCircle size={16} />
@@ -1118,7 +1082,6 @@ function App() {
             <span>{state?.categoryAssignments.length ?? 0} categories</span>
             <span>{state?.feedbackEvents.length ?? 0} feedback</span>
             <span>{state?.proposals.length ?? 0} proposals</span>
-            <span>{state?.snapshots.length ?? 0} snapshots</span>
           </div>
         </header>
         <div className={(selectedProjection?.groups ?? []).length === 0 ? "map-group-legend map-group-legend-empty" : "map-group-legend"}>

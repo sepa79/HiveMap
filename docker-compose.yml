@@ -1,0 +1,16 @@
+services:
+  hivemap:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8787:8787"
+    environment:
+      HIVEMAP_API_HOST: "0.0.0.0"
+      HIVEMAP_API_PORT: "8787"
+      HIVEMAP_POSTGRES_DB: "hivemap"
+      HIVEMAP_POSTGRES_PORT: "5432"
+      HIVEMAP_DATA_DIR: "/var/lib/hivemap/postgres"
+      HIVEMAP_WEB_DIST: "/app/apps/web/dist"
+    volumes:
+      - ./.local/hivemap-postgres:/var/lib/hivemap/postgres

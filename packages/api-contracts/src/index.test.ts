@@ -8,16 +8,24 @@ import {
   validateApplyProposalRequest,
   validateApproveProposalRequest,
   validateAssignCategoryRequest,
+  validateBackfillConceptEmbeddingsRequest,
   validateCreateProposalRequest,
-  validateCreateSnapshotRequest,
+  validateGetRepositoryIndexRequest,
   validateCreateWorkspaceRequest,
+  validateExecuteRepositoryIndexRequest,
+  validateGetScanProfileOverlayHelpRequest,
+  validateListRepositoryEvidenceCandidatesRequest,
   validateGetWorkspaceSummaryRequest,
   validateGetProjectionRequest,
   validateExportWorkspaceBundleRequest,
   validateImportWorkspaceBundleRequest,
+  validateListRepositoryIndexesRequest,
   validateListWorkspaceSummariesRequest,
   validateRecordFeedbackRequest,
+  validateRefreshConceptEmbeddingRequest,
   validateResolveWorkspaceRequest,
+  validateSearchRepositoryIndexRequest,
+  validateStartRepositoryIndexRequest,
   type McpToolName,
   type McpToolRequestMap,
 } from "./index.js";
@@ -58,6 +66,68 @@ describe("api contracts", () => {
         ],
       }),
     ).toThrow(ApiContractValidationError);
+  });
+
+  it("validates repository index requests", () => {
+    expect(() => validateListRepositoryIndexesRequest({ workspaceId: "workspace-a" })).not.toThrow();
+    expect(() => validateGetRepositoryIndexRequest({ workspaceId: "workspace-a", indexId: "repo-index-a" })).not.toThrow();
+    expect(() =>
+      validateStartRepositoryIndexRequest({
+        workspaceId: "workspace-a",
+        index: {
+          id: "repo-index-a",
+          repositoryUrl: "https://example.com/org/repo.git",
+          requestedRef: "main",
+          mode: "safe",
+          requestedAt: "2026-08-20T12:00:00.000Z",
+          actor: {
+            agentId: "codex",
+            tool: "mcp",
+          },
+        },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateStartRepositoryIndexRequest({
+        workspaceId: "workspace-a",
+        index: {
+          id: "repo-index-a",
+          repositoryUrl: " ",
+          mode: "safe",
+          requestedAt: "2026-08-20T12:00:00.000Z",
+          actor: {
+            agentId: "codex",
+            tool: "mcp",
+          },
+        },
+      }),
+    ).toThrow("index.repositoryUrl must be non-empty");
+    expect(() => validateExecuteRepositoryIndexRequest({ workspaceId: "workspace-a", indexId: "repo-index-a" })).not.toThrow();
+    expect(() =>
+      validateSearchRepositoryIndexRequest({
+        workspaceId: "workspace-a",
+        indexId: "repo-index-a",
+        query: "ownership docs",
+        limit: 5,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateListRepositoryEvidenceCandidatesRequest({
+        workspaceId: "workspace-a",
+        indexId: "repo-index-a",
+        profileId: "documentation-conflicts",
+        profileVersion: 1,
+        criterionId: "broken-references",
+        limit: 5,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateGetScanProfileOverlayHelpRequest({
+        workspaceId: "workspace-a",
+        profileId: "code-quality-review",
+        profileVersion: 1,
+      }),
+    ).not.toThrow();
   });
 
   it("rejects empty graph command batches", () => {
@@ -140,19 +210,6 @@ describe("api contracts", () => {
     );
   });
 
-  it("validates snapshot creation requests", () => {
-    expect(() =>
-      validateCreateSnapshotRequest({
-        workspaceId: "workspace-a",
-        snapshot: {
-          id: "snapshot-a",
-          createdAt: "2026-05-13T21:00:00.000Z",
-          projectionId: "projection-a",
-        },
-      }),
-    ).not.toThrow();
-  });
-
   it("validates browser ZIP bundle boundaries", () => {
     expect(() =>
       validateExportWorkspaceBundleRequest({
@@ -163,6 +220,32 @@ describe("api contracts", () => {
     expect(() => validateImportWorkspaceBundleRequest({ bytes: new Uint8Array(), mode: "new" })).toThrow(
       "bytes must contain a ZIP bundle",
     );
+  });
+
+  it("validates provider-backed embedding refresh and backfill requests", () => {
+    expect(() =>
+      validateRefreshConceptEmbeddingRequest({
+        workspaceId: "workspace-a",
+        nodeId: "node-a",
+        model: "ollama:nomic-embed-text",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateBackfillConceptEmbeddingsRequest({
+        workspaceId: "workspace-a",
+        model: "ollama:nomic-embed-text",
+        nodeIds: ["node-a"],
+        limit: 10,
+        force: true,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateBackfillConceptEmbeddingsRequest({
+        workspaceId: "workspace-a",
+        model: "ollama:nomic-embed-text",
+        nodeIds: [],
+      }),
+    ).toThrow("nodeIds must contain at least one node id");
   });
 
   it("keeps MCP tool request map tied to explicit tool names", () => {

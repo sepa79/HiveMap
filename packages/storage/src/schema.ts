@@ -1,1 +1,2 @@
-export const STORAGE_SCHEMA_VERSION = "3";
+export const STORAGE_SCHEMA_VERSION = "4";
+export const POSTGRES_STORAGE_SCHEMA_VERSION = "10";

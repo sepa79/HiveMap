@@ -1,0 +1,12 @@
+{
+  "env": {
+    "HIVEMAP_IMAGE": "{{ imageRepository.project }}:{{ release.imageTag }}"
+  },
+  "images": [
+    {
+      "name": "hivemap",
+      "image": "{{ imageRepository.project }}:{{ release.imageTag }}",
+      "application": true
+    }
+  ]
+}

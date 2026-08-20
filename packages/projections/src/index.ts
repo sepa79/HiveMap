@@ -1,6 +1,6 @@
 import { validateGraph, type SemanticGraph } from "@hivemap/graph-core";
 
-const PROJECTION_TYPES = ["conversation-map", "project-map", "overview", "dive-in", "snapshot"] as const;
+const PROJECTION_TYPES = ["conversation-map", "project-map", "overview", "dive-in"] as const;
 
 export type ProjectionType = (typeof PROJECTION_TYPES)[number];
 

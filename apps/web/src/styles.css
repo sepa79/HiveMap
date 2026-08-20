@@ -473,8 +473,7 @@ label {
 }
 
 .source-item,
-.proposal-item,
-.snapshot-item {
+.proposal-item {
   background: var(--panel2);
   border: 1px solid var(--border2);
   border-radius: 10px;
@@ -619,16 +618,6 @@ label {
 .badge-inferred {
   border-color: rgba(255, 200, 87, 0.38);
   color: var(--warn);
-}
-
-.snapshot-item strong {
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-
-.snapshot-item span {
-  color: var(--muted);
-  font-size: 11px;
 }
 
 .button-row {

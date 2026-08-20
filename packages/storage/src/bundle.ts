@@ -8,14 +8,17 @@ import { compareCompletedScans, toFindingEvidence, type CompletedScanRun, type S
 import { validateWorkspaceState, type WorkspaceState } from "./index.js";
 import { STORAGE_SCHEMA_VERSION } from "./schema.js";
 
-export const HIVEMAP_BUNDLE_FORMAT_VERSION = 1;
+export const HIVEMAP_BUNDLE_FORMAT_VERSION = 2;
+export const HIVEMAP_LOGICAL_STATE_VERSION = 1;
+const SUPPORTED_LEGACY_BUNDLE_STORAGE_SCHEMAS = new Set(["2", STORAGE_SCHEMA_VERSION]);
 
 export type BundleFileRole = "canonical" | "generated";
 
 export type BundleManifest = {
   format: "hivemap-workspace";
   formatVersion: number;
-  storageSchemaVersion: string;
+  logicalStateVersion?: number;
+  storageSchemaVersion?: string;
   exportedAt: string;
   workspaceId: string;
   files: Array<{
@@ -59,7 +62,7 @@ export function createWorkspaceBundle(
   const manifest: BundleManifest = {
     format: "hivemap-workspace",
     formatVersion: HIVEMAP_BUNDLE_FORMAT_VERSION,
-    storageSchemaVersion: STORAGE_SCHEMA_VERSION,
+    logicalStateVersion: HIVEMAP_LOGICAL_STATE_VERSION,
     exportedAt,
     workspaceId: state.workspace.id,
     files: [...files.entries()]
@@ -200,30 +203,42 @@ ${profile.ssotOrder.map((source, index) => `${index + 1}. \`${source}\``).join("
 }
 
 function createRepeatInstructions(workspaceId: string, profile: ScanProfile, run: ScanRun): string {
+  const repositoryUrlLine =
+    run.repository.repositoryUrl === undefined ? "" : `Repository URL used previously: \`${run.repository.repositoryUrl}\`\n`;
+  const repositoryIndexLine =
+    run.repository.repositoryIndexId === undefined ? "" : `Repository index used previously: \`${run.repository.repositoryIndexId}\`\n`;
   return `# Repeat Scan ${run.id}
 
-Repository root used previously: \`${run.repository.root}\`
+${repositoryIndexLine}${repositoryUrlLine}Repository root used previously: \`${run.repository.root}\`
 Previous revision: \`${run.repository.revision}\`
 Profile: \`${profile.id}@${profile.version}\`
 
 1. Import this bundle with \`workspace_import_zip\` in explicit \`new\` or \`replace\` mode.
 2. Read the target repository rules and this scan profile.
-3. Call \`scan_start\` for workspace \`${workspaceId}\` with profile \`${profile.id}@${profile.version}\` and the current repository identity.
-4. Rediscover files using the profile include/exclude rules. Do not reuse the previous inventory as current truth.
-5. Call \`scan_record_coverage\` with every discovered, included, excluded, and failed source.
-6. Apply semantic graph commands and call \`scan_finding_create\` for current problems.
-7. Call \`scan_complete\` with every applied criterion and required output.
-8. Call \`scan_compare\` with before scan \`${run.id}\` and the new completed scan.
-9. Export a new ZIP as verification evidence.
+3. Resolve or create one completed repository index for the target repository and revision before starting the next scan.
+4. If no completed index is already available, call \`repository_index_start\` and then \`repository_index_execute\` for the target repository.
+5. Call \`scan_start\` for workspace \`${workspaceId}\` with profile \`${profile.id}@${profile.version}\` and the completed \`repositoryIndexId\`.
+6. Use the derived coverage attached to the started run as the normal scan inventory. Call \`scan_record_coverage\` only if you need one explicit full correction.
+7. Apply semantic graph commands and call \`scan_finding_create\` for current problems.
+8. Call \`scan_complete\` with every applied criterion and required output.
+9. Call \`scan_compare\` with before scan \`${run.id}\` and the new completed scan.
+10. Export a new ZIP as verification evidence.
 `;
 }
 
 function validateManifest(manifest: BundleManifest): void {
   if (manifest.format !== "hivemap-workspace") throw new BundleValidationError(`Unknown bundle format: ${String(manifest.format)}`);
-  if (manifest.formatVersion !== HIVEMAP_BUNDLE_FORMAT_VERSION) {
+  if (manifest.formatVersion === HIVEMAP_BUNDLE_FORMAT_VERSION) {
+    if (manifest.logicalStateVersion !== HIVEMAP_LOGICAL_STATE_VERSION) {
+      throw new BundleValidationError(`Unsupported logical bundle state version: ${String(manifest.logicalStateVersion)}`);
+    }
+  } else if (manifest.formatVersion === 1) {
+    if (!SUPPORTED_LEGACY_BUNDLE_STORAGE_SCHEMAS.has(String(manifest.storageSchemaVersion))) {
+      throw new BundleValidationError(`Unsupported legacy bundle storage schema: ${String(manifest.storageSchemaVersion)}`);
+    }
+  } else {
     throw new BundleValidationError(`Unsupported bundle format version: ${manifest.formatVersion}`);
   }
-  if (manifest.storageSchemaVersion !== STORAGE_SCHEMA_VERSION) throw new BundleValidationError(`Unsupported bundle storage schema: ${manifest.storageSchemaVersion}`);
   assertDate("manifest.exportedAt", manifest.exportedAt);
   assertNonEmpty("manifest.workspaceId", manifest.workspaceId);
   const paths = manifest.files.map((file) => file.path);

@@ -96,6 +96,17 @@ Do not let UI layout state become semantic truth.
 
 Use HiveMind for durable learnings when available.
 
+For meaningful development work, HiveMind is the default durable memory layer.
+
+Meaningful work includes:
+
+- product or architecture decisions,
+- storage or deployment direction,
+- MCP/API contract changes,
+- scan workflow changes,
+- important failures, risks, or proven fixes,
+- reusable workflow learnings.
+
 Store:
 
 - product learnings,
@@ -111,6 +122,47 @@ Do not store:
 - noisy implementation steps,
 - unreviewed speculation as fact.
 
+Minimum workflow when HiveMind is available:
+
+1. Resolve the project first. Do not guess the HiveMind project id when `project_resolve` can confirm it.
+2. Read the active HiveMind project rules and bounded project brief near the start of meaningful work.
+3. Open a HiveMind session near the start of meaningful work.
+4. Open a feature-scoped context token for the current work unit.
+5. Check recent learnings or entries when touching storage, runtime, projections, scans, or MCP/API boundaries.
+6. Record at least the durable decision, progress, feedback, or risk that would otherwise be lost after the session.
+7. Link the relevant repo files when they anchor the memory.
+8. Close the active context token after the work unit. Do not leave routine work with dangling active contexts.
+
+Required operational flow for meaningful work:
+
+1. `project_resolve`
+2. `rules_get`
+3. `context_get_project_brief`
+4. `session_start`
+5. `context_open`
+6. `learning_get_recent` and/or `entry_search`
+7. implementation work
+8. `learning_capture` and/or another durable entry write
+9. `context_close`
+
+Do not reduce HiveMind usage to `learning_get_recent` plus `learning_capture` on a long-lived token. That loses project rules, current open threads, and session hygiene.
+
+HiveMap remains the semantic graph system of record for concept maps and projections. HiveMind remains the durable project memory for development workflow, decisions, and learnings. Do not collapse one into the other.
+
+## Near-Term Delivery Direction
+
+The current near-term engineering direction is:
+
+1. DB/storage upgrade suitable for hosted/containerized evolution.
+2. One containerized local runtime tested through Docker.
+3. Only after that, HiveForge integration and repeated deploy/e2e loops.
+
+Until an explicit ADR says otherwise:
+
+- prefer changes that move HiveMap toward a container-friendly single runtime,
+- do not assume the current shared SQLite shape is good enough for hosted multi-process deployment,
+- treat Streamable HTTP MCP and HiveForge integration as follow-on work after the local container/runtime slice is proven.
+
 ## Project Knowledge Maps
 
 When work maps product concepts to documentation, code, tests, assets, or HiveMind evidence, read and follow:
@@ -124,9 +176,10 @@ These maps are navigation and semantic correlation layers. They must preserve th
 
 1. Read this file.
 2. Read `docs/README.md`.
-3. Read the relevant docs/specs.
-4. Inspect existing code or POC evidence before changing behavior.
-5. Identify the affected SSOT.
+3. If the task is meaningful HiveMap work and HiveMind is available, run the required HiveMind operational flow in this file before making substantive changes.
+4. Read the relevant docs/specs.
+5. Inspect existing code or POC evidence before changing behavior.
+6. Identify the affected SSOT.
 
 ## Repository Scans
 
@@ -140,4 +193,5 @@ Operational scan execution must also follow `docs/ai/REPOSITORY_SCAN_WORKFLOW.md
 - Apply `docs/ai/REVIEW_CHECKS.md`.
 - Apply `docs/ai/JESTER_CHECKS.md` for architecture, storage, API, async, or agent-mediated flows.
 - Update docs/specs with behavior or contract changes.
-- Record durable learnings in HiveMind when they change product or architecture direction.
+- Record durable learnings in HiveMind when they change product or architecture direction, or explicitly state that no durable HiveMind update was needed.
+- Close any active feature-scoped HiveMind context opened for the work unit.

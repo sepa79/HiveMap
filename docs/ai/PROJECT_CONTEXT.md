@@ -28,29 +28,29 @@ HiveMap stores a canonical semantic graph and derives readable overview, dive-in
 |---|---|---|
 | `apps/web` | Browser UI for overview, dive-in, project-map, and scan review flows | Uses React and React Flow. |
 | `apps/api` | Local REST boundary for the UI and tests | Must share runtime semantics with MCP. |
-| `apps/mcp` | Agent-facing MCP boundary | Current transport is stdio. |
+| `apps/mcp` | Agent-facing MCP boundary | Current local transport is a legacy stdio adapter, not the target runtime shape. |
 | `packages/runtime` | Shared application service layer | Orchestrates graph, categories, capture, projections, scans, and storage. |
 | `packages/graph-core` | Canonical semantic graph types, validation, and command application | Pure domain logic. |
 | `packages/projections` | View derivation for overview, dive-in, and project maps | Must not mutate graph semantics. |
 | `packages/capture` | Capture policy, feedback events, and proposal lifecycle | Models intent and reviewable changes. |
 | `packages/scans` | Repository scan profiles, validation, evidence, and comparisons | Validates agent-performed scans. |
-| `packages/storage` | SQLite persistence and ZIP import/export bundle support | Current first-pass persistence adapter. |
+| `packages/storage` | Postgres runtime persistence, test in-memory store support, and ZIP import/export bundle support | Runtime persistence is Postgres-only. |
 | `packages/api-contracts` | Shared request/response and contract validation types | Prevents divergent REST/MCP DTO semantics. |
 
 ## Runtime model
 
-HiveMap currently runs as a local single-user Node.js workspace. The web UI talks to the REST API, and an MCP client talks to the MCP server; both point at the same SQLite database file under `.hivemap/`. The MCP process is separate from the API process but delegates to the same runtime package. The UI is built with Vite and expects the API on `127.0.0.1`. The current alpha intentionally fails instead of silently switching ports or transport behavior.
+HiveMap currently runs as a local single-user Node.js workspace on Postgres. The web UI talks to the REST API, and any legacy local MCP client must point at the same Postgres database if it is used during development. The MCP adapter remains a separate process and delegates to the same runtime package, but it is not part of the target local runtime contract. The UI is built with Vite and expects the API on `127.0.0.1`. The current alpha intentionally fails instead of silently switching ports or transport behavior.
 
 ## Deployment model
 
-The supported model today is local development and local evaluation only. The repo has no committed Docker or HiveForge deployment contract yet. Hosted/containerized and Streamable HTTP MCP shapes are under consideration but are not current repository behavior.
+The supported model today is local development and local evaluation only. The repo now includes a working single-image Docker runtime for the API, built web UI, and bundled Postgres, but HiveForge deployment and hosted Streamable HTTP MCP are still future work rather than current repository behavior.
 
 ## Data/storage model
 
-- Canonical semantic graph state persisted in SQLite through `packages/storage`
+- Canonical semantic graph state persisted in Postgres through `packages/storage`
 - Category catalog and assignments
 - Capture policy, feedback events, and proposals
-- Projections and snapshots
+- Projections and portable exports
 - Repository scan profiles, coverage, findings, completed runs, and comparisons
 - Portable `.hivemap.zip` workspace bundles for export/import
 - POC assets and snapshots kept under `poc/` for evidence only
@@ -59,12 +59,13 @@ The supported model today is local development and local evaluation only. The re
 
 - MCP SDK for agent tool transport
 - React Flow for graph rendering in the browser UI
-- Node.js `node:sqlite` for the current persistence backend
+- Postgres with `pgvector` for the target runtime backend
+- In-memory test store for fast store/runtime/API/MCP tests without a database process
 - Optional HiveMind linkage for durable learnings and decisions by explicit ids/links
 
 ## Important risks
 
-- Shared SQLite across API and MCP is acceptable for local alpha but is a constraint for hosted/containerized evolution.
+- API and any legacy local MCP adapter must point at the same Postgres database or the UI and agent will appear to drift.
 - The current runtime has no auth/authz and must not be exposed directly to a network.
 - Review and scan workflows depend on agent quality; HiveMap validates outputs but does not replace agent judgment.
 - Drift between `docs/architecture.md`, `docs/specs/*`, and implementation would directly weaken the product's SSOT model.

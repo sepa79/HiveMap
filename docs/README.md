@@ -21,7 +21,7 @@ Design HiveMap 1.0 around:
 - category overlays,
 - user-controlled capture policy,
 - agent-mediated interpretation,
-- saved snapshots or views for demos/history.
+- saved views plus portable exports for demos/history.
 
 ## Canonical Docs
 
@@ -32,6 +32,7 @@ Design HiveMap 1.0 around:
 - `design/interaction-model.md`: human/agent interaction model.
 - `design/technical-design.md`: first technical design.
 - `design/mvp-slice.md`: first implementation slice.
+- `design/postgres-container-hiveforge-plan.md`: tracked delivery plan for the Postgres, container, and HiveForge upgrade path.
 - `specs/`: contracts that implementation must follow.
 - `ai/`: command, review, Jester, and HiveMind workflow rules.
 - `ai/KNOWLEDGE_MAP_WORKFLOW.md`: repeatable workflow for correlating concepts with docs, code, tests, assets, and HiveMind.

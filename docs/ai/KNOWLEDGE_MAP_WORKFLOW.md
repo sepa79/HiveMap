@@ -76,7 +76,7 @@ Apply the repository review and Jester checks.
 
 ### 6. Verify And Capture Evidence
 
-Load every created projection through the public HiveMap boundary. Capture a screenshot when visual readability matters. Save an immutable snapshot for the initial reviewed state.
+Load every created projection through the public HiveMap boundary. Capture a screenshot when visual readability matters. Export a ZIP when the initial reviewed state needs frozen evidence.
 
 Record durable learnings in:
 
@@ -92,7 +92,7 @@ Close both contexts.
 3. For anchored documentation references, compare the referenced section or symbol. A whole-file digest is only a candidate signal because an unrelated edit in the same file does not make every correlated concept stale.
 4. Read the semantic diff and classify each affected concept as unchanged, changed, added, contradicted, or removed.
 5. Update only correlations and concept notes whose bounded source changed. Do not advance a revision for an unrelated section merely to silence drift detection.
-6. Apply graph changes through explicit commands, then create a new version of any materially changed projection. Preserve the prior snapshot and visibly mark the old projection stale until a projection-supersession contract exists.
+6. Apply graph changes through explicit commands, then create a new version of any materially changed projection. Preserve prior exported evidence when a frozen before-state matters and visibly mark the old projection stale until a projection-supersession contract exists.
 7. Load the refreshed overview and every affected deep dive through the public boundary. Check concept details and capture visual evidence when readability changed.
 8. Record the refresh result and any detector false positives in the target project and HiveMap HiveMind contexts.
 

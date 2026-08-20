@@ -12,6 +12,17 @@ const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   workspace_resolve: "Resolve a workspace ref by canonical id, slug, or exact name and return the canonical workspace record.",
   project_create: "Create one explicit HiveMap workspace with built-in repository scan profiles.",
   graph_get: "Read the canonical semantic graph for a workspace.",
+  repository_index_list: "List persisted repository index job records for one workspace.",
+  repository_index_get: "Read one persisted repository index job record by workspace id and index id.",
+  repository_index_start: "Persist one explicit repository index job request for the current safe-mode indexing phase.",
+  repository_index_execute: "Execute one safe-mode repository index job and persist resolved commit, files, and chunks.",
+  repository_search: "Search bounded file and chunk evidence inside one completed repository index.",
+  repository_evidence_candidates: "Return bounded repository evidence packets for one scan profile criterion on one completed repository index, plus the effective scan profile, overlay status, coverage summary, and a reminder that scan_profile_overlay_help explains per-repo overlays.",
+  scan_profile_overlay_help: "Explain the optional .hivemap/scan-profiles/<profile>.yaml overlay contract, merge rules, template, defaults behavior, and fail-fast validation for one scan profile.",
+  concept_embedding_upsert: "Store or refresh one explicit concept embedding for a workspace node and model.",
+  concept_embedding_refresh: "Generate or refresh one concept embedding through a configured provider:model ref.",
+  concept_embedding_backfill: "Backfill explicit concept embeddings for selected or all concept nodes through a configured provider:model ref.",
+  concept_similar_list: "Return bounded read-only similar-concept suggestions for one concept node and model.",
   graph_command: "Apply explicit typed commands to the canonical semantic graph.",
   category_assign: "Assign one validated semantic/visual category overlay.",
   projection_get: "Read one named projection over the semantic graph.",
@@ -22,8 +33,8 @@ const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   proposal_apply: "Apply one approved graph proposal to the canonical graph.",
   scan_profile_list: "List versioned agent scan recipes, discovery rules, criteria, SSOT order, and required outputs.",
   scan_list: "List auditable in-progress and completed repository scan runs for a workspace.",
-  scan_start: "Start an agent-executed scan and receive the resolved profile plus exact discovery and completion instructions.",
-  scan_record_coverage: "Record the complete discovered, included, excluded, and failed source inventory for an in-progress scan.",
+  scan_start: "Start an agent-executed scan from one completed repository index and receive derived coverage, effective scan profile, overlay status, coverage warnings, and exact completion instructions.",
+  scan_record_coverage: "Replace the derived coverage for an in-progress scan only when one explicit full correction is needed.",
   scan_finding_create: "Create a validated finding node with stable fingerprint, source claims, severity, and origin scan evidence.",
   finding_update: "Update an active finding status or severity; resolved status requires explicit resolution evidence.",
   scan_complete: "Complete a scan only after coverage, every profile criterion, required output, and finding evidence validate.",
@@ -65,6 +76,90 @@ export function createHiveMapMcpServer(runtime: HiveMapRuntime): McpServer {
 
   registerTool(server, runtime, "graph_get", {
     workspaceId: z.string(),
+  });
+
+  registerTool(server, runtime, "repository_index_list", {
+    workspaceId: z.string(),
+  });
+
+  registerTool(server, runtime, "repository_index_get", {
+    workspaceId: z.string(),
+    indexId: z.string(),
+  });
+
+  registerTool(server, runtime, "repository_index_start", {
+    workspaceId: z.string(),
+    index: z.object({
+      id: z.string(),
+      repositoryUrl: z.string(),
+      requestedRef: z.string().optional(),
+      mode: z.enum(["safe", "deep"]),
+      requestedAt: z.string(),
+      actor: z.object({
+        agentId: z.string(),
+        tool: z.string(),
+      }),
+    }),
+  });
+
+  registerTool(server, runtime, "repository_index_execute", {
+    workspaceId: z.string(),
+    indexId: z.string(),
+  });
+
+  registerTool(server, runtime, "repository_search", {
+    workspaceId: z.string(),
+    indexId: z.string(),
+    query: z.string(),
+    limit: z.number().int().positive().optional(),
+  });
+
+  registerTool(server, runtime, "repository_evidence_candidates", {
+    workspaceId: z.string(),
+    indexId: z.string(),
+    profileId: z.string(),
+    profileVersion: z.number().int().positive(),
+    criterionId: z.string(),
+    limit: z.number().int().positive().optional(),
+  });
+
+  registerTool(server, runtime, "scan_profile_overlay_help", {
+    workspaceId: z.string(),
+    profileId: z.string(),
+    profileVersion: z.number().int().positive(),
+  });
+
+  registerTool(server, runtime, "concept_embedding_upsert", {
+    workspaceId: z.string(),
+    nodeId: z.string(),
+    embedding: z.object({
+      model: z.string(),
+      values: z.array(z.number()),
+      updatedAt: z.string(),
+    }),
+  });
+
+  registerTool(server, runtime, "concept_embedding_refresh", {
+    workspaceId: z.string(),
+    nodeId: z.string(),
+    model: z.string(),
+    force: z.boolean().optional(),
+  });
+
+  registerTool(server, runtime, "concept_embedding_backfill", {
+    workspaceId: z.string(),
+    model: z.string(),
+    nodeIds: z.array(z.string()).optional(),
+    limit: z.number().int().positive().optional(),
+    force: z.boolean().optional(),
+  });
+
+  registerTool(server, runtime, "concept_similar_list", {
+    workspaceId: z.string(),
+    nodeId: z.string(),
+    model: z.string(),
+    limit: z.number().int().positive().optional(),
+    minScore: z.number().optional(),
   });
 
   registerTool(server, runtime, "graph_command", {
@@ -120,13 +215,7 @@ export function createHiveMapMcpServer(runtime: HiveMapRuntime): McpServer {
       id: z.string(),
       profileId: z.string(),
       profileVersion: z.number().int().positive(),
-      repository: z.object({
-        root: z.string(),
-        repositoryUrl: z.string().optional(),
-        branch: z.string(),
-        revision: z.string(),
-        worktreeDigest: z.string().optional(),
-      }),
+      repositoryIndexId: z.string(),
       actor: z.object({ agentId: z.string(), tool: z.string() }),
       startedAt: z.string(),
     }),
@@ -202,7 +291,7 @@ function registerTool(
       inputSchema,
     },
     async (args) => {
-      const result = handleMcpTool(runtime, toolName, args as never);
+      const result = await handleMcpTool(runtime, toolName, args as never);
 
       if (!result.ok) {
         return toolFailureToMcpResult(result);

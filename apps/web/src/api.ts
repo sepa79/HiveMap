@@ -99,7 +99,7 @@ export type SemanticGraph = {
 export type Projection = {
   id: string;
   name: string;
-  type: "conversation-map" | "project-map" | "overview" | "dive-in" | "snapshot";
+  type: "conversation-map" | "project-map" | "overview" | "dive-in";
   rootNodeIds: string[];
   visibleNodeIds: string[];
   visibleEdgeIds: string[];
@@ -168,14 +168,6 @@ export type GraphProposal = {
   status: "pending" | "approved" | "rejected" | "applied" | "superseded";
 };
 
-export type SnapshotRecord = {
-  id: string;
-  createdAt: string;
-  projectionId?: string;
-  graph: SemanticGraph;
-  projection: Projection;
-};
-
 export type WorkspaceState = {
   workspace: {
     id: string;
@@ -190,7 +182,6 @@ export type WorkspaceState = {
   feedbackEvents: FeedbackEvent[];
   proposals: GraphProposal[];
   projections: Projection[];
-  snapshots: SnapshotRecord[];
   scanProfiles: ScanProfile[];
   scanRuns: ScanRun[];
 };
@@ -372,17 +363,6 @@ export async function rejectProposal(workspaceId: string, proposalId: string): P
     { method: "POST", body: {} },
   );
   return response.proposal;
-}
-
-export async function createSnapshot(
-  workspaceId: string,
-  snapshot: { id: string; createdAt: string; projectionId: string },
-): Promise<SnapshotRecord> {
-  const response = await request<{ snapshot: SnapshotRecord }>(`/workspaces/${workspaceId}/snapshots`, {
-    method: "POST",
-    body: { snapshot },
-  });
-  return response.snapshot;
 }
 
 async function request<T>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {

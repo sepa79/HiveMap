@@ -138,6 +138,26 @@ export type RepositoryChunkRecord = {
   contentHash: string;
 };
 
+export type RepositorySymbolRecord = {
+  workspaceId: string;
+  indexId: string;
+  key: string;
+  filePath: string;
+  language: string;
+  name: string;
+  qualifiedName: string;
+  kind: string;
+  parentSymbolKey?: string;
+  startLine: number;
+  startColumn: number;
+  endLine: number;
+  endColumn: number;
+  isExported: boolean;
+  isPublic: boolean;
+  producerTool: string;
+  producerVersion: string;
+};
+
 export type RepositorySearchMatchRecord = {
   kind: "file" | "chunk";
   filePath: string;
@@ -179,11 +199,13 @@ export interface HiveMapStore {
   upsertRepositoryIndex(record: RepositoryIndexRecord): Promise<void>;
   listRepositoryIndexFiles(workspaceId: string, indexId: string): Promise<RepositoryFileRecord[]>;
   listRepositoryIndexChunks(workspaceId: string, indexId: string): Promise<RepositoryChunkRecord[]>;
+  listRepositoryIndexSymbols(workspaceId: string, indexId: string): Promise<RepositorySymbolRecord[]>;
   replaceRepositoryIndexContents(
     workspaceId: string,
     indexId: string,
     files: RepositoryFileRecord[],
     chunks: RepositoryChunkRecord[],
+    symbols?: RepositorySymbolRecord[],
   ): Promise<void>;
   searchRepositoryIndex(workspaceId: string, indexId: string, query: string, limit: number): Promise<RepositorySearchMatchRecord[]>;
 }
@@ -269,12 +291,33 @@ type RepositoryChunkRow = {
   content_hash: string;
 };
 
+type RepositorySymbolRow = {
+  workspace_id: string;
+  index_id: string;
+  key: string;
+  file_path: string;
+  language: string;
+  name: string;
+  qualified_name: string;
+  kind: string;
+  parent_symbol_key: NullableString;
+  start_line: number;
+  start_column: number;
+  end_line: number;
+  end_column: number;
+  is_exported: boolean;
+  is_public: boolean;
+  producer_tool: string;
+  producer_version: string;
+};
+
 export class InMemoryHiveMapStore implements HiveMapStore {
   private readonly workspaces = new Map<string, WorkspaceState>();
   private readonly conceptEmbeddings = new Map<string, ConceptEmbeddingRecord>();
   private readonly repositoryIndexes = new Map<string, RepositoryIndexRecord>();
   private readonly repositoryFiles = new Map<string, RepositoryFileRecord[]>();
   private readonly repositoryChunks = new Map<string, RepositoryChunkRecord[]>();
+  private readonly repositorySymbols = new Map<string, RepositorySymbolRecord[]>();
 
   async initialize(): Promise<void> {}
 
@@ -423,11 +466,22 @@ export class InMemoryHiveMapStore implements HiveMapStore {
     return structuredClone(this.repositoryChunks.get(key) ?? []);
   }
 
+  async listRepositoryIndexSymbols(workspaceId: string, indexId: string): Promise<RepositorySymbolRecord[]> {
+    assertNonEmpty("workspaceId", workspaceId);
+    assertNonEmpty("indexId", indexId);
+    const key = repositoryIndexKey(workspaceId, indexId);
+    if (!this.repositoryIndexes.has(key)) {
+      throw new StorageError(`Repository index not found: ${workspaceId}/${indexId}`);
+    }
+    return structuredClone(this.repositorySymbols.get(key) ?? []);
+  }
+
   async replaceRepositoryIndexContents(
     workspaceId: string,
     indexId: string,
     files: RepositoryFileRecord[],
     chunks: RepositoryChunkRecord[],
+    symbols: RepositorySymbolRecord[] = [],
   ): Promise<void> {
     assertNonEmpty("workspaceId", workspaceId);
     assertNonEmpty("indexId", indexId);
@@ -446,8 +500,13 @@ export class InMemoryHiveMapStore implements HiveMapStore {
       validateRepositoryChunkRecord(chunk);
       assertRepositoryIndexContentOwnership("repository chunk", workspaceId, indexId, chunk.workspaceId, chunk.indexId);
     }
+    for (const symbol of symbols) {
+      validateRepositorySymbolRecord(symbol);
+      assertRepositoryIndexContentOwnership("repository symbol", workspaceId, indexId, symbol.workspaceId, symbol.indexId);
+    }
     this.repositoryFiles.set(key, structuredClone(files));
     this.repositoryChunks.set(key, structuredClone(chunks));
+    this.repositorySymbols.set(key, structuredClone(symbols));
   }
 
   async searchRepositoryIndex(workspaceId: string, indexId: string, query: string, limit: number): Promise<RepositorySearchMatchRecord[]> {
@@ -522,6 +581,7 @@ export class InMemoryHiveMapStore implements HiveMapStore {
         this.repositoryIndexes.delete(key);
         this.repositoryFiles.delete(key);
         this.repositoryChunks.delete(key);
+        this.repositorySymbols.delete(key);
       }
     }
   }
@@ -573,6 +633,11 @@ export class PostgresHiveMapStore implements HiveMapStore {
       if (schemaVersion === "8") {
         await client.query(POSTGRES_V8_TO_V9_SQL);
         schemaVersion = "9";
+      }
+
+      if (schemaVersion === "9") {
+        await client.query(POSTGRES_V9_TO_V10_SQL);
+        schemaVersion = "10";
       }
 
       if (schemaVersion !== POSTGRES_STORAGE_SCHEMA_VERSION) {
@@ -858,11 +923,23 @@ export class PostgresHiveMapStore implements HiveMapStore {
     return result.rows.map((row) => rowToRepositoryChunkRecord(row));
   }
 
+  async listRepositoryIndexSymbols(workspaceId: string, indexId: string): Promise<RepositorySymbolRecord[]> {
+    assertNonEmpty("workspaceId", workspaceId);
+    assertNonEmpty("indexId", indexId);
+    const result = await this.pool.query<RepositorySymbolRow>(
+      "SELECT workspace_id, index_id, key, file_path, language, name, qualified_name, kind, parent_symbol_key, start_line, start_column, end_line, end_column, is_exported, is_public, producer_tool, producer_version " +
+        "FROM repository_symbols WHERE workspace_id = $1 AND index_id = $2 ORDER BY ordinal",
+      [workspaceId, indexId],
+    );
+    return result.rows.map((row) => rowToRepositorySymbolRecord(row));
+  }
+
   async replaceRepositoryIndexContents(
     workspaceId: string,
     indexId: string,
     files: RepositoryFileRecord[],
     chunks: RepositoryChunkRecord[],
+    symbols: RepositorySymbolRecord[] = [],
   ): Promise<void> {
     assertNonEmpty("workspaceId", workspaceId);
     assertNonEmpty("indexId", indexId);
@@ -874,11 +951,16 @@ export class PostgresHiveMapStore implements HiveMapStore {
       validateRepositoryChunkRecord(chunk);
       assertRepositoryIndexContentOwnership("repository chunk", workspaceId, indexId, chunk.workspaceId, chunk.indexId);
     }
+    for (const symbol of symbols) {
+      validateRepositorySymbolRecord(symbol);
+      assertRepositoryIndexContentOwnership("repository symbol", workspaceId, indexId, symbol.workspaceId, symbol.indexId);
+    }
     await this.withTransaction(async (client) => {
       const existing = await client.query("SELECT 1 FROM repository_indexes WHERE workspace_id = $1 AND id = $2 FOR UPDATE", [workspaceId, indexId]);
       if (existing.rowCount !== 1) {
         throw new StorageError(`Repository index not found: ${workspaceId}/${indexId}`);
       }
+      await client.query("DELETE FROM repository_symbols WHERE workspace_id = $1 AND index_id = $2", [workspaceId, indexId]);
       await client.query("DELETE FROM repository_chunks WHERE workspace_id = $1 AND index_id = $2", [workspaceId, indexId]);
       await client.query("DELETE FROM repository_files WHERE workspace_id = $1 AND index_id = $2", [workspaceId, indexId]);
 
@@ -907,6 +989,35 @@ export class PostgresHiveMapStore implements HiveMapStore {
             chunk.endLine,
             chunk.text,
             chunk.contentHash,
+          ],
+        );
+        ordinal += 1;
+      }
+
+      ordinal = 0;
+      for (const symbol of symbols) {
+        await client.query(
+          "INSERT INTO repository_symbols (workspace_id, index_id, key, ordinal, file_path, language, name, qualified_name, kind, parent_symbol_key, start_line, start_column, end_line, end_column, is_exported, is_public, producer_tool, producer_version) " +
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)",
+          [
+            symbol.workspaceId,
+            symbol.indexId,
+            symbol.key,
+            ordinal,
+            symbol.filePath,
+            symbol.language,
+            symbol.name,
+            symbol.qualifiedName,
+            symbol.kind,
+            symbol.parentSymbolKey ?? null,
+            symbol.startLine,
+            symbol.startColumn,
+            symbol.endLine,
+            symbol.endColumn,
+            symbol.isExported,
+            symbol.isPublic,
+            symbol.producerTool,
+            symbol.producerVersion,
           ],
         );
         ordinal += 1;
@@ -1639,6 +1750,28 @@ function rowToRepositoryChunkRecord(row: RepositoryChunkRow): RepositoryChunkRec
   };
 }
 
+function rowToRepositorySymbolRecord(row: RepositorySymbolRow): RepositorySymbolRecord {
+  return {
+    workspaceId: row.workspace_id,
+    indexId: row.index_id,
+    key: row.key,
+    filePath: row.file_path,
+    language: row.language,
+    name: row.name,
+    qualifiedName: row.qualified_name,
+    kind: row.kind,
+    ...(row.parent_symbol_key === null ? {} : { parentSymbolKey: row.parent_symbol_key }),
+    startLine: row.start_line,
+    startColumn: row.start_column,
+    endLine: row.end_line,
+    endColumn: row.end_column,
+    isExported: row.is_exported,
+    isPublic: row.is_public,
+    producerTool: row.producer_tool,
+    producerVersion: row.producer_version,
+  };
+}
+
 function stringifyNullable(value: unknown): string | null {
   return value === undefined ? null : JSON.stringify(value);
 }
@@ -1854,6 +1987,34 @@ function validateRepositoryChunkRecord(record: RepositoryChunkRecord): void {
   }
   if (!Number.isInteger(record.endLine) || record.endLine < record.startLine) {
     throw new StorageError("endLine must be greater than or equal to startLine");
+  }
+}
+
+function validateRepositorySymbolRecord(record: RepositorySymbolRecord): void {
+  assertNonEmpty("workspaceId", record.workspaceId);
+  assertNonEmpty("indexId", record.indexId);
+  assertNonEmpty("key", record.key);
+  assertNonEmpty("filePath", record.filePath);
+  assertNonEmpty("language", record.language);
+  assertNonEmpty("name", record.name);
+  assertNonEmpty("qualifiedName", record.qualifiedName);
+  assertNonEmpty("kind", record.kind);
+  assertNonEmpty("producerTool", record.producerTool);
+  assertNonEmpty("producerVersion", record.producerVersion);
+  if (record.parentSymbolKey !== undefined) {
+    assertNonEmpty("parentSymbolKey", record.parentSymbolKey);
+  }
+  if (!Number.isInteger(record.startLine) || record.startLine < 1) {
+    throw new StorageError("repository symbol startLine must be a positive integer");
+  }
+  if (!Number.isInteger(record.startColumn) || record.startColumn < 0) {
+    throw new StorageError("repository symbol startColumn must be a non-negative integer");
+  }
+  if (!Number.isInteger(record.endLine) || record.endLine < record.startLine) {
+    throw new StorageError("repository symbol endLine must be greater than or equal to startLine");
+  }
+  if (!Number.isInteger(record.endColumn) || record.endColumn < 0) {
+    throw new StorageError("repository symbol endColumn must be a non-negative integer");
   }
 }
 
@@ -2275,52 +2436,6 @@ CREATE TABLE IF NOT EXISTS scan_profiles (
   CHECK (jsonb_typeof(criteria) = 'array')
 );
 
-CREATE TABLE IF NOT EXISTS scan_runs (
-  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  id TEXT NOT NULL,
-  ordinal INTEGER NOT NULL,
-  profile_id TEXT NOT NULL,
-  profile_version INTEGER NOT NULL,
-  status scan_run_status NOT NULL,
-  repository_index_id TEXT,
-  repository_root TEXT NOT NULL,
-  repository_url TEXT,
-  repository_branch TEXT NOT NULL,
-  repository_revision TEXT NOT NULL,
-  repository_worktree_digest TEXT,
-  actor_agent_id TEXT NOT NULL,
-  actor_tool TEXT NOT NULL,
-  started_at TIMESTAMPTZ NOT NULL,
-  coverage JSONB,
-  applied_criteria TEXT[] NOT NULL,
-  declared_outputs scan_required_output[] NOT NULL,
-  finding_node_ids TEXT[] NOT NULL,
-  completed_at TIMESTAMPTZ,
-  graph_digest TEXT,
-  finding_evidence JSONB,
-  PRIMARY KEY (workspace_id, id),
-  UNIQUE (workspace_id, ordinal),
-  FOREIGN KEY (workspace_id, profile_id, profile_version) REFERENCES scan_profiles(workspace_id, id, version) ON DELETE RESTRICT,
-  FOREIGN KEY (workspace_id, repository_index_id) REFERENCES repository_indexes(workspace_id, id) ON DELETE RESTRICT,
-  CHECK (ordinal >= 0),
-  CHECK (btrim(id) <> ''),
-  CHECK (btrim(profile_id) <> ''),
-  CHECK (repository_index_id IS NULL OR btrim(repository_index_id) <> ''),
-  CHECK (profile_version > 0),
-  CHECK (btrim(repository_root) <> ''),
-  CHECK (btrim(repository_branch) <> ''),
-  CHECK (btrim(repository_revision) <> ''),
-  CHECK (btrim(actor_agent_id) <> ''),
-  CHECK (btrim(actor_tool) <> ''),
-  CHECK (coverage IS NULL OR jsonb_typeof(coverage) = 'object'),
-  CHECK (finding_evidence IS NULL OR jsonb_typeof(finding_evidence) = 'array'),
-  CHECK (
-    (status = 'in_progress' AND completed_at IS NULL AND graph_digest IS NULL AND finding_evidence IS NULL)
-    OR
-    (status = 'completed' AND completed_at IS NOT NULL AND graph_digest IS NOT NULL AND coverage IS NOT NULL AND finding_evidence IS NOT NULL)
-  )
-);
-
 CREATE TABLE IF NOT EXISTS repository_indexes (
   workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   id TEXT NOT NULL,
@@ -2364,6 +2479,52 @@ CREATE TABLE IF NOT EXISTS repository_indexes (
     (stage = 'cancelled' AND completed_at IS NOT NULL AND failure_code IS NULL)
     OR
     (stage = 'failed' AND completed_at IS NOT NULL AND failure_code IS NOT NULL)
+  )
+);
+
+CREATE TABLE IF NOT EXISTS scan_runs (
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL,
+  profile_id TEXT NOT NULL,
+  profile_version INTEGER NOT NULL,
+  status scan_run_status NOT NULL,
+  repository_index_id TEXT,
+  repository_root TEXT NOT NULL,
+  repository_url TEXT,
+  repository_branch TEXT NOT NULL,
+  repository_revision TEXT NOT NULL,
+  repository_worktree_digest TEXT,
+  actor_agent_id TEXT NOT NULL,
+  actor_tool TEXT NOT NULL,
+  started_at TIMESTAMPTZ NOT NULL,
+  coverage JSONB,
+  applied_criteria TEXT[] NOT NULL,
+  declared_outputs scan_required_output[] NOT NULL,
+  finding_node_ids TEXT[] NOT NULL,
+  completed_at TIMESTAMPTZ,
+  graph_digest TEXT,
+  finding_evidence JSONB,
+  PRIMARY KEY (workspace_id, id),
+  UNIQUE (workspace_id, ordinal),
+  FOREIGN KEY (workspace_id, profile_id, profile_version) REFERENCES scan_profiles(workspace_id, id, version) ON DELETE RESTRICT,
+  FOREIGN KEY (workspace_id, repository_index_id) REFERENCES repository_indexes(workspace_id, id) ON DELETE RESTRICT,
+  CHECK (ordinal >= 0),
+  CHECK (btrim(id) <> ''),
+  CHECK (btrim(profile_id) <> ''),
+  CHECK (repository_index_id IS NULL OR btrim(repository_index_id) <> ''),
+  CHECK (profile_version > 0),
+  CHECK (btrim(repository_root) <> ''),
+  CHECK (btrim(repository_branch) <> ''),
+  CHECK (btrim(repository_revision) <> ''),
+  CHECK (btrim(actor_agent_id) <> ''),
+  CHECK (btrim(actor_tool) <> ''),
+  CHECK (coverage IS NULL OR jsonb_typeof(coverage) = 'object'),
+  CHECK (finding_evidence IS NULL OR jsonb_typeof(finding_evidence) = 'array'),
+  CHECK (
+    (status = 'in_progress' AND completed_at IS NULL AND graph_digest IS NULL AND finding_evidence IS NULL)
+    OR
+    (status = 'completed' AND completed_at IS NOT NULL AND graph_digest IS NOT NULL AND coverage IS NOT NULL AND finding_evidence IS NOT NULL)
   )
 );
 
@@ -2414,6 +2575,45 @@ CREATE TABLE IF NOT EXISTS repository_chunks (
   CHECK (btrim(content_hash) <> '')
 );
 
+CREATE TABLE IF NOT EXISTS repository_symbols (
+  workspace_id TEXT NOT NULL,
+  index_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  ordinal INTEGER NOT NULL,
+  file_path TEXT NOT NULL,
+  language TEXT NOT NULL,
+  name TEXT NOT NULL,
+  qualified_name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  parent_symbol_key TEXT,
+  start_line INTEGER NOT NULL,
+  start_column INTEGER NOT NULL,
+  end_line INTEGER NOT NULL,
+  end_column INTEGER NOT NULL,
+  is_exported BOOLEAN NOT NULL,
+  is_public BOOLEAN NOT NULL,
+  producer_tool TEXT NOT NULL,
+  producer_version TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, index_id, key),
+  UNIQUE (workspace_id, index_id, ordinal),
+  FOREIGN KEY (workspace_id, index_id) REFERENCES repository_indexes(workspace_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (workspace_id, index_id, file_path) REFERENCES repository_files(workspace_id, index_id, path) ON DELETE CASCADE,
+  CHECK (ordinal >= 0),
+  CHECK (btrim(key) <> ''),
+  CHECK (btrim(file_path) <> ''),
+  CHECK (btrim(language) <> ''),
+  CHECK (btrim(name) <> ''),
+  CHECK (btrim(qualified_name) <> ''),
+  CHECK (btrim(kind) <> ''),
+  CHECK (parent_symbol_key IS NULL OR btrim(parent_symbol_key) <> ''),
+  CHECK (start_line > 0),
+  CHECK (start_column >= 0),
+  CHECK (end_line >= start_line),
+  CHECK (end_column >= 0),
+  CHECK (btrim(producer_tool) <> ''),
+  CHECK (btrim(producer_version) <> '')
+);
+
 CREATE INDEX IF NOT EXISTS workspaces_name_lookup_idx ON workspaces (lower(name));
 CREATE INDEX IF NOT EXISTS workspaces_slug_lookup_idx ON workspaces (lower(slug));
 CREATE INDEX IF NOT EXISTS nodes_graph_type_idx ON nodes (graph_id, type, id);
@@ -2429,12 +2629,13 @@ CREATE INDEX IF NOT EXISTS projections_workspace_type_idx ON projections (worksp
 CREATE INDEX IF NOT EXISTS scan_profiles_workspace_ref_idx ON scan_profiles (workspace_id, id, version DESC);
 CREATE INDEX IF NOT EXISTS scan_runs_workspace_status_started_idx ON scan_runs (workspace_id, status, started_at DESC);
 CREATE INDEX IF NOT EXISTS scan_runs_workspace_profile_idx ON scan_runs (workspace_id, profile_id, profile_version, started_at DESC);
-CREATE INDEX IF NOT EXISTS scan_runs_workspace_repository_index_idx ON scan_runs (workspace_id, repository_index_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS repository_indexes_workspace_stage_updated_idx ON repository_indexes (workspace_id, stage, updated_at DESC);
 CREATE INDEX IF NOT EXISTS repository_indexes_workspace_repo_commit_idx ON repository_indexes (workspace_id, repository_url, resolved_commit);
 CREATE INDEX IF NOT EXISTS repository_files_workspace_index_path_idx ON repository_files (workspace_id, index_id, path);
 CREATE INDEX IF NOT EXISTS repository_chunks_workspace_index_file_idx ON repository_chunks (workspace_id, index_id, file_path, ordinal);
 CREATE INDEX IF NOT EXISTS repository_chunks_text_search_idx ON repository_chunks USING GIN (to_tsvector('simple', text));
+CREATE INDEX IF NOT EXISTS repository_symbols_workspace_index_file_idx ON repository_symbols (workspace_id, index_id, file_path, ordinal);
+CREATE INDEX IF NOT EXISTS repository_symbols_workspace_index_name_idx ON repository_symbols (workspace_id, index_id, qualified_name);
 CREATE INDEX IF NOT EXISTS nodes_finding_origin_scan_idx ON nodes ((metadata->'finding'->>'originScanId')) WHERE type = 'finding';
 CREATE INDEX IF NOT EXISTS nodes_finding_fingerprint_idx ON nodes ((metadata->'finding'->>'fingerprint')) WHERE type = 'finding';
 CREATE INDEX IF NOT EXISTS nodes_metadata_gin_idx ON nodes USING GIN (metadata);
@@ -2625,6 +2826,8 @@ CREATE TABLE IF NOT EXISTS repository_chunks (
 CREATE INDEX IF NOT EXISTS repository_files_workspace_index_path_idx ON repository_files (workspace_id, index_id, path);
 CREATE INDEX IF NOT EXISTS repository_chunks_workspace_index_file_idx ON repository_chunks (workspace_id, index_id, file_path, ordinal);
 CREATE INDEX IF NOT EXISTS repository_chunks_text_search_idx ON repository_chunks USING GIN (to_tsvector('simple', text));
+CREATE INDEX IF NOT EXISTS repository_symbols_workspace_index_file_idx ON repository_symbols (workspace_id, index_id, file_path, ordinal);
+CREATE INDEX IF NOT EXISTS repository_symbols_workspace_index_name_idx ON repository_symbols (workspace_id, index_id, qualified_name);
 `;
 
 const POSTGRES_V8_TO_V9_SQL = `
@@ -2662,4 +2865,48 @@ END
 $$;
 
 CREATE INDEX IF NOT EXISTS scan_runs_workspace_repository_index_idx ON scan_runs (workspace_id, repository_index_id, started_at DESC);
+`;
+
+const POSTGRES_V9_TO_V10_SQL = `
+CREATE TABLE IF NOT EXISTS repository_symbols (
+  workspace_id TEXT NOT NULL,
+  index_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  ordinal INTEGER NOT NULL,
+  file_path TEXT NOT NULL,
+  language TEXT NOT NULL,
+  name TEXT NOT NULL,
+  qualified_name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  parent_symbol_key TEXT,
+  start_line INTEGER NOT NULL,
+  start_column INTEGER NOT NULL,
+  end_line INTEGER NOT NULL,
+  end_column INTEGER NOT NULL,
+  is_exported BOOLEAN NOT NULL,
+  is_public BOOLEAN NOT NULL,
+  producer_tool TEXT NOT NULL,
+  producer_version TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, index_id, key),
+  UNIQUE (workspace_id, index_id, ordinal),
+  FOREIGN KEY (workspace_id, index_id) REFERENCES repository_indexes(workspace_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (workspace_id, index_id, file_path) REFERENCES repository_files(workspace_id, index_id, path) ON DELETE CASCADE,
+  CHECK (ordinal >= 0),
+  CHECK (btrim(key) <> ''),
+  CHECK (btrim(file_path) <> ''),
+  CHECK (btrim(language) <> ''),
+  CHECK (btrim(name) <> ''),
+  CHECK (btrim(qualified_name) <> ''),
+  CHECK (btrim(kind) <> ''),
+  CHECK (parent_symbol_key IS NULL OR btrim(parent_symbol_key) <> ''),
+  CHECK (start_line > 0),
+  CHECK (start_column >= 0),
+  CHECK (end_line >= start_line),
+  CHECK (end_column >= 0),
+  CHECK (btrim(producer_tool) <> ''),
+  CHECK (btrim(producer_version) <> '')
+);
+
+CREATE INDEX IF NOT EXISTS repository_symbols_workspace_index_file_idx ON repository_symbols (workspace_id, index_id, file_path, ordinal);
+CREATE INDEX IF NOT EXISTS repository_symbols_workspace_index_name_idx ON repository_symbols (workspace_id, index_id, qualified_name);
 `;

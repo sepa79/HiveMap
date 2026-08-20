@@ -329,11 +329,12 @@ describe("HiveMapRuntime", () => {
         profileVersion: 1,
         criterionId: "contradictory-claims",
       }),
-    ).resolves.toEqual({
+    ).resolves.toEqual(expect.objectContaining({
       indexId: "repo-index-evidence",
       profileId: "documentation-conflicts",
       profileVersion: 1,
       criterionId: "contradictory-claims",
+      ...expectDefaultOverlayMetadata("documentation-conflicts", ".hivemap/scan-profiles/documentation-conflicts.yaml"),
       candidates: [
         expect.objectContaining({
           signal: "contradictory-claim",
@@ -345,7 +346,7 @@ describe("HiveMapRuntime", () => {
           ]),
         }),
       ],
-    });
+    }));
 
     await expect(
       evidenceRuntime.listRepositoryEvidenceCandidates({
@@ -356,11 +357,12 @@ describe("HiveMapRuntime", () => {
         criterionId: "broken-references",
         limit: 2,
       }),
-    ).resolves.toEqual({
+    ).resolves.toEqual(expect.objectContaining({
       indexId: "repo-index-evidence",
       profileId: "documentation-conflicts",
       profileVersion: 1,
       criterionId: "broken-references",
+      ...expectDefaultOverlayMetadata("documentation-conflicts", ".hivemap/scan-profiles/documentation-conflicts.yaml"),
       candidates: expect.arrayContaining([
         expect.objectContaining({
           signal: "broken-reference",
@@ -387,7 +389,7 @@ describe("HiveMapRuntime", () => {
           ],
         }),
       ]),
-    });
+    }));
 
     await expect(
       evidenceRuntime.listRepositoryEvidenceCandidates({
@@ -397,11 +399,12 @@ describe("HiveMapRuntime", () => {
         profileVersion: 1,
         criterionId: "duplicate-authority",
       }),
-    ).resolves.toEqual({
+    ).resolves.toEqual(expect.objectContaining({
       indexId: "repo-index-evidence",
       profileId: "documentation-conflicts",
       profileVersion: 1,
       criterionId: "duplicate-authority",
+      ...expectDefaultOverlayMetadata("documentation-conflicts", ".hivemap/scan-profiles/documentation-conflicts.yaml"),
       candidates: [
         expect.objectContaining({
           signal: "authority-claim",
@@ -412,7 +415,7 @@ describe("HiveMapRuntime", () => {
           ]),
         }),
       ],
-    });
+    }));
 
     await expect(
       evidenceRuntime.listRepositoryEvidenceCandidates({
@@ -422,17 +425,187 @@ describe("HiveMapRuntime", () => {
         profileVersion: 1,
         criterionId: "missing-owner",
       }),
-    ).resolves.toEqual({
+    ).resolves.toEqual(expect.objectContaining({
       indexId: "repo-index-evidence",
       profileId: "documentation-conflicts",
       profileVersion: 1,
       criterionId: "missing-owner",
+      ...expectDefaultOverlayMetadata("documentation-conflicts", ".hivemap/scan-profiles/documentation-conflicts.yaml"),
       candidates: expect.arrayContaining([
         expect.objectContaining({
           signal: "missing-owner",
           sources: [expect.objectContaining({ filePath: "docs/runbook.md" })],
         }),
       ]),
+    }));
+  });
+
+  it("builds coverage-aware structural evidence candidates for duplicate responsibility", async () => {
+    await seedWorkspaceFixture();
+    const structuralRuntime = new HiveMapRuntime({
+      store,
+      embeddingProviders: { test: createTestEmbeddingProvider() },
+      repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryStructuralEvidenceIndexResult(workspaceId, indexId),
+      now: () => "2026-08-20T18:00:00.000Z",
+    });
+
+    await structuralRuntime.startRepositoryIndex({
+      workspaceId: "workspace-a",
+      index: {
+        id: "repo-index-structural",
+        repositoryUrl: "/fixtures/repo",
+        requestedRef: "main",
+        mode: "safe",
+        requestedAt: "2026-08-20T18:00:00.000Z",
+        actor: {
+          agentId: "codex",
+          tool: "mcp",
+        },
+      },
+    });
+    await structuralRuntime.executeRepositoryIndex({ workspaceId: "workspace-a", indexId: "repo-index-structural" });
+
+    await expect(
+      structuralRuntime.listRepositoryEvidenceCandidates({
+        workspaceId: "workspace-a",
+        indexId: "repo-index-structural",
+        profileId: "code-quality-review",
+        profileVersion: 1,
+        criterionId: "duplicate-responsibility",
+      }),
+    ).resolves.toEqual(expect.objectContaining({
+      indexId: "repo-index-structural",
+      profileId: "code-quality-review",
+      profileVersion: 1,
+      criterionId: "duplicate-responsibility",
+      ...expectDefaultOverlayMetadata("code-quality-review", ".hivemap/scan-profiles/code-quality.yaml"),
+      candidates: [
+        expect.objectContaining({
+          signal: "duplicate-responsibility",
+          kind: "requires_interpretation",
+          summary: expect.stringContaining("RuntimePolicy"),
+          sources: [
+            expect.objectContaining({
+              filePath: "packages/runtime/src/runtime-policy/RuntimePolicy.ts",
+              snippet: "class RuntimePolicy",
+            }),
+            expect.objectContaining({
+              filePath: "packages/storage/src/runtime-policy/RuntimePolicy.ts",
+              snippet: "class RuntimePolicy",
+            }),
+          ],
+        }),
+      ],
+    }));
+  });
+
+  it("applies a repository scan profile overlay from indexed repository files", async () => {
+    await seedWorkspaceFixture();
+    const overlayRuntime = new HiveMapRuntime({
+      store,
+      embeddingProviders: { test: createTestEmbeddingProvider() },
+      repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryOverlayEvidenceIndexResult(workspaceId, indexId),
+      now: () => "2026-08-20T19:00:00.000Z",
+    });
+
+    await overlayRuntime.startRepositoryIndex({
+      workspaceId: "workspace-a",
+      index: {
+        id: "repo-index-overlay",
+        repositoryUrl: "/fixtures/repo",
+        requestedRef: "main",
+        mode: "safe",
+        requestedAt: "2026-08-20T19:00:00.000Z",
+        actor: {
+          agentId: "codex",
+          tool: "mcp",
+        },
+      },
+    });
+    await overlayRuntime.executeRepositoryIndex({ workspaceId: "workspace-a", indexId: "repo-index-overlay" });
+
+    await expect(
+      overlayRuntime.listRepositoryEvidenceCandidates({
+        workspaceId: "workspace-a",
+        indexId: "repo-index-overlay",
+        profileId: "code-quality-review",
+        profileVersion: 1,
+        criterionId: "duplicate-responsibility",
+      }),
+    ).resolves.toEqual(expect.objectContaining({
+      indexId: "repo-index-overlay",
+      profileId: "code-quality-review",
+      profileVersion: 1,
+      criterionId: "duplicate-responsibility",
+      overlay: expect.objectContaining({
+        status: "found",
+        source: "repo",
+        applied: true,
+        overlayPath: ".hivemap/scan-profiles/code-quality.yaml",
+      }),
+      coverageSummary: expect.objectContaining({
+        discoveredCodeFileCount: 2,
+        includedCodeFileCount: 2,
+        warnings: [],
+      }),
+      effectiveProfile: expect.objectContaining({
+        scope: expect.objectContaining({
+          include: expect.arrayContaining(["services/**"]),
+        }),
+      }),
+      candidates: [
+        expect.objectContaining({
+          signal: "duplicate-responsibility",
+          sources: [
+            expect.objectContaining({ filePath: "services/runtime/RuntimePolicy.ts" }),
+            expect.objectContaining({ filePath: "services/storage/RuntimePolicy.ts" }),
+          ],
+        }),
+      ],
+    }));
+  });
+
+  it("fails clearly when a repository scan profile overlay is invalid", async () => {
+    await seedWorkspaceFixture();
+    const overlayRuntime = new HiveMapRuntime({
+      store,
+      embeddingProviders: { test: createTestEmbeddingProvider() },
+      repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryInvalidOverlayIndexResult(workspaceId, indexId),
+      now: () => "2026-08-20T19:00:00.000Z",
+    });
+
+    await overlayRuntime.startRepositoryIndex({
+      workspaceId: "workspace-a",
+      index: {
+        id: "repo-index-invalid-overlay",
+        repositoryUrl: "/fixtures/repo",
+        requestedRef: "main",
+        mode: "safe",
+        requestedAt: "2026-08-20T19:00:00.000Z",
+        actor: {
+          agentId: "codex",
+          tool: "mcp",
+        },
+      },
+    });
+    await overlayRuntime.executeRepositoryIndex({ workspaceId: "workspace-a", indexId: "repo-index-invalid-overlay" });
+
+    await expect(
+      overlayRuntime.listRepositoryEvidenceCandidates({
+        workspaceId: "workspace-a",
+        indexId: "repo-index-invalid-overlay",
+        profileId: "code-quality-review",
+        profileVersion: 1,
+        criterionId: "duplicate-responsibility",
+      }),
+    ).rejects.toMatchObject({
+      code: "SCAN_PROFILE_OVERLAY_INVALID",
+      details: {
+        overlayPath: ".hivemap/scan-profiles/code-quality.yaml",
+        profileId: "code-quality-review",
+        profileVersion: 1,
+        guidanceTool: "scan_profile_overlay_help",
+      },
     });
   });
 
@@ -469,13 +642,14 @@ describe("HiveMapRuntime", () => {
         profileVersion: 1,
         criterionId: "contradictory-claims",
       }),
-    ).resolves.toEqual({
+    ).resolves.toEqual(expect.objectContaining({
       indexId: "repo-index-precision",
       profileId: "documentation-conflicts",
       profileVersion: 1,
       criterionId: "contradictory-claims",
+      ...expectDefaultOverlayMetadata("documentation-conflicts", ".hivemap/scan-profiles/documentation-conflicts.yaml"),
       candidates: [],
-    });
+    }));
 
     await expect(
       precisionRuntime.listRepositoryEvidenceCandidates({
@@ -485,13 +659,14 @@ describe("HiveMapRuntime", () => {
         profileVersion: 1,
         criterionId: "duplicate-authority",
       }),
-    ).resolves.toEqual({
+    ).resolves.toEqual(expect.objectContaining({
       indexId: "repo-index-precision",
       profileId: "documentation-conflicts",
       profileVersion: 1,
       criterionId: "duplicate-authority",
+      ...expectDefaultOverlayMetadata("documentation-conflicts", ".hivemap/scan-profiles/documentation-conflicts.yaml"),
       candidates: [],
-    });
+    }));
 
     await expect(
       precisionRuntime.listRepositoryEvidenceCandidates({
@@ -501,13 +676,57 @@ describe("HiveMapRuntime", () => {
         profileVersion: 1,
         criterionId: "missing-owner",
       }),
-    ).resolves.toEqual({
+    ).resolves.toEqual(expect.objectContaining({
       indexId: "repo-index-precision",
       profileId: "documentation-conflicts",
       profileVersion: 1,
       criterionId: "missing-owner",
+      ...expectDefaultOverlayMetadata("documentation-conflicts", ".hivemap/scan-profiles/documentation-conflicts.yaml"),
       candidates: [],
+    }));
+  });
+
+  it("does not treat repeated semantic-ssot invariants as duplicate document authority", async () => {
+    await seedWorkspaceFixture();
+    const invariantRuntime = new HiveMapRuntime({
+      store,
+      embeddingProviders: { test: createTestEmbeddingProvider() },
+      repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryEvidenceSemanticInvariantResult(workspaceId, indexId),
+      now: () => "2026-08-19T23:00:00.000Z",
     });
+
+    await invariantRuntime.startRepositoryIndex({
+      workspaceId: "workspace-a",
+      index: {
+        id: "repo-index-semantic-invariants",
+        repositoryUrl: "/fixtures/repo",
+        requestedRef: "main",
+        mode: "safe",
+        requestedAt: "2026-08-20T12:00:00.000Z",
+        actor: {
+          agentId: "codex",
+          tool: "mcp",
+        },
+      },
+    });
+    await invariantRuntime.executeRepositoryIndex({ workspaceId: "workspace-a", indexId: "repo-index-semantic-invariants" });
+
+    await expect(
+      invariantRuntime.listRepositoryEvidenceCandidates({
+        workspaceId: "workspace-a",
+        indexId: "repo-index-semantic-invariants",
+        profileId: "documentation-conflicts",
+        profileVersion: 1,
+        criterionId: "duplicate-authority",
+      }),
+    ).resolves.toEqual(expect.objectContaining({
+      indexId: "repo-index-semantic-invariants",
+      profileId: "documentation-conflicts",
+      profileVersion: 1,
+      criterionId: "duplicate-authority",
+      ...expectDefaultOverlayMetadata("documentation-conflicts", ".hivemap/scan-profiles/documentation-conflicts.yaml"),
+      candidates: [],
+    }));
   });
 
   it("flags lower-precedence current-looking docs as stale when stronger SSOT contradicts them", async () => {
@@ -543,11 +762,12 @@ describe("HiveMapRuntime", () => {
         profileVersion: 1,
         criterionId: "stale-documentation",
       }),
-    ).resolves.toEqual({
+    ).resolves.toEqual(expect.objectContaining({
       indexId: "repo-index-stale",
       profileId: "documentation-conflicts",
       profileVersion: 1,
       criterionId: "stale-documentation",
+      ...expectDefaultOverlayMetadata("documentation-conflicts", ".hivemap/scan-profiles/documentation-conflicts.yaml"),
       candidates: [
         expect.objectContaining({
           signal: "stale-documentation",
@@ -559,7 +779,7 @@ describe("HiveMapRuntime", () => {
           ]),
         }),
       ],
-    });
+    }));
   });
 
   it("does not treat legacy higher-precedence docs as the authoritative stale baseline", async () => {
@@ -595,13 +815,14 @@ describe("HiveMapRuntime", () => {
         profileVersion: 1,
         criterionId: "stale-documentation",
       }),
-    ).resolves.toEqual({
+    ).resolves.toEqual(expect.objectContaining({
       indexId: "repo-index-legacy-authority",
       profileId: "documentation-conflicts",
       profileVersion: 1,
       criterionId: "stale-documentation",
+      ...expectDefaultOverlayMetadata("documentation-conflicts", ".hivemap/scan-profiles/documentation-conflicts.yaml"),
       candidates: [],
-    });
+    }));
   });
 
   it("does not flag valid unicode markdown heading links as broken references", async () => {
@@ -637,13 +858,100 @@ describe("HiveMapRuntime", () => {
         profileVersion: 1,
         criterionId: "broken-references",
       }),
-    ).resolves.toEqual({
+    ).resolves.toEqual(expect.objectContaining({
       indexId: "repo-index-unicode-heading",
       profileId: "documentation-conflicts",
       profileVersion: 1,
       criterionId: "broken-references",
+      ...expectDefaultOverlayMetadata("documentation-conflicts", ".hivemap/scan-profiles/documentation-conflicts.yaml"),
       candidates: [],
+    }));
+  });
+
+  it("does not flag repository links that point to files outside scan coverage", async () => {
+    await seedWorkspaceFixture();
+    const rootLinkRuntime = new HiveMapRuntime({
+      store,
+      embeddingProviders: { test: createTestEmbeddingProvider() },
+      repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryEvidenceRootLinkResult(workspaceId, indexId),
+      now: () => "2026-08-19T23:00:00.000Z",
     });
+
+    await rootLinkRuntime.startRepositoryIndex({
+      workspaceId: "workspace-a",
+      index: {
+        id: "repo-index-root-link",
+        repositoryUrl: "/fixtures/repo",
+        requestedRef: "main",
+        mode: "safe",
+        requestedAt: "2026-08-20T12:00:00.000Z",
+        actor: {
+          agentId: "codex",
+          tool: "mcp",
+        },
+      },
+    });
+    await rootLinkRuntime.executeRepositoryIndex({ workspaceId: "workspace-a", indexId: "repo-index-root-link" });
+
+    await expect(
+      rootLinkRuntime.listRepositoryEvidenceCandidates({
+        workspaceId: "workspace-a",
+        indexId: "repo-index-root-link",
+        profileId: "documentation-conflicts",
+        profileVersion: 1,
+        criterionId: "broken-references",
+      }),
+    ).resolves.toEqual(expect.objectContaining({
+      indexId: "repo-index-root-link",
+      profileId: "documentation-conflicts",
+      profileVersion: 1,
+      criterionId: "broken-references",
+      ...expectDefaultOverlayMetadata("documentation-conflicts", ".hivemap/scan-profiles/documentation-conflicts.yaml"),
+      candidates: [],
+    }));
+  });
+
+  it("does not treat nested readmes and broad design docs as missing-owner candidates by default", async () => {
+    await seedWorkspaceFixture();
+    const ownershipRuntime = new HiveMapRuntime({
+      store,
+      embeddingProviders: { test: createTestEmbeddingProvider() },
+      repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryEvidenceOwnershipScopeResult(workspaceId, indexId),
+      now: () => "2026-08-19T23:00:00.000Z",
+    });
+
+    await ownershipRuntime.startRepositoryIndex({
+      workspaceId: "workspace-a",
+      index: {
+        id: "repo-index-ownership-scope",
+        repositoryUrl: "/fixtures/repo",
+        requestedRef: "main",
+        mode: "safe",
+        requestedAt: "2026-08-20T12:00:00.000Z",
+        actor: {
+          agentId: "codex",
+          tool: "mcp",
+        },
+      },
+    });
+    await ownershipRuntime.executeRepositoryIndex({ workspaceId: "workspace-a", indexId: "repo-index-ownership-scope" });
+
+    await expect(
+      ownershipRuntime.listRepositoryEvidenceCandidates({
+        workspaceId: "workspace-a",
+        indexId: "repo-index-ownership-scope",
+        profileId: "documentation-conflicts",
+        profileVersion: 1,
+        criterionId: "missing-owner",
+      }),
+    ).resolves.toEqual(expect.objectContaining({
+      indexId: "repo-index-ownership-scope",
+      profileId: "documentation-conflicts",
+      profileVersion: 1,
+      criterionId: "missing-owner",
+      ...expectDefaultOverlayMetadata("documentation-conflicts", ".hivemap/scan-profiles/documentation-conflicts.yaml"),
+      candidates: [],
+    }));
   });
 
   it("re-runs completed and failed repository indexes by clearing old terminal state and replacing old contents", async () => {
@@ -1047,6 +1355,26 @@ describe("HiveMapRuntime", () => {
       }),
     ).rejects.toThrow("requires delegated capture");
   });
+
+  it("returns scan profile overlay help for repository-local scan customization", async () => {
+    await seedWorkspaceFixture();
+
+    await expect(
+      runtime.getScanProfileOverlayHelp({
+        workspaceId: "workspace-a",
+        profileId: "code-quality-review",
+        profileVersion: 1,
+      }),
+    ).resolves.toEqual(expect.objectContaining({
+      profileId: "code-quality-review",
+      profileVersion: 1,
+      overlayPath: ".hivemap/scan-profiles/code-quality.yaml",
+      guidanceTool: "scan_profile_overlay_help",
+      baseScope: expect.objectContaining({
+        include: expect.arrayContaining(["src/**", "apps/**", "packages/**"]),
+      }),
+    }));
+  });
 });
 
 async function seedWorkspaceFixture(
@@ -1157,6 +1485,23 @@ function createSequenceRepositoryIndexExecutor(sequence: Array<ReturnType<typeof
       files: next.files.map((file) => ({ ...file, workspaceId, indexId })),
       chunks: next.chunks.map((chunk) => ({ ...chunk, workspaceId, indexId })),
     };
+  };
+}
+
+function expectDefaultOverlayMetadata(profileId: string, overlayPath: string) {
+  return {
+    baseProfile: expect.objectContaining({ id: profileId, version: 1 }),
+    effectiveProfile: expect.objectContaining({ id: profileId, version: 1 }),
+    overlay: expect.objectContaining({
+      status: "missing",
+      source: "defaults",
+      applied: false,
+      overlayPath,
+      guidanceTool: "scan_profile_overlay_help",
+    }),
+    coverageSummary: expect.objectContaining({
+      warnings: expect.any(Array),
+    }),
   };
 }
 
@@ -1312,7 +1657,7 @@ function createRepositoryEvidenceIndexResult(
         sourceKind: "documentation",
         startLine: 1,
         endLine: 4,
-        text: "# Architecture\nThis document is the single source of truth for ownership.\nSee [Missing Guide](missing.md).\nSee [Guide section](guide.md#missing-section).",
+        text: "# Architecture\nThis document is the single source of truth for runtime storage ownership.\nSee [Missing Guide](missing.md).\nSee [Guide section](guide.md#missing-section).",
         contentHash: "chunk-hash-arch",
       },
       {
@@ -1324,7 +1669,7 @@ function createRepositoryEvidenceIndexResult(
         sourceKind: "documentation",
         startLine: 1,
         endLine: 3,
-        text: "# Guide\nCanonical workflow owner guidance lives here.\n## Existing Section",
+        text: "# Guide\nCanonical runtime storage owner guidance lives here.\n## Existing Section",
         contentHash: "chunk-hash-guide",
       },
       {
@@ -1393,6 +1738,143 @@ function createRepositoryEvidenceIndexResult(
       chunkCount: 7,
       indexedBytes: 820,
     },
+  };
+}
+
+function createRepositoryOverlayEvidenceIndexResult(
+  workspaceId = "workspace-a",
+  indexId = "repo-index-a",
+): Awaited<ReturnType<RepositoryIndexExecutor>> {
+  return {
+    resolvedCommit: "4444444444444444444444444444444444444444",
+    files: [
+      {
+        workspaceId,
+        indexId,
+        path: ".hivemap/scan-profiles/code-quality.yaml",
+        language: "yaml",
+        sourceKind: "config",
+        contentHash: "hash-overlay",
+        byteSize: 120,
+      },
+      {
+        workspaceId,
+        indexId,
+        path: "services/runtime/RuntimePolicy.ts",
+        language: "typescript",
+        sourceKind: "code",
+        contentHash: "hash-service-runtime",
+        byteSize: 120,
+      },
+      {
+        workspaceId,
+        indexId,
+        path: "services/storage/RuntimePolicy.ts",
+        language: "typescript",
+        sourceKind: "code",
+        contentHash: "hash-service-storage",
+        byteSize: 120,
+      },
+    ],
+    chunks: [
+      {
+        workspaceId,
+        indexId,
+        id: "chunk-overlay",
+        filePath: ".hivemap/scan-profiles/code-quality.yaml",
+        language: "yaml",
+        sourceKind: "config",
+        startLine: 1,
+        endLine: 7,
+        text: "formatVersion: 1\nprofileId: code-quality-review\ninclude:\n  - services/**\nlegacyPatterns:\n  - legacy/**",
+        contentHash: "chunk-hash-overlay",
+      },
+      {
+        workspaceId,
+        indexId,
+        id: "chunk-service-runtime",
+        filePath: "services/runtime/RuntimePolicy.ts",
+        language: "typescript",
+        sourceKind: "code",
+        startLine: 1,
+        endLine: 3,
+        text: "export class RuntimePolicy {\n  describe() { return 'runtime'; }\n}",
+        contentHash: "chunk-hash-service-runtime",
+      },
+      {
+        workspaceId,
+        indexId,
+        id: "chunk-service-storage",
+        filePath: "services/storage/RuntimePolicy.ts",
+        language: "typescript",
+        sourceKind: "code",
+        startLine: 1,
+        endLine: 3,
+        text: "export class RuntimePolicy {\n  describe() { return 'storage'; }\n}",
+        contentHash: "chunk-hash-service-storage",
+      },
+    ],
+    symbols: [
+      {
+        workspaceId,
+        indexId,
+        key: "services/runtime/RuntimePolicy.ts::RuntimePolicy",
+        filePath: "services/runtime/RuntimePolicy.ts",
+        language: "typescript",
+        name: "RuntimePolicy",
+        qualifiedName: "RuntimePolicy",
+        kind: "class",
+        startLine: 1,
+        startColumn: 1,
+        endLine: 3,
+        endColumn: 1,
+        isExported: true,
+        isPublic: true,
+        producerTool: "tree-sitter",
+        producerVersion: "test",
+      },
+      {
+        workspaceId,
+        indexId,
+        key: "services/storage/RuntimePolicy.ts::RuntimePolicy",
+        filePath: "services/storage/RuntimePolicy.ts",
+        language: "typescript",
+        name: "RuntimePolicy",
+        qualifiedName: "RuntimePolicy",
+        kind: "class",
+        startLine: 1,
+        startColumn: 1,
+        endLine: 3,
+        endColumn: 1,
+        isExported: true,
+        isPublic: true,
+        producerTool: "tree-sitter",
+        producerVersion: "test",
+      },
+    ],
+    stats: {
+      fileCount: 3,
+      chunkCount: 3,
+      indexedBytes: 360,
+    },
+  };
+}
+
+function createRepositoryInvalidOverlayIndexResult(
+  workspaceId = "workspace-a",
+  indexId = "repo-index-a",
+): Awaited<ReturnType<RepositoryIndexExecutor>> {
+  const result = createRepositoryOverlayEvidenceIndexResult(workspaceId, indexId);
+  return {
+    ...result,
+    chunks: result.chunks.map((chunk) =>
+      chunk.filePath === ".hivemap/scan-profiles/code-quality.yaml"
+        ? {
+            ...chunk,
+            text: "formatVersion: 2\nprofileId: code-quality-review\ninclude:\n  - services/**",
+          }
+        : chunk,
+    ),
   };
 }
 
@@ -1473,6 +1955,128 @@ function createRepositoryEvidenceNoiseResult(
       fileCount: 3,
       chunkCount: 3,
       indexedBytes: 320,
+    },
+  };
+}
+
+function createRepositoryStructuralEvidenceIndexResult(
+  workspaceId = "workspace-a",
+  indexId = "repo-index-a",
+): Awaited<ReturnType<RepositoryIndexExecutor>> {
+  return {
+    resolvedCommit: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    files: [
+      {
+        workspaceId,
+        indexId,
+        path: "packages/runtime/src/runtime-policy/RuntimePolicy.ts",
+        language: "typescript",
+        sourceKind: "code",
+        contentHash: "struct-runtime-policy",
+        byteSize: 120,
+      },
+      {
+        workspaceId,
+        indexId,
+        path: "packages/storage/src/runtime-policy/RuntimePolicy.ts",
+        language: "typescript",
+        sourceKind: "code",
+        contentHash: "struct-storage-policy",
+        byteSize: 128,
+      },
+      {
+        workspaceId,
+        indexId,
+        path: "packages/runtime/tests/RuntimePolicyHarness.ts",
+        language: "typescript",
+        sourceKind: "test",
+        contentHash: "struct-test-policy",
+        byteSize: 84,
+      },
+      {
+        workspaceId,
+        indexId,
+        path: "docs/specs/runtime-policy.md",
+        language: "markdown",
+        sourceKind: "documentation",
+        contentHash: "struct-doc-policy",
+        byteSize: 96,
+      },
+    ],
+    chunks: [
+      {
+        workspaceId,
+        indexId,
+        id: "struct-doc-policy",
+        filePath: "docs/specs/runtime-policy.md",
+        language: "markdown",
+        sourceKind: "documentation",
+        startLine: 1,
+        endLine: 2,
+        text: "# Runtime Policy\nContract for runtime ownership boundaries.",
+        contentHash: "struct-doc-policy-chunk",
+      },
+    ],
+    symbols: [
+      {
+        workspaceId,
+        indexId,
+        key: "runtime-policy",
+        filePath: "packages/runtime/src/runtime-policy/RuntimePolicy.ts",
+        language: "typescript",
+        name: "RuntimePolicy",
+        qualifiedName: "RuntimePolicy",
+        kind: "class",
+        startLine: 1,
+        startColumn: 0,
+        endLine: 8,
+        endColumn: 1,
+        isExported: true,
+        isPublic: false,
+        producerTool: "test",
+        producerVersion: "1",
+      },
+      {
+        workspaceId,
+        indexId,
+        key: "storage-policy",
+        filePath: "packages/storage/src/runtime-policy/RuntimePolicy.ts",
+        language: "typescript",
+        name: "RuntimePolicy",
+        qualifiedName: "RuntimePolicy",
+        kind: "class",
+        startLine: 1,
+        startColumn: 0,
+        endLine: 10,
+        endColumn: 1,
+        isExported: true,
+        isPublic: false,
+        producerTool: "test",
+        producerVersion: "1",
+      },
+      {
+        workspaceId,
+        indexId,
+        key: "test-policy-harness",
+        filePath: "packages/runtime/tests/RuntimePolicyHarness.ts",
+        language: "typescript",
+        name: "RuntimePolicy",
+        qualifiedName: "RuntimePolicy",
+        kind: "class",
+        startLine: 1,
+        startColumn: 0,
+        endLine: 6,
+        endColumn: 1,
+        isExported: true,
+        isPublic: false,
+        producerTool: "test",
+        producerVersion: "1",
+      },
+    ],
+    stats: {
+      fileCount: 4,
+      chunkCount: 1,
+      indexedBytes: 428,
     },
   };
 }
@@ -1674,6 +2278,174 @@ function createRepositoryEvidenceUnicodeHeadingResult(
       fileCount: 2,
       chunkCount: 2,
       indexedBytes: 290,
+    },
+  };
+}
+
+function createRepositoryEvidenceRootLinkResult(
+  workspaceId = "workspace-a",
+  indexId = "repo-index-a",
+): Awaited<ReturnType<RepositoryIndexExecutor>> {
+  return {
+    resolvedCommit: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    files: [
+      {
+        workspaceId,
+        indexId,
+        path: "README.md",
+        language: "markdown",
+        sourceKind: "documentation",
+        contentHash: "root-link-readme",
+        byteSize: 120,
+      },
+      {
+        workspaceId,
+        indexId,
+        path: "LICENSE",
+        language: "text",
+        sourceKind: "other",
+        contentHash: "root-link-license",
+        byteSize: 64,
+      },
+    ],
+    chunks: [
+      {
+        workspaceId,
+        indexId,
+        id: "root-link-readme",
+        filePath: "README.md",
+        language: "markdown",
+        sourceKind: "documentation",
+        startLine: 1,
+        endLine: 2,
+        text: "# HiveMap\nSee [License](LICENSE).",
+        contentHash: "root-link-readme",
+      },
+    ],
+    stats: {
+      fileCount: 2,
+      chunkCount: 1,
+      indexedBytes: 184,
+    },
+  };
+}
+
+function createRepositoryEvidenceOwnershipScopeResult(
+  workspaceId = "workspace-a",
+  indexId = "repo-index-a",
+): Awaited<ReturnType<RepositoryIndexExecutor>> {
+  return {
+    resolvedCommit: "ffffffffffffffffffffffffffffffffffffffff",
+    files: [
+      {
+        workspaceId,
+        indexId,
+        path: "packages/runtime/README.md",
+        language: "markdown",
+        sourceKind: "documentation",
+        contentHash: "ownership-scope-readme",
+        byteSize: 120,
+      },
+      {
+        workspaceId,
+        indexId,
+        path: "docs/design/runtime-overview.md",
+        language: "markdown",
+        sourceKind: "documentation",
+        contentHash: "ownership-scope-design",
+        byteSize: 140,
+      },
+    ],
+    chunks: [
+      {
+        workspaceId,
+        indexId,
+        id: "ownership-scope-readme",
+        filePath: "packages/runtime/README.md",
+        language: "markdown",
+        sourceKind: "documentation",
+        startLine: 1,
+        endLine: 2,
+        text: "# Runtime Package\nPackage notes and local development tips.",
+        contentHash: "ownership-scope-readme",
+      },
+      {
+        workspaceId,
+        indexId,
+        id: "ownership-scope-design",
+        filePath: "docs/design/runtime-overview.md",
+        language: "markdown",
+        sourceKind: "documentation",
+        startLine: 1,
+        endLine: 2,
+        text: "# Runtime Overview\nThe runtime should stay small and explicit.",
+        contentHash: "ownership-scope-design",
+      },
+    ],
+    stats: {
+      fileCount: 2,
+      chunkCount: 2,
+      indexedBytes: 260,
+    },
+  };
+}
+
+function createRepositoryEvidenceSemanticInvariantResult(
+  workspaceId = "workspace-a",
+  indexId = "repo-index-a",
+): Awaited<ReturnType<RepositoryIndexExecutor>> {
+  return {
+    resolvedCommit: "9999999999999999999999999999999999999999",
+    files: [
+      {
+        workspaceId,
+        indexId,
+        path: "AGENTS.md",
+        language: "markdown",
+        sourceKind: "documentation",
+        contentHash: "semantic-invariant-agents",
+        byteSize: 120,
+      },
+      {
+        workspaceId,
+        indexId,
+        path: "README.md",
+        language: "markdown",
+        sourceKind: "documentation",
+        contentHash: "semantic-invariant-readme",
+        byteSize: 120,
+      },
+    ],
+    chunks: [
+      {
+        workspaceId,
+        indexId,
+        id: "semantic-invariant-agents",
+        filePath: "AGENTS.md",
+        language: "markdown",
+        sourceKind: "documentation",
+        startLine: 1,
+        endLine: 2,
+        text: "# Rules\nThe semantic graph is the source of truth.",
+        contentHash: "semantic-invariant-agents",
+      },
+      {
+        workspaceId,
+        indexId,
+        id: "semantic-invariant-readme",
+        filePath: "README.md",
+        language: "markdown",
+        sourceKind: "documentation",
+        startLine: 1,
+        endLine: 2,
+        text: "# Overview\nSemantic graph data is the source of truth; UI maps are projections.",
+        contentHash: "semantic-invariant-readme",
+      },
+    ],
+    stats: {
+      fileCount: 2,
+      chunkCount: 2,
+      indexedBytes: 240,
     },
   };
 }

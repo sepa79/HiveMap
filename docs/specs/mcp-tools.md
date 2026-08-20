@@ -9,6 +9,13 @@ Draft MCP surface for agents. MCP is the primary HiveMap agent interface for alp
 - `workspace_resolve`
 - `project_create`
 - `graph_get`
+- `repository_index_list`
+- `repository_index_get`
+- `repository_index_start`
+- `repository_index_execute`
+- `repository_search`
+- `repository_evidence_candidates`
+- `scan_profile_overlay_help`
 - `graph_command`
 - `category_assign`
 - `projection_get`
@@ -41,6 +48,7 @@ Draft MCP surface for agents. MCP is the primary HiveMap agent interface for alp
 - REST endpoints, if present, must call the same command handlers as MCP tools.
 - Scan tools instruct and validate an agent; they do not silently crawl the repository.
 - ZIP paths and import mode are explicit. Import never merges or rewrites ids silently.
+- Repository-index tools persist explicit job records; they do not silently crawl or execute repository code in this phase.
 
 ## Implementation Direction
 
@@ -54,6 +62,31 @@ Agents discover a workspace before calling graph or scan tools:
 2. `workspace_resolve({ ref })` converts a user-facing id, slug, or exact name into one canonical workspace record.
 3. `workspace_get({ workspaceId })` can fetch one canonical lightweight workspace record directly by id.
 4. Tools such as `graph_get` and `scan_start` then use the returned canonical `workspaceId`.
+
+Repository index flow in the current phase:
+
+1. `repository_index_start({ workspaceId, index })` persists one explicit safe-mode request with stage `requested`.
+2. `repository_index_execute({ workspaceId, indexId })` runs the current minimal safe-mode indexer for one persisted request.
+3. `repository_index_list({ workspaceId })` lists persisted job records for that workspace.
+4. `repository_index_get({ workspaceId, indexId })` reads one job record and its current lifecycle stage.
+5. `repository_search({ workspaceId, indexId, query, limit })` searches bounded file/chunk evidence inside one completed repository index.
+6. `repository_evidence_candidates({ workspaceId, indexId, profileId, profileVersion, criterionId, limit })` returns bounded criterion-scoped evidence packets plus the effective profile, overlay status, and coverage summary when HiveMap can pre-select deterministic or interpretation-ready sources.
+7. `scan_profile_overlay_help({ workspaceId, profileId, profileVersion })` explains the optional repository-local overlay contract at `.hivemap/scan-profiles/<profile>.yaml`, including template, merge rules, defaults behavior, and fail-fast validation.
+
+Scan flow in the current repository-index-backed phase:
+
+1. `repository_index_start({ workspaceId, index })` persists one explicit repository-index request.
+2. `repository_index_execute({ workspaceId, indexId })` completes the safe-mode file/chunk index for one exact revision.
+3. `scan_start({ workspaceId, scan: { id, profileId, profileVersion, repositoryIndexId, actor, startedAt } })` starts one scan from that completed index, derives coverage from the effective profile include/exclude rules, and returns the base profile, effective profile, overlay status, coverage summary, and instructions.
+4. `repository_evidence_candidates(...)` should be called per criterion when the selected profile/rule can use bounded evidence packets instead of raw repository discovery.
+5. `scan_record_coverage({ workspaceId, scanId, coverage })` remains available only when the caller needs an explicit coverage override or correction.
+
+Overlay discovery rules in the current phase:
+
+- Scan-profile overlays are optional repository-local YAML files under `.hivemap/scan-profiles/<profile>.yaml`.
+- Missing overlay files keep the built-in profile defaults active.
+- Invalid overlay files fail `scan_start` and `repository_evidence_candidates` clearly; there is no silent fallback.
+- Agents should call `scan_profile_overlay_help` instead of guessing overlay fields or merge behavior.
 
 `workspace_resolve` error codes:
 

@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { posix as pathPosix } from "node:path";
-
 import {
   validateBackfillConceptEmbeddingsRequest,
   validateExecuteRepositoryIndexRequest,
+  validateGetScanProfileOverlayHelpRequest,
   validateGetRepositoryIndexRequest,
   validateGetWorkspaceSummaryRequest,
   validateListRepositoryIndexesRequest,
@@ -52,6 +52,8 @@ import {
   type CreateWorkspaceResponse,
   type GetWorkspaceSummaryRequest,
   type GetWorkspaceSummaryResponse,
+  type GetScanProfileOverlayHelpRequest,
+  type GetScanProfileOverlayHelpResponse,
   type GetCategoriesResponse,
   type GetGraphRequest,
   type GetGraphResponse,
@@ -67,6 +69,8 @@ import {
   type ListRepositoryEvidenceCandidatesResponse,
   type RepositoryEvidenceCandidate,
   type RepositoryEvidenceSource,
+  type ScanCoverageSummary,
+  type ScanProfileOverlayResolution,
   type GetWorkspaceResponse,
   type ListFeedbackRequest,
   type ListFeedbackResponse,
@@ -124,12 +128,16 @@ import { createDiveInProjection, createOverviewProjection, createProjectMapProje
 import {
   INITIAL_SCAN_PROFILES,
   compareCompletedScans,
+  applyScanProfileOverlay,
   createFindingNode,
+  getScanProfileOverlayPath,
+  SCAN_PROFILE_OVERLAY_FORMAT_VERSION,
   toFindingEvidence,
   updateFindingNode,
   validateScanRun,
   type ScanCoverage,
   type ScanProfile,
+  type ScanProfileOverlay,
   type CompletedScanRun,
   type InProgressScanRun,
 } from "@hivemap/scans";
@@ -145,6 +153,7 @@ import {
   type SimilarConceptMatchRecord,
   type RepositoryIndexRecord,
   type RepositoryChunkRecord,
+  type RepositorySymbolRecord,
   type WorkspaceRecord,
   type WorkspaceState,
 } from "@hivemap/storage";
@@ -321,7 +330,7 @@ export class HiveMapRuntime {
 
     await this.store.upsertRepositoryIndex(createRepositoryIndexExecutionRecord(index, this.now()));
     if (isRepositoryIndexTerminalStage(index.stage)) {
-      await this.store.replaceRepositoryIndexContents(request.workspaceId, request.indexId, [], []);
+      await this.store.replaceRepositoryIndexContents(request.workspaceId, request.indexId, [], [], []);
     }
 
     try {
@@ -341,7 +350,13 @@ export class HiveMapRuntime {
       await this.bumpRepositoryIndexStage(request.workspaceId, request.indexId, "normalizing", {
         resolvedCommit: result.resolvedCommit,
       });
-      await this.store.replaceRepositoryIndexContents(request.workspaceId, request.indexId, result.files, result.chunks);
+      await this.store.replaceRepositoryIndexContents(
+        request.workspaceId,
+        request.indexId,
+        result.files,
+        result.chunks,
+        result.symbols ?? [],
+      );
 
       const completedAt = this.now();
       const completed: RepositoryIndexRecord = {
@@ -416,20 +431,34 @@ export class HiveMapRuntime {
 
     const files = await this.store.listRepositoryIndexFiles(request.workspaceId, request.indexId);
     const chunks = await this.store.listRepositoryIndexChunks(request.workspaceId, request.indexId);
+    const symbols = await this.store.listRepositoryIndexSymbols(request.workspaceId, request.indexId);
+    const profileContext = resolveScanProfileContext(profile, files, chunks, symbols);
 
     return {
       indexId: request.indexId,
       profileId: request.profileId,
       profileVersion: request.profileVersion,
       criterionId: request.criterionId,
+      baseProfile: profileContext.baseProfile,
+      effectiveProfile: profileContext.effectiveProfile,
+      overlay: profileContext.overlay,
+      coverageSummary: profileContext.coverageSummary,
       candidates: createRepositoryEvidenceCandidates({
-        profile,
+        profile: profileContext.effectiveProfile,
         criterionId: request.criterionId,
         files,
         chunks,
+        symbols,
         limit: request.limit ?? 20,
       }),
     };
+  }
+
+  async getScanProfileOverlayHelp(request: GetScanProfileOverlayHelpRequest): Promise<GetScanProfileOverlayHelpResponse> {
+    validateGetScanProfileOverlayHelpRequest(request);
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
+    const profile = findScanProfile(state, request.profileId, request.profileVersion);
+    return createScanProfileOverlayHelp(profile);
   }
 
   async upsertConceptEmbedding(request: UpsertConceptEmbeddingRequest): Promise<UpsertConceptEmbeddingResponse> {
@@ -811,6 +840,9 @@ export class HiveMapRuntime {
       });
     }
     const repositoryFiles = await this.store.listRepositoryIndexFiles(request.workspaceId, request.scan.repositoryIndexId);
+    const repositoryChunks = await this.store.listRepositoryIndexChunks(request.workspaceId, request.scan.repositoryIndexId);
+    const repositorySymbols = await this.store.listRepositoryIndexSymbols(request.workspaceId, request.scan.repositoryIndexId);
+    const profileContext = resolveScanProfileContext(profile, repositoryFiles, repositoryChunks, repositorySymbols);
     const run: InProgressScanRun = {
       id: request.scan.id,
       profileId: request.scan.profileId,
@@ -819,14 +851,21 @@ export class HiveMapRuntime {
       actor: request.scan.actor,
       startedAt: request.scan.startedAt,
       status: "in_progress",
-      coverage: deriveScanCoverage(profile, repositoryFiles),
+      coverage: deriveScanCoverage(profileContext.effectiveProfile, repositoryFiles),
       appliedCriteria: [],
       declaredOutputs: [],
       findingNodeIds: [],
     };
     validateScanRun(run, state.scanProfiles, state.graph);
     await this.store.saveWorkspaceState({ ...state, scanRuns: [...state.scanRuns, run] });
-    return { run, profile, instructions: createScanInstructions(profile, run) };
+    return {
+      run,
+      profile: profileContext.effectiveProfile,
+      baseProfile: profileContext.baseProfile,
+      overlay: profileContext.overlay,
+      coverageSummary: profileContext.coverageSummary,
+      instructions: createScanInstructions(profileContext.effectiveProfile, run, profileContext.overlay, profileContext.coverageSummary),
+    };
   }
 
   async recordScanCoverage(request: RecordScanCoverageRequest): Promise<RecordScanCoverageResponse> {
@@ -1021,6 +1060,61 @@ function createScanRepositoryFromIndex(indexId: string, index: RepositoryIndexRe
   };
 }
 
+type ScanProfileContext = {
+  baseProfile: ScanProfile;
+  effectiveProfile: ScanProfile;
+  overlay: ScanProfileOverlayResolution;
+  coverageSummary: ScanCoverageSummary;
+};
+
+function resolveScanProfileContext(
+  baseProfile: ScanProfile,
+  files: readonly RepositoryFileRecord[],
+  chunks: readonly RepositoryChunkRecord[],
+  symbols: readonly RepositorySymbolRecord[],
+): ScanProfileContext {
+  const overlayPath = normalizeRepositoryPath(getScanProfileOverlayPath(baseProfile.id));
+  const overlayFile = files.find((file) => normalizeRepositoryPath(file.path) === overlayPath);
+  if (overlayFile === undefined) {
+    const overlay = createMissingScanProfileOverlayResolution(baseProfile, overlayPath);
+    return {
+      baseProfile,
+      effectiveProfile: baseProfile,
+      overlay,
+      coverageSummary: createScanCoverageSummary(baseProfile, files, symbols, overlay),
+    };
+  }
+
+  const overlay = readScanProfileOverlayFromRepository(baseProfile, overlayPath, chunks);
+  let effectiveProfile: ScanProfile;
+  try {
+    effectiveProfile = applyScanProfileOverlay(baseProfile, overlay);
+  } catch (error) {
+    throw createScanProfileOverlayInvalidError(baseProfile, overlayPath, error);
+  }
+  const overlayResolution: ScanProfileOverlayResolution = {
+    status: "found",
+    source: "repo",
+    applied: true,
+    overlayPath,
+    guidanceTool: "scan_profile_overlay_help",
+    nextActionHint: `Repository overlay from ${overlayPath} is active. Call scan_profile_overlay_help for the merge contract and supported fields.`,
+    mergedIncludeCount: overlay.include?.length ?? 0,
+    mergedExcludeCount:
+      (overlay.exclude?.length ?? 0) +
+      (overlay.archivePatterns?.length ?? 0) +
+      (overlay.legacyPatterns?.length ?? 0) +
+      (overlay.generatedPatterns?.length ?? 0),
+  };
+
+  return {
+    baseProfile,
+    effectiveProfile,
+    overlay: overlayResolution,
+    coverageSummary: createScanCoverageSummary(effectiveProfile, files, symbols, overlayResolution),
+  };
+}
+
 function deriveScanCoverage(profile: ScanProfile, files: readonly RepositoryFileRecord[]): ScanCoverage {
   const discovered = files.map((file) => normalizeRepositoryPath(file.path)).sort();
   const included: string[] = [];
@@ -1046,47 +1140,318 @@ function deriveScanCoverage(profile: ScanProfile, files: readonly RepositoryFile
   };
 }
 
+function createMissingScanProfileOverlayResolution(profile: ScanProfile, overlayPath: string): ScanProfileOverlayResolution {
+  return {
+    status: "missing",
+    source: "defaults",
+    applied: false,
+    overlayPath,
+    guidanceTool: "scan_profile_overlay_help",
+    nextActionHint: `No repository overlay was found at ${overlayPath}. Defaults remain active; call scan_profile_overlay_help for the template and merge rules.`,
+    mergedIncludeCount: 0,
+    mergedExcludeCount: 0,
+  };
+}
+
+function readScanProfileOverlayFromRepository(
+  profile: ScanProfile,
+  overlayPath: string,
+  chunks: readonly RepositoryChunkRecord[],
+): ScanProfileOverlay {
+  try {
+    return parseScanProfileOverlayYaml(
+      readRepositoryIndexedFileText(overlayPath, chunks),
+      overlayPath,
+    );
+  } catch (error) {
+    throw createScanProfileOverlayInvalidError(profile, overlayPath, error);
+  }
+}
+
+function createScanCoverageSummary(
+  profile: ScanProfile,
+  files: readonly RepositoryFileRecord[],
+  symbols: readonly RepositorySymbolRecord[],
+  overlay: ScanProfileOverlayResolution,
+): ScanCoverageSummary {
+  const coverage = deriveScanCoverage(profile, files);
+  const discoveredPaths = new Set(coverage.discovered);
+  const includedPaths = new Set(coverage.included);
+  const codePaths = new Set(
+    files
+      .filter((file) => file.sourceKind === "code")
+      .map((file) => normalizeRepositoryPath(file.path))
+      .filter((path) => discoveredPaths.has(path)),
+  );
+  const topLevelCodeSymbols = symbols.filter(
+    (symbol) => symbol.parentSymbolKey === undefined && codePaths.has(normalizeRepositoryPath(symbol.filePath)),
+  );
+  const includedTopLevelCodeSymbols = topLevelCodeSymbols.filter((symbol) => includedPaths.has(normalizeRepositoryPath(symbol.filePath)));
+
+  const summary: ScanCoverageSummary = {
+    discoveredCount: coverage.discovered.length,
+    includedCount: coverage.included.length,
+    excludedCount: coverage.excluded.length,
+    failedCount: coverage.failed.length,
+    discoveredCodeFileCount: codePaths.size,
+    includedCodeFileCount: [...codePaths].filter((path) => includedPaths.has(path)).length,
+    discoveredTopLevelCodeSymbolCount: topLevelCodeSymbols.length,
+    includedTopLevelCodeSymbolCount: includedTopLevelCodeSymbols.length,
+    warnings: [],
+  };
+  summary.warnings = createScanCoverageWarnings(profile, summary, overlay);
+  return summary;
+}
+
+function createScanCoverageWarnings(
+  profile: ScanProfile,
+  summary: ScanCoverageSummary,
+  overlay: ScanProfileOverlayResolution,
+): string[] {
+  if (profile.id !== "code-quality-review" || summary.discoveredCodeFileCount === 0) {
+    return [];
+  }
+
+  const warnings: string[] = [];
+  const includedCodeFileRatio = summary.includedCodeFileCount / summary.discoveredCodeFileCount;
+  const includedTopLevelSymbolRatio =
+    summary.discoveredTopLevelCodeSymbolCount === 0
+      ? 1
+      : summary.includedTopLevelCodeSymbolCount / summary.discoveredTopLevelCodeSymbolCount;
+
+  if (summary.includedCodeFileCount === 0) {
+    warnings.push(
+      `Profile coverage includes no code files in this repository index. Add ${overlay.overlayPath} or call ${overlay.guidanceTool} to customize repository-specific code roots.`,
+    );
+    return warnings;
+  }
+
+  if (includedCodeFileRatio < 0.2 || includedTopLevelSymbolRatio < 0.2) {
+    warnings.push(
+      `Profile coverage only includes ${summary.includedCodeFileCount}/${summary.discoveredCodeFileCount} code files and ${summary.includedTopLevelCodeSymbolCount}/${summary.discoveredTopLevelCodeSymbolCount} top-level code symbols. Add ${overlay.overlayPath} or call ${overlay.guidanceTool} if this repository uses non-default code roots.`,
+    );
+  }
+
+  return warnings;
+}
+
+function createScanProfileOverlayHelp(profile: ScanProfile): GetScanProfileOverlayHelpResponse {
+  const overlayPath = getScanProfileOverlayPath(profile.id);
+  const templateLines = [
+    `formatVersion: ${SCAN_PROFILE_OVERLAY_FORMAT_VERSION}`,
+    `profileId: ${profile.id}`,
+    "include:",
+    "  - services/**",
+    "exclude:",
+    "  - vendor/**",
+    "archivePatterns:",
+    "  - archive/**",
+    "legacyPatterns:",
+    "  - legacy/**",
+    "generatedPatterns:",
+    "  - generated/**",
+  ];
+  const exampleLines =
+    profile.id === "code-quality-review"
+      ? [
+          `formatVersion: ${SCAN_PROFILE_OVERLAY_FORMAT_VERSION}`,
+          "profileId: code-quality-review",
+          "include:",
+          "  - services/**",
+          "  - modules/**",
+          "exclude:",
+          "  - temp/**",
+          "archivePatterns:",
+          "  - archived/**",
+          "legacyPatterns:",
+          "  - legacy-ui/**",
+          "generatedPatterns:",
+          "  - '**/*.generated.ts'",
+        ]
+      : [
+          `formatVersion: ${SCAN_PROFILE_OVERLAY_FORMAT_VERSION}`,
+          `profileId: ${profile.id}`,
+          "exclude:",
+          "  - docs/archive/**",
+          "archivePatterns:",
+          "  - historical/**",
+        ];
+
+  return {
+    profileId: profile.id,
+    profileVersion: profile.version,
+    overlayPath,
+    format: "yaml",
+    formatVersion: SCAN_PROFILE_OVERLAY_FORMAT_VERSION,
+    summary: `Optional repository-local overlay for ${profile.id}@${profile.version}. Use it when the default scan profile scope does not match the repository layout.`,
+    defaultsBehavior: `If ${overlayPath} is missing, HiveMap uses the built-in ${profile.id}@${profile.version} scope without fallback side effects.`,
+    validationBehavior: `If ${overlayPath} exists but is invalid, scan_start and repository_evidence_candidates fail with SCAN_PROFILE_OVERLAY_INVALID. HiveMap does not silently ignore a bad overlay.`,
+    guidanceTool: "scan_profile_overlay_help",
+    mergeRules: [
+      "include appends repository-specific include globs to the built-in profile include list.",
+      "exclude appends repository-specific exclude globs to the built-in profile exclude list.",
+      "archivePatterns, legacyPatterns, and generatedPatterns append to the effective exclude list.",
+      "profileId must exactly match the target scan profile id.",
+      `formatVersion must equal ${SCAN_PROFILE_OVERLAY_FORMAT_VERSION}.`,
+    ],
+    supportedFields: [
+      { name: "formatVersion", required: true, description: "Exact overlay schema version for fail-fast validation." },
+      { name: "profileId", required: true, description: "Exact target scan profile id, for example code-quality-review." },
+      { name: "include", required: false, description: "Additional repository-specific include globs to append to the base profile." },
+      { name: "exclude", required: false, description: "Additional repository-specific exclude globs to append to the base profile." },
+      { name: "archivePatterns", required: false, description: "Archive-only globs appended to the effective exclude list." },
+      { name: "legacyPatterns", required: false, description: "Legacy-only globs appended to the effective exclude list." },
+      { name: "generatedPatterns", required: false, description: "Generated-code globs appended to the effective exclude list." },
+    ],
+    baseScope: {
+      include: [...profile.scope.include],
+      exclude: [...profile.scope.exclude],
+    },
+    template: templateLines.join("\n"),
+    example: exampleLines.join("\n"),
+  };
+}
+
 function createRepositoryEvidenceCandidates(options: {
   profile: ScanProfile;
   criterionId: string;
   files: readonly RepositoryFileRecord[];
   chunks: readonly RepositoryChunkRecord[];
+  symbols: readonly RepositorySymbolRecord[];
   limit: number;
 }): RepositoryEvidenceCandidate[] {
-  if (options.profile.id !== "documentation-conflicts") {
-    return [];
-  }
-
   const includedPaths = new Set(deriveScanCoverage(options.profile, options.files).included);
   const includedFiles = options.files.filter((file) => includedPaths.has(normalizeRepositoryPath(file.path)));
   const includedChunks = options.chunks.filter((chunk) => includedPaths.has(normalizeRepositoryPath(chunk.filePath)));
+  const includedSymbols = options.symbols.filter((symbol) => includedPaths.has(normalizeRepositoryPath(symbol.filePath)));
 
-  switch (options.criterionId) {
-    case "contradictory-claims":
-      return buildContradictoryClaimCandidates(includedFiles, includedChunks, options.limit);
-    case "stale-documentation":
-      return buildStaleDocumentationCandidates(options.profile, includedFiles, includedChunks, options.limit);
-    case "broken-references":
-      return buildBrokenReferenceCandidates(includedFiles, includedChunks, options.limit);
-    case "duplicate-authority":
-      return buildDuplicateAuthorityCandidates(includedChunks, options.limit);
-    case "missing-owner":
-      return buildMissingOwnerCandidates(includedFiles, includedChunks, options.limit);
+  switch (options.profile.id) {
+    case "documentation-conflicts":
+      switch (options.criterionId) {
+        case "contradictory-claims":
+          return buildContradictoryClaimCandidates(includedFiles, includedChunks, options.limit);
+        case "stale-documentation":
+          return buildStaleDocumentationCandidates(options.profile, includedFiles, includedChunks, options.limit);
+        case "broken-references":
+          return buildBrokenReferenceCandidates(options.files, includedChunks, options.chunks, options.limit);
+        case "duplicate-authority":
+          return buildDuplicateAuthorityCandidates(includedChunks, options.limit);
+        case "missing-owner":
+          return buildMissingOwnerCandidates(includedFiles, includedChunks, options.limit);
+        default:
+          return [];
+      }
+    case "code-quality-review":
+      switch (options.criterionId) {
+        case "duplicate-responsibility":
+          return buildDuplicateResponsibilityCandidates(includedFiles, includedSymbols, options.limit);
+        default:
+          return [];
+      }
     default:
       return [];
   }
 }
 
+const TOP_LEVEL_RESPONSIBILITY_SYMBOL_KINDS = new Set(["class", "interface", "enum", "record", "function"]);
+
+function buildDuplicateResponsibilityCandidates(
+  files: readonly RepositoryFileRecord[],
+  symbols: readonly RepositorySymbolRecord[],
+  limit: number,
+): RepositoryEvidenceCandidate[] {
+  const codePaths = new Set(
+    files
+      .filter((file) => file.sourceKind === "code")
+      .map((file) => normalizeRepositoryPath(file.path)),
+  );
+  const groups = new Map<string, RepositorySymbolRecord[]>();
+
+  for (const symbol of symbols) {
+    if (!codePaths.has(normalizeRepositoryPath(symbol.filePath))) {
+      continue;
+    }
+    if (symbol.parentSymbolKey !== undefined) {
+      continue;
+    }
+    if (!symbol.isExported && !symbol.isPublic) {
+      continue;
+    }
+    if (!TOP_LEVEL_RESPONSIBILITY_SYMBOL_KINDS.has(symbol.kind)) {
+      continue;
+    }
+    const normalizedName = symbol.name.trim().toLocaleLowerCase();
+    if (normalizedName.length === 0) {
+      continue;
+    }
+    const existing = groups.get(normalizedName);
+    if (existing === undefined) {
+      groups.set(normalizedName, [symbol]);
+    } else {
+      existing.push(symbol);
+    }
+  }
+
+  return [...groups.entries()]
+    .map(([normalizedName, group]) => ({
+      normalizedName,
+      group: group.sort(compareRepositorySymbols),
+    }))
+    .filter(({ group }) => new Set(group.map((symbol) => symbol.filePath)).size > 1)
+    .sort((left, right) => {
+      const countDelta = right.group.length - left.group.length;
+      if (countDelta !== 0) {
+        return countDelta;
+      }
+      return left.normalizedName.localeCompare(right.normalizedName);
+    })
+    .slice(0, limit)
+    .map(({ normalizedName, group }) => {
+      const displayName = group[0]?.name ?? normalizedName;
+      return {
+        id: `duplicate-responsibility:${normalizedName}`,
+        criterionId: "duplicate-responsibility",
+        signal: "duplicate-responsibility",
+        kind: "requires_interpretation",
+        title: `Repeated top-level symbol: ${displayName}`,
+        summary: `Top-level exported/public symbol '${displayName}' appears in multiple covered code files. Review whether responsibility is intentionally split or duplicated.`,
+        sources: group.map((symbol) => ({
+          kind: "chunk",
+          filePath: symbol.filePath,
+          language: symbol.language,
+          sourceKind: "code",
+          snippet: `${symbol.kind} ${symbol.qualifiedName}`,
+          startLine: symbol.startLine,
+          endLine: symbol.endLine,
+          whySelected: "Covered code file exposes the same top-level symbol name as another module.",
+        })),
+      };
+    });
+}
+
+function compareRepositorySymbols(left: RepositorySymbolRecord, right: RepositorySymbolRecord): number {
+  const fileDelta = left.filePath.localeCompare(right.filePath);
+  if (fileDelta !== 0) {
+    return fileDelta;
+  }
+  const lineDelta = left.startLine - right.startLine;
+  if (lineDelta !== 0) {
+    return lineDelta;
+  }
+  return left.qualifiedName.localeCompare(right.qualifiedName);
+}
+
 function buildBrokenReferenceCandidates(
   files: readonly RepositoryFileRecord[],
-  chunks: readonly RepositoryChunkRecord[],
+  sourceChunks: readonly RepositoryChunkRecord[],
+  referenceChunks: readonly RepositoryChunkRecord[],
   limit: number,
 ): RepositoryEvidenceCandidate[] {
   const existingPaths = new Set(files.map((file) => normalizeRepositoryPath(file.path)));
-  const headingsByFile = collectMarkdownHeadingsByFile(chunks);
+  const headingsByFile = collectMarkdownHeadingsByFile(referenceChunks);
   const candidates: RepositoryEvidenceCandidate[] = [];
 
-  for (const chunk of chunks) {
+  for (const chunk of sourceChunks) {
     if (chunk.sourceKind !== "documentation") {
       continue;
     }
@@ -1403,7 +1768,7 @@ function buildDuplicateAuthorityCandidates(
       if (right === undefined || right.filePath === left.filePath) {
         continue;
       }
-      const sharedTokens = intersectNormalizedTokens(left.topicTokens, right.topicTokens);
+      const sharedTokens = selectAuthoritySharedTokens(left.topicTokens, right.topicTokens);
       if (sharedTokens.length === 0) {
         continue;
       }
@@ -1431,7 +1796,7 @@ function buildMissingOwnerCandidates(
   limit: number,
 ): RepositoryEvidenceCandidate[] {
   const documentationFiles = files.filter((file) => file.sourceKind === "documentation");
-  const authorityFilePaths = new Set(collectAuthorityClaims(chunks).map((claim) => claim.filePath));
+  const authorityFilePaths = collectOwnershipMarkerFilePaths(chunks);
   const chunksByFile = new Map<string, RepositoryChunkRecord[]>();
   for (const chunk of chunks) {
     const current = chunksByFile.get(chunk.filePath) ?? [];
@@ -1472,6 +1837,22 @@ function buildMissingOwnerCandidates(
   }
 
   return candidates;
+}
+
+function collectOwnershipMarkerFilePaths(chunks: readonly RepositoryChunkRecord[]): Set<string> {
+  const filePaths = new Set<string>();
+  for (const chunk of chunks) {
+    if (chunk.sourceKind !== "documentation") {
+      continue;
+    }
+    for (const line of chunk.text.split("\n")) {
+      if (matchOwnershipMarkerPhrase(line) !== undefined) {
+        filePaths.add(chunk.filePath);
+        break;
+      }
+    }
+  }
+  return filePaths;
 }
 
 function collectAuthorityClaims(chunks: readonly RepositoryChunkRecord[]): Array<{
@@ -1684,7 +2065,17 @@ function matchExclusiveSelectionClaim(
 }
 
 function matchAuthorityPhrase(value: string): string | undefined {
-  const match = value.match(/\b(single source of truth|source of truth|canonical|authoritative|owner(?:ship)?|owned by)\b/i);
+  for (const pattern of AUTHORITY_CLAIM_PATTERNS) {
+    const match = value.match(pattern);
+    if (match !== null) {
+      return match[1] ?? match[0];
+    }
+  }
+  return undefined;
+}
+
+function matchOwnershipMarkerPhrase(value: string): string | undefined {
+  const match = value.match(/\b(single source of truth|source of truth|canonical|authoritative|owned by|ownership|owner)\b/i);
   return match?.[1];
 }
 
@@ -1763,6 +2154,18 @@ function extractAuthorityTopicTokens(line: string, heading?: string): string[] {
   return normalizeTopicTokens([heading ?? "", line].join(" "));
 }
 
+function selectAuthoritySharedTokens(left: readonly string[], right: readonly string[]): string[] {
+  const sharedTokens = intersectNormalizedTokens(left, right);
+  const materialSharedTokens = sharedTokens.filter((token) => !GENERIC_AUTHORITY_TOPIC_TOKENS.has(token));
+  if (materialSharedTokens.length === 0) {
+    return [];
+  }
+  if (materialSharedTokens.length === 1 && sharedTokens.length < 2) {
+    return [];
+  }
+  return materialSharedTokens;
+}
+
 function normalizeTopicTokens(value: string): string[] {
   const tokens = value
     .toLocaleLowerCase()
@@ -1819,7 +2222,7 @@ function isMaterialOwnershipDocument(file: RepositoryFileRecord, chunks: readonl
   if (IGNORED_MISSING_OWNER_PATH_PATTERNS.some((pattern) => normalizedPath.includes(pattern) || baseName.includes(pattern))) {
     return false;
   }
-  if (baseName === "agents.md" || baseName === "readme.md") {
+  if (baseName === "agents.md" || normalizedPath === "readme.md") {
     return true;
   }
   if (MATERIAL_OWNER_PATH_KEYWORDS.some((keyword) => normalizedPath.includes(keyword) || baseName.includes(keyword))) {
@@ -1885,6 +2288,30 @@ const IGNORED_TOPIC_TOKENS = new Set([
   "this",
   "truth",
 ]);
+const GENERIC_AUTHORITY_TOPIC_TOKENS = new Set([
+  "agent",
+  "agents",
+  "architecture",
+  "design",
+  "doc",
+  "guide",
+  "module",
+  "owner",
+  "ownership",
+  "policy",
+  "project",
+  "projection",
+  "repo",
+  "repository",
+  "rule",
+  "runtime",
+  "scan",
+  "spec",
+  "system",
+  "tool",
+  "workflow",
+  "workspace",
+]);
 
 const IGNORED_CLAIM_TOKENS = new Set([
   "available",
@@ -1903,9 +2330,32 @@ const IGNORED_CLAIM_TOKENS = new Set([
   "unavailable",
 ]);
 
-const IGNORED_MISSING_OWNER_PATH_PATTERNS = ["glossary", "changelog", "release-notes", "terms", "archive", "history"];
-const MATERIAL_OWNER_PATH_KEYWORDS = ["architecture", "design", "spec", "contract", "policy", "workflow", "runbook", "playbook", "guide", "deploy", "operations", "runtime"];
-const MATERIAL_OWNER_TEXT_KEYWORDS = ["must ", "should ", "architecture", "design", "contract", "workflow", "deployment", "runtime", "policy", "runbook"];
+const IGNORED_MISSING_OWNER_PATH_PATTERNS = [
+  "glossary",
+  "changelog",
+  "release-notes",
+  "terms",
+  "archive",
+  "history",
+  "docs/ai/",
+  "docs/adr/",
+  "docs/design/",
+  "docs/product/",
+];
+const MATERIAL_OWNER_PATH_KEYWORDS = ["contract", "policy", "runbook", "playbook", "operations", "ownership", "responsibility", "schema", "api", "mcp"];
+const MATERIAL_OWNER_TEXT_KEYWORDS = [
+  "rollback",
+  "incident",
+  "operator",
+  "on-call",
+  "oncall",
+];
+const AUTHORITY_CLAIM_PATTERNS = [
+  /\b(single source of truth|source of truth|canonical|authoritative)\b.*\b(?:lives here|belongs here|defined here|recorded here|maintained here)\b/i,
+  /\bthis\s+(?:document|doc|page|file|guide|spec|readme|runbook|playbook|section)\b.*\b(single source of truth|source of truth|canonical|authoritative)\b/i,
+  /\b(?:document|doc|page|file|guide|spec|readme|runbook|playbook|section)\b.*\b(?:is|are|remains)\s+(?:the\s+)?(single source of truth|source of truth|canonical|authoritative)\b/i,
+  /\b(?:document|doc|guide|spec|readme|runbook|playbook|page|file)\b.*\bowned by\b/i,
+] as const;
 const IGNORED_CONTRADICTION_PATH_PATTERNS = ["glossary", "changelog", "release-notes", "terms", "archive", "history"];
 const MATERIAL_CONTRADICTION_PATH_KEYWORDS = ["architecture", "design", "spec", "contract", "policy", "workflow", "runbook", "playbook", "guide", "deploy", "operations", "runtime", "storage", "transport"];
 const MATERIAL_CONTRADICTION_TEXT_KEYWORDS = ["primary", "default", "supported", "deprecated", "removed", "deferred", "runtime", "backend", "interface", "target"];
@@ -2343,16 +2793,175 @@ function toSimilarConceptMatch(
   };
 }
 
-function createScanInstructions(profile: ReturnType<typeof findScanProfile>, run: InProgressScanRun): string[] {
+function createScanInstructions(
+  profile: ReturnType<typeof findScanProfile>,
+  run: InProgressScanRun,
+  overlay: ScanProfileOverlayResolution,
+  coverageSummary: ScanCoverageSummary,
+): string[] {
   return [
     ...profile.instructions,
     `Use the repository-index-derived coverage already attached to this run from ${run.repository.root} at revision ${run.repository.revision}.`,
+    overlay.applied
+      ? `Applied repository scan profile overlay from ${overlay.overlayPath}.`
+      : `No repository scan profile overlay was found at ${overlay.overlayPath}; built-in profile defaults remain active.`,
+    `Overlay guidance is available through ${overlay.guidanceTool}.`,
     `Review only coverage.included sources for normal scan execution; do not rediscover or expand inventory from a live repository.`,
     `When available for a profile criterion, retrieve repository evidence candidates first so agent review stays bounded to curated evidence packets instead of raw repository discovery.`,
     `Use scan_record_coverage only when you need one explicit full correction to the derived discovered/included/excluded/failed inventory.`,
+    `Coverage summary: discovered ${coverageSummary.discoveredCount}, included ${coverageSummary.includedCount}, excluded ${coverageSummary.excludedCount}, failed ${coverageSummary.failedCount}.`,
     `Coverage was derived from include patterns: ${profile.scope.include.join(", ")}.`,
     `Coverage excludes sources matching: ${profile.scope.exclude.join(", ")}.`,
+    ...coverageSummary.warnings.map((warning: string) => `Coverage warning: ${warning}`),
     `Apply every criterion: ${profile.criteria.map((criterion) => criterion.id).join(", ")}.`,
     `Declare outputs: ${profile.requiredOutputs.join(", ")}.`,
   ];
+}
+
+function readRepositoryIndexedFileText(filePath: string, chunks: readonly RepositoryChunkRecord[]): string {
+  const matchingChunks = chunks
+    .filter((chunk) => normalizeRepositoryPath(chunk.filePath) === filePath)
+    .sort((left, right) => {
+      const lineDelta = left.startLine - right.startLine;
+      if (lineDelta !== 0) {
+        return lineDelta;
+      }
+      return left.id.localeCompare(right.id);
+    });
+  if (matchingChunks.length === 0) {
+    throw new Error(`Indexed repository file ${filePath} has no chunk text`);
+  }
+  return matchingChunks.map((chunk) => chunk.text).join("\n");
+}
+
+function parseScanProfileOverlayYaml(text: string, overlayPath: string): ScanProfileOverlay {
+  const overlay: Partial<ScanProfileOverlay> = {};
+  let activeListField:
+    | "include"
+    | "exclude"
+    | "archivePatterns"
+    | "legacyPatterns"
+    | "generatedPatterns"
+    | undefined;
+
+  for (const [index, rawLine] of text.split(/\r?\n/).entries()) {
+    const lineNumber = index + 1;
+    const line = stripYamlInlineComment(rawLine);
+    if (line.trim().length === 0) {
+      continue;
+    }
+
+    if (/^\s/.test(line)) {
+      if (activeListField === undefined) {
+        throw new Error(`Line ${lineNumber} in ${overlayPath} is indented without a list field`);
+      }
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("- ")) {
+        throw new Error(`Line ${lineNumber} in ${overlayPath} must use '- value' list syntax`);
+      }
+      const item = parseYamlScalar(trimmed.slice(2), overlayPath, lineNumber);
+      const nextValue = overlay[activeListField] ?? [];
+      if (!Array.isArray(nextValue)) {
+        throw new Error(`Field ${activeListField} in ${overlayPath} must be a list`);
+      }
+      nextValue.push(item);
+      overlay[activeListField] = nextValue;
+      continue;
+    }
+
+    activeListField = undefined;
+    const separatorIndex = line.indexOf(":");
+    if (separatorIndex < 1) {
+      throw new Error(`Line ${lineNumber} in ${overlayPath} must use key: value syntax`);
+    }
+    const key = line.slice(0, separatorIndex).trim();
+    const value = line.slice(separatorIndex + 1).trim();
+    if (key in overlay) {
+      throw new Error(`Field ${key} is defined more than once in ${overlayPath}`);
+    }
+    switch (key) {
+      case "formatVersion": {
+        if (value.length === 0) {
+          throw new Error(`Field formatVersion in ${overlayPath} must be an inline scalar`);
+        }
+        const parsed = Number.parseInt(parseYamlScalar(value, overlayPath, lineNumber), 10);
+        if (!Number.isInteger(parsed)) {
+          throw new Error(`Field formatVersion in ${overlayPath} must be an integer`);
+        }
+        overlay.formatVersion = parsed as ScanProfileOverlay["formatVersion"];
+        break;
+      }
+      case "profileId":
+        if (value.length === 0) {
+          throw new Error(`Field profileId in ${overlayPath} must be an inline scalar`);
+        }
+        overlay.profileId = parseYamlScalar(value, overlayPath, lineNumber);
+        break;
+      case "include":
+      case "exclude":
+      case "archivePatterns":
+      case "legacyPatterns":
+      case "generatedPatterns":
+        if (value.length !== 0) {
+          throw new Error(`Field ${key} in ${overlayPath} must use indented '- value' items`);
+        }
+        overlay[key] = [];
+        activeListField = key;
+        break;
+      default:
+        throw new Error(`Unknown overlay field ${key} in ${overlayPath}`);
+    }
+  }
+
+  if (overlay.formatVersion === undefined || overlay.profileId === undefined) {
+    throw new Error(`Overlay ${overlayPath} must define formatVersion and profileId`);
+  }
+  return overlay as ScanProfileOverlay;
+}
+
+function parseYamlScalar(value: string, overlayPath: string, lineNumber: number): string {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    throw new Error(`Line ${lineNumber} in ${overlayPath} contains an empty scalar value`);
+  }
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length >= 2) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'") && trimmed.length >= 2)
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function stripYamlInlineComment(value: string): string {
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index] ?? "";
+    if (char === "'" && !inDoubleQuote) {
+      inSingleQuote = !inSingleQuote;
+      continue;
+    }
+    if (char === '"' && !inSingleQuote) {
+      inDoubleQuote = !inDoubleQuote;
+      continue;
+    }
+    if (char === "#" && !inSingleQuote && !inDoubleQuote) {
+      return value.slice(0, index).trimEnd();
+    }
+  }
+  return value;
+}
+
+function createScanProfileOverlayInvalidError(profile: ScanProfile, overlayPath: string, error: unknown): RuntimeError {
+  const message = error instanceof Error ? error.message : "Invalid scan profile overlay";
+  return new RuntimeError(`Invalid scan profile overlay at ${overlayPath}: ${message}`, {
+    code: "SCAN_PROFILE_OVERLAY_INVALID",
+    details: {
+      overlayPath,
+      profileId: profile.id,
+      profileVersion: profile.version,
+      guidanceTool: "scan_profile_overlay_help",
+    },
+  });
 }

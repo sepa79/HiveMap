@@ -8,7 +8,6 @@ Projections are visual/readable views over the semantic graph.
 - `project-map`
 - `overview`
 - `dive-in`
-- `snapshot`
 
 ## Projection Rule
 
@@ -20,7 +19,7 @@ A projection may hide, group, position, or annotate graph data. It must not beco
 type Projection = {
   id: string;
   name: string;
-  type: "conversation-map" | "project-map" | "overview" | "dive-in" | "snapshot";
+  type: "conversation-map" | "project-map" | "overview" | "dive-in";
   rootNodeIds: string[];
   visibleNodeIds: string[];
   visibleEdgeIds: string[];

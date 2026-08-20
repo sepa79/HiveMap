@@ -62,7 +62,6 @@ Owns:
 - overview projection,
 - dive-in projection,
 - project map projection,
-- snapshot projection,
 - grouping logic.
 
 It reads graph data and produces projection data. It does not mutate graph semantics.
@@ -71,7 +70,9 @@ It reads graph data and produces projection data. It does not mutate graph seman
 
 Owns persistence adapters.
 
-Initial adapter is SQLite, behind explicit interfaces.
+Runtime direction is Postgres behind explicit interfaces.
+
+The current SQLite alpha implementation is transitional evidence, not the intended 1.0 backend destination.
 
 ### `api-contracts`
 
@@ -95,18 +96,17 @@ Browser UI for maps, projections, feedback, and proposal review.
 
 ## Storage First Pass
 
-Use SQLite for first real implementation.
+Use explicit storage interfaces so the runtime can move to Postgres without transport or domain drift.
 
 Reasoning:
 
-- local-first,
-- durable,
-- inspectable,
-- supports graph/projection/event tables,
-- avoids premature service dependency,
-- easier than JSON once proposals/snapshots/events exist.
+- container-friendly runtime,
+- single supported backend instead of parallel SQLite/Postgres paths,
+- durable persistence for graph/projection/event tables,
+- compatible with HiveForge deployment goals,
+- compatible with later hosted MCP work.
 
-Do not add remote DB, auth, or sync until local workflow is proven.
+Do not block the base runtime/container track on embedding-provider work, auth, or hosted deployment concerns. ZIP export/import remains the explicit migration and portability boundary.
 
 ## Tables / Stores
 
@@ -122,7 +122,6 @@ Initial persistence concerns:
 - `feedback_events`
 - `proposals`
 - `projections`
-- `snapshots`
 
 Exact schema belongs in `docs/specs/storage-format.md` before implementation.
 
@@ -193,7 +192,7 @@ UI tests can come after core contracts stabilize.
 3. Implement `categories` with stable semantic ids and tests.
 4. Implement `capture` event/proposal/policy types with delegated default.
 5. Implement `projections` overview/dive-in logic with tests.
-6. Implement SQLite storage behind explicit interfaces.
+6. Implement Postgres storage behind explicit interfaces.
 7. Implement MCP graph tools.
 8. Implement API command endpoint over the same handlers.
 9. Implement web overview projection.

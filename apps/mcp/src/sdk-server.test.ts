@@ -1,21 +1,26 @@
-import { DatabaseSync } from "node:sqlite";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { HiveMapRuntime } from "@hivemap/runtime";
-import { SqliteHiveMapStore } from "@hivemap/storage";
+import { type EmbeddingProvider, type RepositoryIndexExecutor, HiveMapRuntime } from "@hivemap/runtime";
+import { InMemoryHiveMapStore } from "@hivemap/storage";
 
 import { createHiveMapMcpServer } from "./sdk-server.js";
 
 let client: Client;
 let server: ReturnType<typeof createHiveMapMcpServer>;
-let store: SqliteHiveMapStore;
+let store: InMemoryHiveMapStore;
 
 beforeEach(async () => {
-  store = new SqliteHiveMapStore(new DatabaseSync(":memory:"));
-  store.initialize();
-  server = createHiveMapMcpServer(new HiveMapRuntime({ store }));
+  store = new InMemoryHiveMapStore();
+  await store.initialize();
+  server = createHiveMapMcpServer(
+    new HiveMapRuntime({
+      store,
+      embeddingProviders: { test: createTestEmbeddingProvider() },
+      repositoryIndexExecutor: createTestRepositoryIndexExecutor(),
+    }),
+  );
   client = new Client({ name: "hivemap-test-client", version: "0.1.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
@@ -24,7 +29,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await client.close();
   await server.close();
-  store.close();
+  await store.close();
 });
 
 describe("HiveMap MCP SDK server", () => {
@@ -37,6 +42,17 @@ describe("HiveMap MCP SDK server", () => {
       "workspace_resolve",
       "project_create",
       "graph_get",
+      "repository_index_list",
+      "repository_index_get",
+      "repository_index_start",
+      "repository_index_execute",
+      "repository_search",
+      "repository_evidence_candidates",
+      "scan_profile_overlay_help",
+      "concept_embedding_upsert",
+      "concept_embedding_refresh",
+      "concept_embedding_backfill",
+      "concept_similar_list",
       "graph_command",
       "category_assign",
       "projection_get",
@@ -136,5 +152,256 @@ describe("HiveMap MCP SDK server", () => {
         },
       },
     });
+
+    const repositoryIndexResult = await client.callTool({
+      name: "repository_index_start",
+      arguments: {
+        workspaceId: "workspace-a",
+        index: {
+          id: "repo-index-a",
+          repositoryUrl: "/fixtures/repo",
+          requestedRef: "main",
+          mode: "safe",
+          requestedAt: "2026-08-20T12:00:00.000Z",
+          actor: {
+            agentId: "codex",
+            tool: "mcp",
+          },
+        },
+      },
+    });
+    expect(repositoryIndexResult.structuredContent).toEqual({
+      ok: true,
+      tool: "repository_index_start",
+      value: {
+        index: {
+          id: "repo-index-a",
+          workspaceId: "workspace-a",
+          repositoryUrl: "/fixtures/repo",
+          requestedRef: "main",
+          mode: "safe",
+          stage: "requested",
+          requestedAt: "2026-08-20T12:00:00.000Z",
+          updatedAt: "2026-08-20T12:00:00.000Z",
+          actor: {
+            agentId: "codex",
+            tool: "mcp",
+          },
+        },
+      },
+    });
+
+    const executeResult = await client.callTool({
+      name: "repository_index_execute",
+      arguments: {
+        workspaceId: "workspace-a",
+        indexId: "repo-index-a",
+      },
+    });
+    expect(executeResult.structuredContent).toEqual({
+      ok: true,
+      tool: "repository_index_execute",
+      value: {
+        index: expect.objectContaining({
+          id: "repo-index-a",
+          stage: "completed",
+          resolvedCommit: expect.stringMatching(/^[0-9a-f]{40}$/),
+        }),
+      },
+    });
+
+    const searchResult = await client.callTool({
+      name: "repository_search",
+      arguments: {
+        workspaceId: "workspace-a",
+        indexId: "repo-index-a",
+        query: "single source truth",
+        limit: 5,
+      },
+    });
+    expect(searchResult.structuredContent).toEqual({
+      ok: true,
+      tool: "repository_search",
+      value: {
+        indexId: "repo-index-a",
+        query: "single source truth",
+        hits: expect.arrayContaining([
+          expect.objectContaining({
+            kind: "chunk",
+            filePath: "docs/architecture.md",
+          }),
+        ]),
+      },
+    });
+
+    const evidenceResult = await client.callTool({
+      name: "repository_evidence_candidates",
+      arguments: {
+        workspaceId: "workspace-a",
+        indexId: "repo-index-a",
+        profileId: "documentation-conflicts",
+        profileVersion: 1,
+        criterionId: "broken-references",
+      },
+    });
+    expect(evidenceResult.structuredContent).toEqual({
+      ok: true,
+      tool: "repository_evidence_candidates",
+      value: expect.objectContaining({
+        indexId: "repo-index-a",
+        profileId: "documentation-conflicts",
+        profileVersion: 1,
+        criterionId: "broken-references",
+        candidates: [],
+        overlay: expect.objectContaining({
+          status: "missing",
+          guidanceTool: "scan_profile_overlay_help",
+        }),
+      }),
+    });
+
+    const overlayHelpResult = await client.callTool({
+      name: "scan_profile_overlay_help",
+      arguments: {
+        workspaceId: "workspace-a",
+        profileId: "code-quality-review",
+        profileVersion: 1,
+      },
+    });
+    expect(overlayHelpResult.structuredContent).toEqual({
+      ok: true,
+      tool: "scan_profile_overlay_help",
+      value: expect.objectContaining({
+        overlayPath: ".hivemap/scan-profiles/code-quality.yaml",
+        guidanceTool: "scan_profile_overlay_help",
+      }),
+    });
+
+    const embeddingResult = await client.callTool({
+      name: "concept_embedding_upsert",
+      arguments: {
+        workspaceId: "workspace-a",
+        nodeId: "node-a",
+        embedding: {
+          model: "nomic-embed-text",
+          values: [1, 0],
+          updatedAt: "2026-08-19T22:31:00.000Z",
+        },
+      },
+    });
+    expect(embeddingResult.structuredContent).toEqual({
+      ok: true,
+      tool: "concept_embedding_upsert",
+      value: {
+        embedding: {
+          workspaceId: "workspace-a",
+          nodeId: "node-a",
+          model: "nomic-embed-text",
+          dimensions: 2,
+          contentDigest: expect.any(String),
+          updatedAt: "2026-08-19T22:31:00.000Z",
+        },
+      },
+    });
+
+    const refreshResult = await client.callTool({
+      name: "concept_embedding_refresh",
+      arguments: {
+        workspaceId: "workspace-a",
+        nodeId: "node-a",
+        model: "test:nomic-embed-text",
+      },
+    });
+    expect(refreshResult.structuredContent).toEqual({
+      ok: true,
+      tool: "concept_embedding_refresh",
+      value: {
+        embedding: {
+          workspaceId: "workspace-a",
+          nodeId: "node-a",
+          model: "test:nomic-embed-text",
+          dimensions: 2,
+          contentDigest: expect.any(String),
+          updatedAt: expect.any(String),
+        },
+        provider: "test",
+        status: "refreshed",
+      },
+    });
   });
 });
+
+function createTestEmbeddingProvider(): EmbeddingProvider {
+  return {
+    id: "test",
+    async embed(request) {
+      return request.inputs.map((input) => (input.includes("Alpha") ? [1, 0] : [0.9, 0.1]));
+    },
+  };
+}
+
+function createTestRepositoryIndexExecutor(): RepositoryIndexExecutor {
+  return async ({ workspaceId, indexId }) => ({
+    resolvedCommit: "0123456789abcdef0123456789abcdef01234567",
+    files: [
+      {
+        workspaceId,
+        indexId,
+        path: "docs/architecture.md",
+        language: "markdown",
+        sourceKind: "documentation",
+        contentHash: "hash-doc",
+        byteSize: 96,
+      },
+      {
+        workspaceId,
+        indexId,
+        path: "src/index.ts",
+        language: "typescript",
+        sourceKind: "code",
+        contentHash: "hash-src",
+        byteSize: 82,
+      },
+      {
+        workspaceId,
+        indexId,
+        path: "package.json",
+        language: "json",
+        sourceKind: "config",
+        contentHash: "hash-package",
+        byteSize: 30,
+      },
+    ],
+    chunks: [
+      {
+        workspaceId,
+        indexId,
+        id: "chunk-doc",
+        filePath: "docs/architecture.md",
+        language: "markdown",
+        sourceKind: "documentation",
+        startLine: 1,
+        endLine: 3,
+        text: "The system keeps a single source of truth for ownership and concept evidence.",
+        contentHash: "chunk-hash-doc",
+      },
+      {
+        workspaceId,
+        indexId,
+        id: "chunk-src",
+        filePath: "src/index.ts",
+        language: "typescript",
+        sourceKind: "code",
+        startLine: 1,
+        endLine: 3,
+        text: "export function describeOwnership() { return 'ownership is tracked in one place'; }",
+        contentHash: "chunk-hash-src",
+      },
+    ],
+    stats: {
+      fileCount: 3,
+      chunkCount: 2,
+      indexedBytes: 208,
+    },
+  });
+}

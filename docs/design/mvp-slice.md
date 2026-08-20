@@ -48,7 +48,7 @@ Build a local-first HiveMap alpha that proves:
 7. Agent applies a delegated update or creates a proposal if the policy requires review.
 8. Projection updates.
 9. User switches to Project Map semantics when the conversation is about a project.
-10. Snapshot is saved.
+10. ZIP export is saved when a frozen checkpoint is needed.
 
 ## Definition Of Done
 
@@ -59,7 +59,7 @@ Build a local-first HiveMap alpha that proves:
 - Overview projection hides detail by default.
 - Dive-in projection reveals local detail.
 - Categories are displayed and persisted.
-- POC snapshots remain available for comparison.
+- POC exported evidence remains available for comparison.
 - Core behavior has focused tests.
 
 ## Suggested Milestones
@@ -95,7 +95,7 @@ Build a local-first HiveMap alpha that proves:
 
 ### Milestone 5 — Demo Hardening
 
-- saved snapshots,
-- import POC demo snapshots,
+- portable exports,
+- import POC demo bundles,
 - README run instructions,
 - final smoke test.

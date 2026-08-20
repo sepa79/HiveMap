@@ -29,7 +29,21 @@ export type ScanProfile = {
   requiredOutputs: ScanRequiredOutput[];
 };
 
+export const SCAN_PROFILE_OVERLAY_FORMAT_VERSION = 1 as const;
+export const SCAN_PROFILE_OVERLAY_DIRECTORY = ".hivemap/scan-profiles" as const;
+
+export type ScanProfileOverlay = {
+  formatVersion: typeof SCAN_PROFILE_OVERLAY_FORMAT_VERSION;
+  profileId: string;
+  include?: string[];
+  exclude?: string[];
+  archivePatterns?: string[];
+  legacyPatterns?: string[];
+  generatedPatterns?: string[];
+};
+
 export type ScanRepository = {
+  repositoryIndexId?: string;
   root: string;
   repositoryUrl?: string;
   branch: string;
@@ -209,7 +223,7 @@ export const DOCUMENTATION_CONFLICTS_PROFILE: ScanProfile = {
   description: "Map repository documentation with emphasis on conflicting authority, stale claims, and missing ownership.",
   instructions: [
     "Read repository rules and establish the documented SSOT order before interpreting claims.",
-    "Rediscover sources from the profile include/exclude rules; do not reuse an old inventory as current truth.",
+    "Use the run coverage derived from the selected completed repository index as the bounded source inventory for this scan.",
     "Map bounded concepts and their owning source sections before creating findings.",
     "Represent every conflict with exact source claims, anchors, revisions, and the expected owner.",
     "Distinguish product direction, current contract, implementation evidence, and historical material.",
@@ -239,7 +253,7 @@ export const CODE_QUALITY_PROFILE: ScanProfile = {
   description: "Map implementation boundaries and record code, contract, test, and runtime problems.",
   instructions: [
     "Read repository rules, architecture, and relevant contracts before assessing implementation.",
-    "Rediscover code and tests from the profile rules for every run.",
+    "Use the run coverage derived from the selected completed repository index as the bounded code and test inventory for this scan.",
     "Map components and boundaries before recording local symptoms.",
     "Attach code symbols, tests, and contract sources to every finding.",
     "Use technical finding kinds such as architecture-risk, runtime-risk, authority-gap, test-gap, and deployment-risk when they describe the problem more precisely than documentation-oriented kinds.",
@@ -264,6 +278,19 @@ export const CODE_QUALITY_PROFILE: ScanProfile = {
 };
 
 export const INITIAL_SCAN_PROFILES: ScanProfile[] = [DOCUMENTATION_CONFLICTS_PROFILE, CODE_QUALITY_PROFILE];
+
+export function getScanProfileOverlayFileStem(profileId: string): string {
+  switch (profileId) {
+    case "code-quality-review":
+      return "code-quality";
+    default:
+      return profileId;
+  }
+}
+
+export function getScanProfileOverlayPath(profileId: string): string {
+  return `${SCAN_PROFILE_OVERLAY_DIRECTORY}/${getScanProfileOverlayFileStem(profileId)}.yaml`;
+}
 
 export function validateScanProfile(profile: ScanProfile): void {
   assertNonEmpty("profile.id", profile.id);
@@ -294,6 +321,38 @@ export function validateScanProfile(profile: ScanProfile): void {
     assertNonEmpty("criterion.id", criterion.id);
     assertNonEmpty("criterion.description", criterion.description);
   }
+}
+
+export function validateScanProfileOverlay(overlay: ScanProfileOverlay): void {
+  if (overlay.formatVersion !== SCAN_PROFILE_OVERLAY_FORMAT_VERSION) {
+    throw new ScanValidationError(`scan profile overlay formatVersion must be ${SCAN_PROFILE_OVERLAY_FORMAT_VERSION}`);
+  }
+  assertNonEmpty("overlay.profileId", overlay.profileId);
+  validateOptionalPatternList("overlay.include", overlay.include);
+  validateOptionalPatternList("overlay.exclude", overlay.exclude);
+  validateOptionalPatternList("overlay.archivePatterns", overlay.archivePatterns);
+  validateOptionalPatternList("overlay.legacyPatterns", overlay.legacyPatterns);
+  validateOptionalPatternList("overlay.generatedPatterns", overlay.generatedPatterns);
+}
+
+export function applyScanProfileOverlay(profile: ScanProfile, overlay: ScanProfileOverlay): ScanProfile {
+  validateScanProfileOverlay(overlay);
+  if (overlay.profileId !== profile.id) {
+    throw new ScanValidationError(`scan profile overlay targets ${overlay.profileId}, expected ${profile.id}`);
+  }
+  return {
+    ...profile,
+    scope: {
+      include: uniqueStable([...profile.scope.include, ...(overlay.include ?? [])]),
+      exclude: uniqueStable([
+        ...profile.scope.exclude,
+        ...(overlay.exclude ?? []),
+        ...(overlay.archivePatterns ?? []),
+        ...(overlay.legacyPatterns ?? []),
+        ...(overlay.generatedPatterns ?? []),
+      ]),
+    },
+  };
 }
 
 export function validateScanCoverage(coverage: ScanCoverage): void {
@@ -567,6 +626,7 @@ function severityRank(severity: FindingSeverity): number {
 }
 
 function validateRepository(repository: ScanRepository): void {
+  assertOptionalNonEmpty("repository.repositoryIndexId", repository.repositoryIndexId);
   assertNonEmpty("repository.root", repository.root);
   assertOptionalNonEmpty("repository.repositoryUrl", repository.repositoryUrl);
   assertNonEmpty("repository.branch", repository.branch);
@@ -588,9 +648,19 @@ function assertNonEmptyArray(label: string, values: readonly string[]): void {
   validateStringArray(label, values);
 }
 
+function validateOptionalPatternList(label: string, values: readonly string[] | undefined): void {
+  if (values !== undefined) {
+    validateStringArray(label, values);
+  }
+}
+
 function validateStringArray(label: string, values: readonly string[]): void {
   for (const value of values) assertNonEmpty(label, value);
   assertUnique(label, values);
+}
+
+function uniqueStable(values: readonly string[]): string[] {
+  return [...new Set(values)];
 }
 
 function assertUnique(label: string, values: readonly unknown[]): void {

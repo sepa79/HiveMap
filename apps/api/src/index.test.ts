@@ -581,13 +581,25 @@ describe("api server", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(parseJson(response)).toEqual({
-      indexId: "repo-index-scan",
-      profileId: "documentation-conflicts",
-      profileVersion: 1,
-      criterionId: "broken-references",
-      candidates: [],
-    });
+    expect(parseJson(response)).toEqual(
+      expect.objectContaining({
+        indexId: "repo-index-scan",
+        profileId: "documentation-conflicts",
+        profileVersion: 1,
+        criterionId: "broken-references",
+        candidates: [],
+        overlay: expect.objectContaining({
+          status: "missing",
+          source: "defaults",
+          applied: false,
+        }),
+        coverageSummary: expect.objectContaining({
+          discoveredCount: 3,
+          includedCount: 1,
+          warnings: [],
+        }),
+      }),
+    );
   });
 
   it("lists workspaces and round-trips a browser ZIP bundle", async () => {

@@ -28,10 +28,10 @@ capture policy + human/agent intent
 | Graph Core | Node/edge model, validation, graph mutation commands | Store UI layout or agent guesses as truth |
 | Capture | Capture policy, feedback events, agent intent events | Parse every message automatically by default |
 | Categories | Category catalog and category assignment validation | Replace core node types |
-| Projections | Overview concepts, dive-in views, project map views, saved snapshots | Mutate graph semantics |
+| Projections | Overview concepts, dive-in views, and project map views | Mutate graph semantics |
 | API/MCP | Explicit operations for agents and clients | Auto-switch protocols or hide failures |
 | UI | Render projections and emit feedback | Become the semantic editor by default |
-| Storage | Persist graph, views, snapshots, events | Invent duplicate schemas |
+| Storage | Persist graph, views, feedback, proposals, scans, and exportable state | Invent duplicate schemas |
 | Scans | Profile agent scans, validate coverage/findings, compare immutable run evidence | Crawl repositories or replace agent interpretation |
 
 ## Data Model Direction
@@ -58,7 +58,7 @@ HiveMap should default to:
 1. Overview concepts.
 2. Dive-in views for focused detail.
 3. Category overlays for trust/risk/uncertainty/urgency.
-4. Saved views/snapshots for demos, history, and review.
+4. Saved views plus portable exports for demos, history, and review.
 
 ## Integration Direction
 
@@ -70,10 +70,29 @@ HiveMap should remain independent from HiveMind.
 
 No implicit coupling.
 
+## Runtime Direction
+
+Near-term engineering direction is:
+
+1. move the runtime backend to Postgres,
+2. prove one self-contained local runtime container in Docker,
+3. validate that runtime through HiveForge,
+4. only then add hosted MCP follow-up work.
+
+ZIP export/import remains the canonical migration and portability boundary between runtime backends. HiveMap should not carry SQLite forward as a supported 1.0 runtime backend.
+
+`pgvector` remains part of the target backend direction, but embedding generation and vector-powered product behavior are a deferred workstream rather than a blocker for the base runtime/container slice.
+
+For local operation, the intended user experience is one container that bundles HiveMap, Postgres, plugins, and local model-serving dependencies. Optional persistence may come from a mounted filesystem path for Postgres data, but the default local workflow should not require separate database URLs, database file paths, or multi-service manual wiring.
+
+ZIP export should remain a normal download flow.
+
+Local `stdio` MCP is not part of the target runtime shape for this slice.
+
 ## Open Architecture Questions
 
-- Which storage backend should 1.0 use first?
-- Should MCP be primary and REST secondary, or REST first with MCP adapter?
+- How should the Postgres runtime handle whole-workspace read/modify/write semantics without hidden concurrency loss?
+- Should hosted MCP live inside the main HTTP runtime or behind a separate boundary after the containerized slice is proven?
 - How should category assignment provenance be represented?
 - What is the minimal projection schema for overview and dive-in views?
 - How should agent proposals be reviewed before graph mutation?

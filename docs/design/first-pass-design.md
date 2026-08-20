@@ -209,7 +209,7 @@ The first non-throwaway version should support:
 6. Open dive-in projection.
 7. Record feedback events.
 8. Let agent read feedback and apply or propose graph updates according to policy.
-9. Save snapshots.
+9. Export portable workspace evidence when a frozen checkpoint is needed.
 
 Authentication, collaboration, advanced layout optimization, and deep HiveMind integration are not required for the first product slice.
 
@@ -224,7 +224,7 @@ HiveMap 1.0-alpha succeeds if:
 - categories make trust/risk/uncertainty obvious,
 - delegated capture can keep up with a real conversation,
 - feedback events help the agent improve the map,
-- snapshots preserve useful demo/review states.
+- portable exports preserve useful demo/review states.
 
 ## Non-Goals For First Implementation
 

@@ -1,0 +1,112 @@
+{
+  "version": 1,
+  "description": "Probe concepts and expected semantic neighbors for live HiveMap embedding comparisons.",
+  "topK": 5,
+  "models": [
+    "ollama:nomic-embed-text",
+    "ollama:mxbai-embed-large",
+    "ollama:qwen3-embedding:0.6b"
+  ],
+  "workspaces": [
+    {
+      "workspaceId": "caravanworld",
+      "label": "CaravanWorld",
+      "probes": [
+        {
+          "nodeId": "cw-game-party",
+          "label": "Party",
+          "expectedNeighborIds": [
+            "cw-game-regional-traffic",
+            "cw-game-economy",
+            "cw-game-settlement",
+            "cw-game-trade-hub",
+            "cw-game-tasks"
+          ]
+        },
+        {
+          "nodeId": "cw-game-settlement",
+          "label": "Settlement / City",
+          "expectedNeighborIds": [
+            "cw-game-economy",
+            "cw-game-facility",
+            "cw-game-trade-hub",
+            "cw-game-market",
+            "cw-game-population"
+          ]
+        },
+        {
+          "nodeId": "cw-game-facility",
+          "label": "Facility",
+          "expectedNeighborIds": [
+            "cw-game-settlement",
+            "cw-game-trade-hub",
+            "cw-game-population",
+            "cw-game-economy",
+            "cw-game-building"
+          ]
+        },
+        {
+          "nodeId": "cw-game-authority",
+          "label": "Authority Requires Communication",
+          "expectedNeighborIds": [
+            "cw-game-information",
+            "cw-game-communication-before-effect",
+            "cw-game-command-hierarchy",
+            "cw-game-governor-role",
+            "cw-game-settlement"
+          ]
+        }
+      ]
+    },
+    {
+      "workspaceId": "pockethive-merge-rewrite-lifecycle-mcp-dd8f031e",
+      "label": "PocketHive",
+      "probes": [
+        {
+          "nodeId": "pattern-control-plane-routing",
+          "label": "Control-plane envelope and routing contract",
+          "expectedNeighborIds": [
+            "pattern-workitem-envelope",
+            "concept-ssot-authority",
+            "component-orchestrator-intent",
+            "component-swarm-controller-runtime",
+            "system-pockethive"
+          ]
+        },
+        {
+          "nodeId": "pattern-startup-artifact",
+          "label": "Immutable startup artifact contract",
+          "expectedNeighborIds": [
+            "component-orchestrator-intent",
+            "component-swarm-controller-runtime",
+            "system-pockethive",
+            "pattern-control-plane-routing",
+            "component-pocket-hive-mcp"
+          ]
+        },
+        {
+          "nodeId": "component-pocket-hive-mcp",
+          "label": "PocketHive MCP facade",
+          "expectedNeighborIds": [
+            "system-pockethive",
+            "component-orchestrator-intent",
+            "concept-ssot-authority",
+            "component-swarm-controller-runtime",
+            "pattern-control-plane-routing"
+          ]
+        },
+        {
+          "nodeId": "component-swarm-controller-runtime",
+          "label": "Swarm Controller runtime authority",
+          "expectedNeighborIds": [
+            "component-orchestrator-intent",
+            "pattern-startup-artifact",
+            "pattern-control-plane-routing",
+            "system-pockethive",
+            "concept-ssot-authority"
+          ]
+        }
+      ]
+    }
+  ]
+}

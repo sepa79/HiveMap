@@ -29,7 +29,7 @@ import {
   type ScanRequiredOutput,
   type ScanRun,
 } from "@hivemap/scans";
-import type { BundleManifest, SnapshotRecord, WorkspaceRecord, WorkspaceState } from "@hivemap/storage";
+import type { BundleManifest, WorkspaceRecord, WorkspaceState } from "@hivemap/storage";
 
 export type OperationResult<T> = {
   ok: true;
@@ -98,6 +98,295 @@ export type GetGraphRequest = {
 
 export type GetGraphResponse = {
   graph: SemanticGraph;
+};
+
+export type UpsertConceptEmbeddingRequest = {
+  workspaceId: string;
+  nodeId: string;
+  embedding: {
+    model: string;
+    values: number[];
+    updatedAt: string;
+  };
+};
+
+export type UpsertConceptEmbeddingResponse = {
+  embedding: {
+    workspaceId: string;
+    nodeId: string;
+    model: string;
+    dimensions: number;
+    contentDigest: string;
+    updatedAt: string;
+  };
+};
+
+export type RefreshConceptEmbeddingRequest = {
+  workspaceId: string;
+  nodeId: string;
+  model: string;
+  force?: boolean;
+};
+
+export type RefreshConceptEmbeddingResponse = {
+  embedding: {
+    workspaceId: string;
+    nodeId: string;
+    model: string;
+    dimensions: number;
+    contentDigest: string;
+    updatedAt: string;
+  };
+  provider: string;
+  status: "refreshed" | "unchanged";
+};
+
+export type BackfillConceptEmbeddingsRequest = {
+  workspaceId: string;
+  model: string;
+  nodeIds?: string[];
+  limit?: number;
+  force?: boolean;
+};
+
+export type BackfillConceptEmbeddingsResponse = {
+  workspaceId: string;
+  model: string;
+  provider: string;
+  summary: {
+    totalConcepts: number;
+    selectedConcepts: number;
+    refreshed: number;
+    unchanged: number;
+  };
+  results: Array<{
+    nodeId: string;
+    label: string;
+    status: "refreshed" | "unchanged";
+    dimensions: number;
+    contentDigest: string;
+    updatedAt: string;
+  }>;
+};
+
+export type ListSimilarConceptsRequest = {
+  workspaceId: string;
+  nodeId: string;
+  model: string;
+  limit?: number;
+  minScore?: number;
+};
+
+export type ListSimilarConceptsResponse = {
+  sourceNodeId: string;
+  model: string;
+  matches: Array<{
+    nodeId: string;
+    label: string;
+    score: number;
+    updatedAt: string;
+  }>;
+};
+
+export type RepositoryIndexMode = "safe" | "deep";
+
+export type RepositoryIndexStage =
+  | "requested"
+  | "resolving_ref"
+  | "checking_out"
+  | "discovering"
+  | "indexing_syntax"
+  | "running_rules"
+  | "embedding_changed_chunks"
+  | "normalizing"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type RepositoryIndexActor = {
+  agentId: string;
+  tool: string;
+};
+
+export type RepositoryIndexFailure = {
+  code: string;
+  message: string;
+};
+
+export type RepositoryIndexStats = {
+  fileCount: number;
+  chunkCount: number;
+  indexedBytes: number;
+};
+
+export type RepositoryIndexRecord = {
+  id: string;
+  workspaceId: string;
+  repositoryUrl: string;
+  requestedRef?: string;
+  resolvedCommit?: string;
+  mode: RepositoryIndexMode;
+  stage: RepositoryIndexStage;
+  requestedAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  actor: RepositoryIndexActor;
+  failure?: RepositoryIndexFailure;
+  stats?: RepositoryIndexStats;
+};
+
+export type ListRepositoryIndexesRequest = {
+  workspaceId: string;
+};
+
+export type ListRepositoryIndexesResponse = {
+  indexes: RepositoryIndexRecord[];
+};
+
+export type GetRepositoryIndexRequest = {
+  workspaceId: string;
+  indexId: string;
+};
+
+export type GetRepositoryIndexResponse = {
+  index: RepositoryIndexRecord;
+};
+
+export type StartRepositoryIndexRequest = {
+  workspaceId: string;
+  index: Pick<RepositoryIndexRecord, "id" | "repositoryUrl" | "requestedRef" | "mode" | "requestedAt" | "actor">;
+};
+
+export type StartRepositoryIndexResponse = {
+  index: RepositoryIndexRecord;
+};
+
+export type ExecuteRepositoryIndexRequest = {
+  workspaceId: string;
+  indexId: string;
+};
+
+export type ExecuteRepositoryIndexResponse = {
+  index: RepositoryIndexRecord;
+};
+
+export type RepositorySearchHit = {
+  kind: "file" | "chunk";
+  filePath: string;
+  language: string;
+  sourceKind: string;
+  score: number;
+  snippet: string;
+  startLine?: number;
+  endLine?: number;
+};
+
+export type SearchRepositoryIndexRequest = {
+  workspaceId: string;
+  indexId: string;
+  query: string;
+  limit?: number;
+};
+
+export type SearchRepositoryIndexResponse = {
+  indexId: string;
+  query: string;
+  hits: RepositorySearchHit[];
+};
+
+export type RepositoryEvidenceSource = {
+  kind: "file" | "chunk";
+  filePath: string;
+  language: string;
+  sourceKind: string;
+  snippet: string;
+  whySelected: string;
+  startLine?: number;
+  endLine?: number;
+};
+
+export type RepositoryEvidenceCandidate = {
+  id: string;
+  criterionId: string;
+  signal: string;
+  kind: "deterministic" | "requires_interpretation";
+  title: string;
+  summary: string;
+  sources: RepositoryEvidenceSource[];
+};
+
+export type ScanProfileOverlayResolution = {
+  status: "found" | "missing";
+  source: "repo" | "defaults";
+  applied: boolean;
+  overlayPath: string;
+  guidanceTool: "scan_profile_overlay_help";
+  nextActionHint: string;
+  mergedIncludeCount: number;
+  mergedExcludeCount: number;
+};
+
+export type ScanCoverageSummary = {
+  discoveredCount: number;
+  includedCount: number;
+  excludedCount: number;
+  failedCount: number;
+  discoveredCodeFileCount: number;
+  includedCodeFileCount: number;
+  discoveredTopLevelCodeSymbolCount: number;
+  includedTopLevelCodeSymbolCount: number;
+  warnings: string[];
+};
+
+export type ListRepositoryEvidenceCandidatesRequest = {
+  workspaceId: string;
+  indexId: string;
+  profileId: string;
+  profileVersion: number;
+  criterionId: string;
+  limit?: number;
+};
+
+export type ListRepositoryEvidenceCandidatesResponse = {
+  indexId: string;
+  profileId: string;
+  profileVersion: number;
+  criterionId: string;
+  baseProfile: ScanProfile;
+  effectiveProfile: ScanProfile;
+  overlay: ScanProfileOverlayResolution;
+  coverageSummary: ScanCoverageSummary;
+  candidates: RepositoryEvidenceCandidate[];
+};
+
+export type GetScanProfileOverlayHelpRequest = {
+  workspaceId: string;
+  profileId: string;
+  profileVersion: number;
+};
+
+export type GetScanProfileOverlayHelpResponse = {
+  profileId: string;
+  profileVersion: number;
+  overlayPath: string;
+  format: "yaml";
+  formatVersion: number;
+  summary: string;
+  defaultsBehavior: string;
+  validationBehavior: string;
+  guidanceTool: "scan_profile_overlay_help";
+  mergeRules: string[];
+  supportedFields: Array<{
+    name: string;
+    required: boolean;
+    description: string;
+  }>;
+  baseScope: {
+    include: string[];
+    exclude: string[];
+  };
+  template: string;
+  example: string;
 };
 
 export type ApplyGraphCommandsRequest = {
@@ -207,25 +496,6 @@ export type RejectProposalResponse = {
   proposal: GraphProposal;
 };
 
-export type ListSnapshotsRequest = {
-  workspaceId: string;
-};
-
-export type ListSnapshotsResponse = {
-  snapshots: SnapshotRecord[];
-};
-
-export type CreateSnapshotRequest = {
-  workspaceId: string;
-  snapshot: Omit<SnapshotRecord, "graph" | "projection"> & {
-    projectionId: string;
-  };
-};
-
-export type CreateSnapshotResponse = {
-  snapshot: SnapshotRecord;
-};
-
 export type ListScanProfilesRequest = { workspaceId: string };
 export type ListScanProfilesResponse = { profiles: ScanProfile[] };
 export type ListScanRunsRequest = { workspaceId: string };
@@ -233,9 +503,18 @@ export type ListScanRunsResponse = { runs: ScanRun[] };
 
 export type StartScanRequest = {
   workspaceId: string;
-  scan: Pick<InProgressScanRun, "id" | "profileId" | "profileVersion" | "repository" | "actor" | "startedAt">;
+  scan: Pick<InProgressScanRun, "id" | "profileId" | "profileVersion" | "actor" | "startedAt"> & {
+    repositoryIndexId: string;
+  };
 };
-export type StartScanResponse = { run: InProgressScanRun; profile: ScanProfile; instructions: string[] };
+export type StartScanResponse = {
+  run: InProgressScanRun;
+  profile: ScanProfile;
+  baseProfile: ScanProfile;
+  overlay: ScanProfileOverlayResolution;
+  coverageSummary: ScanCoverageSummary;
+  instructions: string[];
+};
 
 export type RecordScanCoverageRequest = { workspaceId: string; scanId: string; coverage: ScanCoverage };
 export type RecordScanCoverageResponse = { run: InProgressScanRun };
@@ -274,6 +553,17 @@ export type McpToolName =
   | "workspace_resolve"
   | "project_create"
   | "graph_get"
+  | "repository_index_list"
+  | "repository_index_get"
+  | "repository_index_start"
+  | "repository_index_execute"
+  | "repository_search"
+  | "repository_evidence_candidates"
+  | "scan_profile_overlay_help"
+  | "concept_embedding_upsert"
+  | "concept_embedding_refresh"
+  | "concept_embedding_backfill"
+  | "concept_similar_list"
   | "graph_command"
   | "category_assign"
   | "projection_get"
@@ -299,6 +589,17 @@ export type McpToolRequestMap = {
   workspace_resolve: ResolveWorkspaceRequest;
   project_create: CreateWorkspaceRequest;
   graph_get: GetGraphRequest;
+  repository_index_list: ListRepositoryIndexesRequest;
+  repository_index_get: GetRepositoryIndexRequest;
+  repository_index_start: StartRepositoryIndexRequest;
+  repository_index_execute: ExecuteRepositoryIndexRequest;
+  repository_search: SearchRepositoryIndexRequest;
+  repository_evidence_candidates: ListRepositoryEvidenceCandidatesRequest;
+  scan_profile_overlay_help: GetScanProfileOverlayHelpRequest;
+  concept_embedding_upsert: UpsertConceptEmbeddingRequest;
+  concept_embedding_refresh: RefreshConceptEmbeddingRequest;
+  concept_embedding_backfill: BackfillConceptEmbeddingsRequest;
+  concept_similar_list: ListSimilarConceptsRequest;
   graph_command: ApplyGraphCommandsRequest;
   category_assign: AssignCategoryRequest;
   projection_get: GetProjectionRequest;
@@ -323,6 +624,17 @@ export type RestEndpointName =
   | "workspace.create"
   | "workspace.get"
   | "graph.get"
+  | "repository-index.list"
+  | "repository-index.get"
+  | "repository-index.start"
+  | "repository-index.execute"
+  | "repository-index.search"
+  | "repository-index.evidence-candidates"
+  | "scan-profile-overlay.help"
+  | "concept-embedding.upsert"
+  | "concept-embedding.refresh"
+  | "concept-embedding.backfill"
+  | "concept-similar.list"
   | "graph.commands.apply"
   | "categories.get"
   | "category.assign"
@@ -335,8 +647,6 @@ export type RestEndpointName =
   | "proposal.approve"
   | "proposal.apply"
   | "proposal.reject"
-  | "snapshot.list"
-  | "snapshot.create"
   | "scan-profile.list"
   | "scan.list"
   | "scan.start"
@@ -379,6 +689,118 @@ export function validateResolveWorkspaceRequest(request: ResolveWorkspaceRequest
 
 export function validateGetGraphRequest(request: GetGraphRequest): void {
   assertNonEmpty("workspaceId", request.workspaceId);
+}
+
+export function validateListRepositoryIndexesRequest(request: ListRepositoryIndexesRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+}
+
+export function validateGetRepositoryIndexRequest(request: GetRepositoryIndexRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("indexId", request.indexId);
+}
+
+export function validateStartRepositoryIndexRequest(request: StartRepositoryIndexRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("index.id", request.index.id);
+  assertNonEmpty("index.repositoryUrl", request.index.repositoryUrl);
+  if (request.index.requestedRef !== undefined) {
+    assertNonEmpty("index.requestedRef", request.index.requestedRef);
+  }
+  assertRepositoryIndexMode("index.mode", request.index.mode);
+  assertDate("index.requestedAt", request.index.requestedAt);
+  assertNonEmpty("index.actor.agentId", request.index.actor.agentId);
+  assertNonEmpty("index.actor.tool", request.index.actor.tool);
+}
+
+export function validateExecuteRepositoryIndexRequest(request: ExecuteRepositoryIndexRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("indexId", request.indexId);
+}
+
+export function validateSearchRepositoryIndexRequest(request: SearchRepositoryIndexRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("indexId", request.indexId);
+  assertNonEmpty("query", request.query);
+  if (request.limit !== undefined && (!Number.isInteger(request.limit) || request.limit < 1)) {
+    throw new ApiContractValidationError("limit must be a positive integer");
+  }
+}
+
+export function validateListRepositoryEvidenceCandidatesRequest(request: ListRepositoryEvidenceCandidatesRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("indexId", request.indexId);
+  assertNonEmpty("profileId", request.profileId);
+  if (!Number.isInteger(request.profileVersion) || request.profileVersion < 1) {
+    throw new ApiContractValidationError("profileVersion must be a positive integer");
+  }
+  assertNonEmpty("criterionId", request.criterionId);
+  if (request.limit !== undefined && (!Number.isInteger(request.limit) || request.limit < 1)) {
+    throw new ApiContractValidationError("limit must be a positive integer");
+  }
+}
+
+export function validateGetScanProfileOverlayHelpRequest(request: GetScanProfileOverlayHelpRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("profileId", request.profileId);
+  if (!Number.isInteger(request.profileVersion) || request.profileVersion < 1) {
+    throw new ApiContractValidationError("profileVersion must be a positive integer");
+  }
+}
+
+export function validateUpsertConceptEmbeddingRequest(request: UpsertConceptEmbeddingRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("nodeId", request.nodeId);
+  assertNonEmpty("embedding.model", request.embedding.model);
+  assertDate("embedding.updatedAt", request.embedding.updatedAt);
+  if (request.embedding.values.length === 0) {
+    throw new ApiContractValidationError("embedding.values must contain at least one number");
+  }
+  for (const value of request.embedding.values) {
+    if (!Number.isFinite(value)) {
+      throw new ApiContractValidationError("embedding.values must contain only finite numbers");
+    }
+  }
+}
+
+export function validateRefreshConceptEmbeddingRequest(request: RefreshConceptEmbeddingRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("nodeId", request.nodeId);
+  assertNonEmpty("model", request.model);
+  if (request.force !== undefined && typeof request.force !== "boolean") {
+    throw new ApiContractValidationError("force must be a boolean when provided");
+  }
+}
+
+export function validateBackfillConceptEmbeddingsRequest(request: BackfillConceptEmbeddingsRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("model", request.model);
+  if (request.limit !== undefined && (!Number.isInteger(request.limit) || request.limit < 1)) {
+    throw new ApiContractValidationError("limit must be a positive integer");
+  }
+  if (request.force !== undefined && typeof request.force !== "boolean") {
+    throw new ApiContractValidationError("force must be a boolean when provided");
+  }
+  if (request.nodeIds !== undefined) {
+    if (request.nodeIds.length === 0) {
+      throw new ApiContractValidationError("nodeIds must contain at least one node id when provided");
+    }
+    for (const nodeId of request.nodeIds) {
+      assertNonEmpty("nodeIds[]", nodeId);
+    }
+  }
+}
+
+export function validateListSimilarConceptsRequest(request: ListSimilarConceptsRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("nodeId", request.nodeId);
+  assertNonEmpty("model", request.model);
+  if (request.limit !== undefined && (!Number.isInteger(request.limit) || request.limit < 1)) {
+    throw new ApiContractValidationError("limit must be a positive integer");
+  }
+  if (request.minScore !== undefined && (!Number.isFinite(request.minScore) || request.minScore < -1 || request.minScore > 1)) {
+    throw new ApiContractValidationError("minScore must be a finite number between -1 and 1");
+  }
 }
 
 export function validateApplyGraphCommandsRequest(request: ApplyGraphCommandsRequest): void {
@@ -432,17 +854,6 @@ export function validateRejectProposalRequest(request: RejectProposalRequest): v
   assertNonEmpty("proposalId", request.proposalId);
 }
 
-export function validateListSnapshotsRequest(request: ListSnapshotsRequest): void {
-  assertNonEmpty("workspaceId", request.workspaceId);
-}
-
-export function validateCreateSnapshotRequest(request: CreateSnapshotRequest): void {
-  assertNonEmpty("workspaceId", request.workspaceId);
-  assertNonEmpty("snapshot.id", request.snapshot.id);
-  assertDate("snapshot.createdAt", request.snapshot.createdAt);
-  assertNonEmpty("snapshot.projectionId", request.snapshot.projectionId);
-}
-
 export function validateStartScanRequest(request: StartScanRequest): void {
   assertNonEmpty("workspaceId", request.workspaceId);
   assertNonEmpty("scan.id", request.scan.id);
@@ -450,9 +861,7 @@ export function validateStartScanRequest(request: StartScanRequest): void {
   if (!Number.isInteger(request.scan.profileVersion) || request.scan.profileVersion < 1) {
     throw new ApiContractValidationError("scan.profileVersion must be a positive integer");
   }
-  assertNonEmpty("scan.repository.root", request.scan.repository.root);
-  assertNonEmpty("scan.repository.branch", request.scan.repository.branch);
-  assertNonEmpty("scan.repository.revision", request.scan.repository.revision);
+  assertNonEmpty("scan.repositoryIndexId", request.scan.repositoryIndexId);
   assertNonEmpty("scan.actor.agentId", request.scan.actor.agentId);
   assertNonEmpty("scan.actor.tool", request.scan.actor.tool);
   assertDate("scan.startedAt", request.scan.startedAt);
@@ -525,6 +934,12 @@ function assertDate(fieldName: string, value: string): void {
 
   if (Number.isNaN(Date.parse(value))) {
     throw new ApiContractValidationError(`${fieldName} must be a valid date string`);
+  }
+}
+
+function assertRepositoryIndexMode(fieldName: string, value: RepositoryIndexMode): void {
+  if (value !== "safe" && value !== "deep") {
+    throw new ApiContractValidationError(`${fieldName} must be one of: safe, deep`);
   }
 }
 
