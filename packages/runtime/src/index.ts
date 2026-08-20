@@ -1,15 +1,25 @@
 import { createHash } from "node:crypto";
+import { posix as pathPosix } from "node:path";
 
 import {
+  validateBackfillConceptEmbeddingsRequest,
+  validateExecuteRepositoryIndexRequest,
+  validateGetRepositoryIndexRequest,
   validateGetWorkspaceSummaryRequest,
+  validateListRepositoryIndexesRequest,
+  validateListRepositoryEvidenceCandidatesRequest,
   validateListWorkspaceSummariesRequest,
   validateResolveWorkspaceRequest,
+  validateSearchRepositoryIndexRequest,
+  validateListSimilarConceptsRequest,
   validateApplyGraphCommandsRequest,
   validateApplyProposalRequest,
   validateApproveProposalRequest,
   validateAssignCategoryRequest,
+  validateRefreshConceptEmbeddingRequest,
+  validateStartRepositoryIndexRequest,
+  validateUpsertConceptEmbeddingRequest,
   validateCreateProposalRequest,
-  validateCreateSnapshotRequest,
   validateCreateWorkspaceRequest,
   validateGetProjectionRequest,
   validateRecordFeedbackRequest,
@@ -32,12 +42,12 @@ import {
   type ApproveProposalResponse,
   type AssignCategoryRequest,
   type AssignCategoryResponse,
+  type BackfillConceptEmbeddingsRequest,
+  type BackfillConceptEmbeddingsResponse,
   type CreateProjectionRequest,
   type CreateProjectionResponse,
   type CreateProposalRequest,
   type CreateProposalResponse,
-  type CreateSnapshotRequest,
-  type CreateSnapshotResponse,
   type CreateWorkspaceRequest,
   type CreateWorkspaceResponse,
   type GetWorkspaceSummaryRequest,
@@ -45,15 +55,23 @@ import {
   type GetCategoriesResponse,
   type GetGraphRequest,
   type GetGraphResponse,
+  type GetRepositoryIndexRequest,
+  type GetRepositoryIndexResponse,
   type GetProjectionRequest,
   type GetProjectionResponse,
+  type ListSimilarConceptsRequest,
+  type ListSimilarConceptsResponse,
+  type ListRepositoryIndexesRequest,
+  type ListRepositoryIndexesResponse,
+  type ListRepositoryEvidenceCandidatesRequest,
+  type ListRepositoryEvidenceCandidatesResponse,
+  type RepositoryEvidenceCandidate,
+  type RepositoryEvidenceSource,
   type GetWorkspaceResponse,
   type ListFeedbackRequest,
   type ListFeedbackResponse,
   type ListProposalsRequest,
   type ListProposalsResponse,
-  type ListSnapshotsRequest,
-  type ListSnapshotsResponse,
   type RecordFeedbackRequest,
   type RecordFeedbackResponse,
   type RejectProposalRequest,
@@ -64,6 +82,8 @@ import {
   type CompleteScanResponse,
   type CreateScanFindingRequest,
   type CreateScanFindingResponse,
+  type ExecuteRepositoryIndexRequest,
+  type ExecuteRepositoryIndexResponse,
   type ExportWorkspaceRequest,
   type ExportWorkspaceResponse,
   type ExportWorkspaceBundleRequest,
@@ -81,12 +101,20 @@ import {
   type ListScanRunsResponse,
   type RecordScanCoverageRequest,
   type RecordScanCoverageResponse,
+  type RefreshConceptEmbeddingRequest,
+  type RefreshConceptEmbeddingResponse,
   type ResolveWorkspaceRequest,
   type ResolveWorkspaceResponse,
+  type SearchRepositoryIndexRequest,
+  type SearchRepositoryIndexResponse,
   type StartScanRequest,
   type StartScanResponse,
+  type StartRepositoryIndexRequest,
+  type StartRepositoryIndexResponse,
   type UpdateFindingRequest,
   type UpdateFindingResponse,
+  type UpsertConceptEmbeddingRequest,
+  type UpsertConceptEmbeddingResponse,
   type WorkspaceSummary,
 } from "@hivemap/api-contracts";
 import { applyApprovedProposal, approvePendingProposal, DEFAULT_CAPTURE_POLICY, rejectPendingProposal } from "@hivemap/capture";
@@ -100,6 +128,8 @@ import {
   toFindingEvidence,
   updateFindingNode,
   validateScanRun,
+  type ScanCoverage,
+  type ScanProfile,
   type CompletedScanRun,
   type InProgressScanRun,
 } from "@hivemap/scans";
@@ -109,13 +139,27 @@ import {
   parseWorkspaceBundle,
   stableJson,
   writeWorkspaceBundle,
-  type SqliteHiveMapStore,
+  type WorkspaceBundle,
+  type HiveMapStore,
+  type RepositoryFileRecord,
+  type SimilarConceptMatchRecord,
+  type RepositoryIndexRecord,
+  type RepositoryChunkRecord,
   type WorkspaceRecord,
   type WorkspaceState,
 } from "@hivemap/storage";
 
+import { EmbeddingProviderError, type EmbeddingProviderRegistry } from "./embeddings.js";
+import { RepositoryIndexExecutionError, executeSafeRepositoryIndex, type RepositoryIndexExecutor } from "./repository-indexing.js";
+
+export * from "./embeddings.js";
+export { RepositoryIndexExecutionError, executeSafeRepositoryIndex, type RepositoryIndexExecutor } from "./repository-indexing.js";
+
 export type HiveMapRuntimeOptions = {
-  store: SqliteHiveMapStore;
+  store: HiveMapStore;
+  embeddingProviders?: EmbeddingProviderRegistry;
+  repositoryIndexExecutor?: RepositoryIndexExecutor;
+  now?: () => string;
 };
 
 export class RuntimeError extends Error {
@@ -131,24 +175,29 @@ export class RuntimeError extends Error {
 }
 
 export class HiveMapRuntime {
-  private readonly store: SqliteHiveMapStore;
+  private readonly store: HiveMapStore;
+  private readonly embeddingProviders: EmbeddingProviderRegistry;
+  private readonly repositoryIndexExecutor: RepositoryIndexExecutor;
+  private readonly now: () => string;
 
   constructor(options: HiveMapRuntimeOptions) {
     this.store = options.store;
+    this.embeddingProviders = options.embeddingProviders ?? {};
+    this.repositoryIndexExecutor = options.repositoryIndexExecutor ?? executeSafeRepositoryIndex;
+    this.now = options.now ?? (() => new Date().toISOString());
   }
 
-  createWorkspace(request: CreateWorkspaceRequest): CreateWorkspaceResponse {
+  async createWorkspace(request: CreateWorkspaceRequest): Promise<CreateWorkspaceResponse> {
     validateCreateWorkspaceRequest(request);
     const state = createInitialWorkspaceState(request);
-    this.store.saveWorkspaceState(state);
+    await this.store.saveWorkspaceState(state);
     return { workspace: state.workspace };
   }
 
-  listWorkspaceSummaries(request: ListWorkspaceSummariesRequest): ListWorkspaceSummariesResponse {
+  async listWorkspaceSummaries(request: ListWorkspaceSummariesRequest): Promise<ListWorkspaceSummariesResponse> {
     validateListWorkspaceSummariesRequest(request);
     const query = request.query?.trim();
-    const items = this.store
-      .listWorkspaces()
+    const items = (await this.store.listWorkspaces())
       .filter((workspace) => request.includeArchived === true || workspace.archived !== true)
       .map(toWorkspaceSummary)
       .filter((workspace) => query === undefined || scoreWorkspaceSummaryMatch(workspace, query) > 0)
@@ -157,15 +206,15 @@ export class HiveMapRuntime {
     return { items };
   }
 
-  getWorkspaceSummary(request: GetWorkspaceSummaryRequest): GetWorkspaceSummaryResponse {
+  async getWorkspaceSummary(request: GetWorkspaceSummaryRequest): Promise<GetWorkspaceSummaryResponse> {
     validateGetWorkspaceSummaryRequest(request);
-    return { workspace: toWorkspaceSummary(this.store.getWorkspaceRecord(request.workspaceId)) };
+    return { workspace: toWorkspaceSummary(await this.store.getWorkspaceRecord(request.workspaceId)) };
   }
 
-  resolveWorkspace(request: ResolveWorkspaceRequest): ResolveWorkspaceResponse {
+  async resolveWorkspace(request: ResolveWorkspaceRequest): Promise<ResolveWorkspaceResponse> {
     validateResolveWorkspaceRequest(request);
     const ref = request.ref.trim();
-    const candidates = this.store.listWorkspaces();
+    const candidates = await this.store.listWorkspaces();
     const exactId = candidates.find((workspace) => workspace.id === ref);
     if (exactId !== undefined) {
       return { workspace: toWorkspaceSummary(exactId) };
@@ -193,48 +242,477 @@ export class HiveMapRuntime {
     throw createWorkspaceNotFoundError(ref);
   }
 
-  listWorkspaces(): ListWorkspacesResponse {
-    return { workspaces: this.store.listWorkspaces() };
+  async listWorkspaces(): Promise<ListWorkspacesResponse> {
+    return { workspaces: await this.store.listWorkspaces() };
   }
 
-  getWorkspace(workspaceId: string): GetWorkspaceResponse {
-    return { state: this.store.loadWorkspaceState(workspaceId) };
+  async getWorkspace(workspaceId: string): Promise<GetWorkspaceResponse> {
+    return { state: await this.store.loadWorkspaceState(workspaceId) };
   }
 
-  getGraph(request: GetGraphRequest): GetGraphResponse {
-    const state = this.store.loadWorkspaceState(request.workspaceId);
+  async getGraph(request: GetGraphRequest): Promise<GetGraphResponse> {
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
     return { graph: state.graph };
   }
 
-  applyGraphCommands(request: ApplyGraphCommandsRequest): ApplyGraphCommandsResponse {
+  async listRepositoryIndexes(request: ListRepositoryIndexesRequest): Promise<ListRepositoryIndexesResponse> {
+    validateListRepositoryIndexesRequest(request);
+    await this.store.getWorkspaceRecord(request.workspaceId);
+    return { indexes: await this.store.listRepositoryIndexes(request.workspaceId) };
+  }
+
+  async getRepositoryIndex(request: GetRepositoryIndexRequest): Promise<GetRepositoryIndexResponse> {
+    validateGetRepositoryIndexRequest(request);
+    await this.store.getWorkspaceRecord(request.workspaceId);
+    return { index: await this.store.getRepositoryIndex(request.workspaceId, request.indexId) };
+  }
+
+  async startRepositoryIndex(request: StartRepositoryIndexRequest): Promise<StartRepositoryIndexResponse> {
+    validateStartRepositoryIndexRequest(request);
+    if (request.index.mode === "deep") {
+      throw new RuntimeError("Deep repository indexing is not implemented in the current phase", {
+        code: "REPOSITORY_INDEX_MODE_UNAVAILABLE",
+        details: { mode: request.index.mode },
+      });
+    }
+    await this.store.getWorkspaceRecord(request.workspaceId);
+    const existing = await this.store.listRepositoryIndexes(request.workspaceId);
+    if (existing.some((record) => record.id === request.index.id)) {
+      throw new RuntimeError(`Repository index already exists: ${request.index.id}`, {
+        code: "REPOSITORY_INDEX_EXISTS",
+        details: { workspaceId: request.workspaceId, indexId: request.index.id },
+      });
+    }
+
+    const index: RepositoryIndexRecord = {
+      id: request.index.id,
+      workspaceId: request.workspaceId,
+      repositoryUrl: request.index.repositoryUrl,
+      mode: request.index.mode,
+      stage: "requested",
+      requestedAt: request.index.requestedAt,
+      updatedAt: request.index.requestedAt,
+      actor: {
+        agentId: request.index.actor.agentId,
+        tool: request.index.actor.tool,
+      },
+      ...(request.index.requestedRef === undefined ? {} : { requestedRef: request.index.requestedRef }),
+    };
+
+    await this.store.upsertRepositoryIndex(index);
+    return { index };
+  }
+
+  async executeRepositoryIndex(request: ExecuteRepositoryIndexRequest): Promise<ExecuteRepositoryIndexResponse> {
+    validateExecuteRepositoryIndexRequest(request);
+    const index = await this.store.getRepositoryIndex(request.workspaceId, request.indexId);
+    if (index.mode !== "safe") {
+      throw new RuntimeError("Only safe repository indexing is implemented in the current phase", {
+        code: "REPOSITORY_INDEX_MODE_UNAVAILABLE",
+        details: { mode: index.mode },
+      });
+    }
+    if (isRepositoryIndexStageActive(index.stage)) {
+      throw new RuntimeError(`Repository index is already running: ${index.id}`, {
+        code: "REPOSITORY_INDEX_ALREADY_RUNNING",
+        details: { indexId: index.id, stage: index.stage },
+      });
+    }
+
+    await this.store.upsertRepositoryIndex(createRepositoryIndexExecutionRecord(index, this.now()));
+    if (isRepositoryIndexTerminalStage(index.stage)) {
+      await this.store.replaceRepositoryIndexContents(request.workspaceId, request.indexId, [], []);
+    }
+
+    try {
+      await this.bumpRepositoryIndexStage(request.workspaceId, request.indexId, "checking_out");
+      const result = await this.repositoryIndexExecutor({
+        workspaceId: request.workspaceId,
+        indexId: request.indexId,
+        repositoryUrl: index.repositoryUrl,
+        ...(index.requestedRef === undefined ? {} : { requestedRef: index.requestedRef }),
+      });
+      await this.bumpRepositoryIndexStage(request.workspaceId, request.indexId, "discovering", {
+        resolvedCommit: result.resolvedCommit,
+      });
+      await this.bumpRepositoryIndexStage(request.workspaceId, request.indexId, "indexing_syntax", {
+        resolvedCommit: result.resolvedCommit,
+      });
+      await this.bumpRepositoryIndexStage(request.workspaceId, request.indexId, "normalizing", {
+        resolvedCommit: result.resolvedCommit,
+      });
+      await this.store.replaceRepositoryIndexContents(request.workspaceId, request.indexId, result.files, result.chunks);
+
+      const completedAt = this.now();
+      const completed: RepositoryIndexRecord = {
+        ...(await this.store.getRepositoryIndex(request.workspaceId, request.indexId)),
+        resolvedCommit: result.resolvedCommit,
+        stage: "completed",
+        updatedAt: completedAt,
+        completedAt,
+        stats: result.stats,
+      };
+      await this.store.upsertRepositoryIndex(completed);
+      return { index: completed };
+    } catch (error) {
+      const completedAt = this.now();
+      const failedIndex = await this.store.getRepositoryIndex(request.workspaceId, request.indexId);
+      await this.store.upsertRepositoryIndex({
+        ...stripRepositoryIndexOptionalState(failedIndex),
+        stage: "failed",
+        updatedAt: completedAt,
+        completedAt,
+        failure: normalizeRepositoryIndexFailure(error),
+      });
+      if (error instanceof RepositoryIndexExecutionError) {
+        throw new RuntimeError(error.message, {
+          code: error.code,
+          details: { workspaceId: request.workspaceId, indexId: request.indexId },
+        });
+      }
+      throw error;
+    }
+  }
+
+  async searchRepositoryIndex(request: SearchRepositoryIndexRequest): Promise<SearchRepositoryIndexResponse> {
+    validateSearchRepositoryIndexRequest(request);
+    const index = await this.store.getRepositoryIndex(request.workspaceId, request.indexId);
+    if (index.stage !== "completed") {
+      throw new RuntimeError(`Repository index must be completed before search: ${index.id}`, {
+        code: "REPOSITORY_INDEX_NOT_COMPLETED",
+        details: { indexId: index.id, stage: index.stage },
+      });
+    }
+    return {
+      indexId: request.indexId,
+      query: request.query,
+      hits: await this.store.searchRepositoryIndex(request.workspaceId, request.indexId, request.query, request.limit ?? 20),
+    };
+  }
+
+  async listRepositoryEvidenceCandidates(
+    request: ListRepositoryEvidenceCandidatesRequest,
+  ): Promise<ListRepositoryEvidenceCandidatesResponse> {
+    validateListRepositoryEvidenceCandidatesRequest(request);
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
+    const profile = findScanProfile(state, request.profileId, request.profileVersion);
+    if (!profile.criteria.some((criterion) => criterion.id === request.criterionId)) {
+      throw new RuntimeError(`Scan criterion not found in profile: ${request.criterionId}`, {
+        code: "SCAN_CRITERION_NOT_FOUND",
+        details: {
+          profileId: request.profileId,
+          profileVersion: request.profileVersion,
+          criterionId: request.criterionId,
+        },
+      });
+    }
+    const index = await this.store.getRepositoryIndex(request.workspaceId, request.indexId);
+    if (index.stage !== "completed") {
+      throw new RuntimeError(`Repository index must be completed before retrieving evidence candidates: ${index.id}`, {
+        code: "REPOSITORY_INDEX_NOT_COMPLETED",
+        details: { indexId: index.id, stage: index.stage },
+      });
+    }
+
+    const files = await this.store.listRepositoryIndexFiles(request.workspaceId, request.indexId);
+    const chunks = await this.store.listRepositoryIndexChunks(request.workspaceId, request.indexId);
+
+    return {
+      indexId: request.indexId,
+      profileId: request.profileId,
+      profileVersion: request.profileVersion,
+      criterionId: request.criterionId,
+      candidates: createRepositoryEvidenceCandidates({
+        profile,
+        criterionId: request.criterionId,
+        files,
+        chunks,
+        limit: request.limit ?? 20,
+      }),
+    };
+  }
+
+  async upsertConceptEmbedding(request: UpsertConceptEmbeddingRequest): Promise<UpsertConceptEmbeddingResponse> {
+    validateUpsertConceptEmbeddingRequest(request);
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
+    const node = findNodeById(state.graph, request.nodeId);
+    if (node.type !== "concept") {
+      throw new RuntimeError(`Embeddings currently support concept nodes only: ${request.nodeId}`, {
+        code: "UNSUPPORTED_EMBEDDING_NODE_TYPE",
+      });
+    }
+
+    const { contentDigest } = createConceptEmbeddingSource(node);
+    await this.store.upsertConceptEmbedding({
+      workspaceId: request.workspaceId,
+      nodeId: request.nodeId,
+      model: request.embedding.model,
+      contentDigest,
+      embedding: request.embedding.values,
+      createdAt: request.embedding.updatedAt,
+      updatedAt: request.embedding.updatedAt,
+    });
+
+    return {
+      embedding: {
+        workspaceId: request.workspaceId,
+        nodeId: request.nodeId,
+        model: request.embedding.model,
+        dimensions: request.embedding.values.length,
+        contentDigest,
+        updatedAt: request.embedding.updatedAt,
+      },
+    };
+  }
+
+  async refreshConceptEmbedding(request: RefreshConceptEmbeddingRequest): Promise<RefreshConceptEmbeddingResponse> {
+    validateRefreshConceptEmbeddingRequest(request);
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
+    const node = findNodeById(state.graph, request.nodeId);
+    if (node.type !== "concept") {
+      throw new RuntimeError(`Embeddings currently support concept nodes only: ${request.nodeId}`, {
+        code: "UNSUPPORTED_EMBEDDING_NODE_TYPE",
+      });
+    }
+
+    const modelRef = resolveEmbeddingModelRef(this.embeddingProviders, request.model);
+    const source = createConceptEmbeddingSource(node);
+    const existing = await this.store.getConceptEmbedding(request.workspaceId, request.nodeId, request.model);
+    if (request.force !== true && existing !== undefined && existing.contentDigest === source.contentDigest) {
+      return {
+        embedding: {
+          workspaceId: existing.workspaceId,
+          nodeId: existing.nodeId,
+          model: existing.model,
+          dimensions: existing.embedding.length,
+          contentDigest: existing.contentDigest,
+          updatedAt: existing.updatedAt,
+        },
+        provider: modelRef.provider.id,
+        status: "unchanged",
+      };
+    }
+
+    const [embedding] = await embedWithProvider(modelRef.provider.id, request.model, () =>
+      modelRef.provider.embed({
+        model: modelRef.providerModel,
+        inputs: [source.contentText],
+      }),
+    );
+    if (embedding === undefined) {
+      throw new RuntimeError(`Embedding provider returned no vector for node ${request.nodeId}`, {
+        code: "EMBEDDING_PROVIDER_EMPTY_RESULT",
+      });
+    }
+    const updatedAt = this.now();
+    await this.store.upsertConceptEmbedding({
+      workspaceId: request.workspaceId,
+      nodeId: request.nodeId,
+      model: request.model,
+      contentDigest: source.contentDigest,
+      embedding,
+      createdAt: existing?.createdAt ?? updatedAt,
+      updatedAt,
+    });
+
+    return {
+      embedding: {
+        workspaceId: request.workspaceId,
+        nodeId: request.nodeId,
+        model: request.model,
+        dimensions: embedding.length,
+        contentDigest: source.contentDigest,
+        updatedAt,
+      },
+      provider: modelRef.provider.id,
+      status: "refreshed",
+    };
+  }
+
+  async backfillConceptEmbeddings(request: BackfillConceptEmbeddingsRequest): Promise<BackfillConceptEmbeddingsResponse> {
+    validateBackfillConceptEmbeddingsRequest(request);
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
+    const modelRef = resolveEmbeddingModelRef(this.embeddingProviders, request.model);
+    const concepts = state.graph.nodes.filter(isConceptNode);
+    const conceptById = new Map(concepts.map((node) => [node.id, node] as const));
+    const selectedNodes = selectConceptNodes(concepts, conceptById, request.nodeIds, request.limit);
+    const existingEmbeddings = new Map(
+      await Promise.all(
+        selectedNodes.map(async (node) => [
+          node.id,
+          await this.store.getConceptEmbedding(request.workspaceId, node.id, request.model),
+        ] as const),
+      ),
+    );
+
+    const unchangedResults: BackfillConceptEmbeddingsResponse["results"] = [];
+    const refreshQueue: Array<{ node: (typeof selectedNodes)[number]; source: ReturnType<typeof createConceptEmbeddingSource> }> = [];
+    for (const node of selectedNodes) {
+      const source = createConceptEmbeddingSource(node);
+      const existing = existingEmbeddings.get(node.id);
+      if (request.force !== true && existing !== undefined && existing.contentDigest === source.contentDigest) {
+        unchangedResults.push({
+          nodeId: node.id,
+          label: node.label,
+          status: "unchanged",
+          dimensions: existing.embedding.length,
+          contentDigest: existing.contentDigest,
+          updatedAt: existing.updatedAt,
+        });
+        continue;
+      }
+
+      refreshQueue.push({ node, source });
+    }
+
+    const refreshedResults: BackfillConceptEmbeddingsResponse["results"] = [];
+    for (const batch of chunkEmbeddingInputs(refreshQueue, modelRef.provider.maxBatchSize)) {
+      const embeddings = await embedWithProvider(modelRef.provider.id, request.model, () =>
+        modelRef.provider.embed({
+          model: modelRef.providerModel,
+          inputs: batch.map((item) => item.source.contentText),
+        }),
+      );
+      const updatedAt = this.now();
+
+      for (const [index, item] of batch.entries()) {
+        const embedding = embeddings[index];
+        if (embedding === undefined) {
+          throw new RuntimeError(`Embedding provider returned no vector for concept node ${item.node.id}`, {
+            code: "EMBEDDING_PROVIDER_EMPTY_RESULT",
+          });
+        }
+        const existing = existingEmbeddings.get(item.node.id);
+        await this.store.upsertConceptEmbedding({
+          workspaceId: request.workspaceId,
+          nodeId: item.node.id,
+          model: request.model,
+          contentDigest: item.source.contentDigest,
+          embedding,
+          createdAt: existing?.createdAt ?? updatedAt,
+          updatedAt,
+        });
+        refreshedResults.push({
+          nodeId: item.node.id,
+          label: item.node.label,
+          status: "refreshed",
+          dimensions: embedding.length,
+          contentDigest: item.source.contentDigest,
+          updatedAt,
+        });
+      }
+    }
+
+    const resultByNodeId = new Map<string, BackfillConceptEmbeddingsResponse["results"][number]>();
+    for (const item of refreshedResults) {
+      resultByNodeId.set(item.nodeId, item);
+    }
+    for (const item of unchangedResults) {
+      resultByNodeId.set(item.nodeId, item);
+    }
+
+    const results = selectedNodes.map((node) => {
+      const result = resultByNodeId.get(node.id);
+      if (result === undefined) {
+        throw new RuntimeError(`Backfill result missing for concept node ${node.id}`, {
+          code: "EMBEDDING_BACKFILL_RESULT_MISSING",
+        });
+      }
+      return result;
+    });
+
+    return {
+      workspaceId: request.workspaceId,
+      model: request.model,
+      provider: modelRef.provider.id,
+      summary: {
+        totalConcepts: concepts.length,
+        selectedConcepts: selectedNodes.length,
+        refreshed: refreshedResults.length,
+        unchanged: unchangedResults.length,
+      },
+      results,
+    };
+  }
+
+  async listSimilarConcepts(request: ListSimilarConceptsRequest): Promise<ListSimilarConceptsResponse> {
+    validateListSimilarConceptsRequest(request);
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
+    const sourceNode = findNodeById(state.graph, request.nodeId);
+    if (sourceNode.type !== "concept") {
+      throw new RuntimeError(`Similarity currently supports concept nodes only: ${request.nodeId}`, {
+        code: "UNSUPPORTED_SIMILARITY_NODE_TYPE",
+      });
+    }
+
+    const { contentDigest: sourceDigest } = createConceptEmbeddingSource(sourceNode);
+    const sourceEmbedding = await this.store.getConceptEmbedding(request.workspaceId, request.nodeId, request.model);
+    if (sourceEmbedding === undefined) {
+      throw new RuntimeError(`Concept embedding not found for node ${request.nodeId} and model ${request.model}`, {
+        code: "CONCEPT_EMBEDDING_MISSING",
+      });
+    }
+    if (sourceEmbedding.contentDigest !== sourceDigest) {
+      throw new RuntimeError(`Concept embedding is stale for node ${request.nodeId} and model ${request.model}`, {
+        code: "CONCEPT_EMBEDDING_STALE",
+      });
+    }
+
+    const conceptNodes = new Map(
+      state.graph.nodes.filter((node) => node.type === "concept").map((node) => [node.id, node] as const),
+    );
+    const minScore = request.minScore ?? -1;
+    const matches = (
+      await this.store.listSimilarConceptEmbeddings(
+        request.workspaceId,
+        request.nodeId,
+        request.model,
+        Math.max(request.limit ?? 5, 5) * 5,
+      )
+    )
+      .filter((candidate) => {
+        const node = conceptNodes.get(candidate.nodeId);
+        return node !== undefined && candidate.contentDigest === createConceptEmbeddingSource(node).contentDigest && candidate.score >= minScore;
+      })
+      .slice(0, request.limit ?? 5)
+      .map((candidate) => toSimilarConceptMatch(candidate, conceptNodes));
+
+    return {
+      sourceNodeId: request.nodeId,
+      model: request.model,
+      matches,
+    };
+  }
+
+  async applyGraphCommands(request: ApplyGraphCommandsRequest): Promise<ApplyGraphCommandsResponse> {
     validateApplyGraphCommandsRequest(request);
-    const state = this.store.loadWorkspaceState(request.workspaceId);
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
     const nextState = { ...state, graph: applyGraphCommands(state.graph, request.commands) };
-    this.store.saveWorkspaceState(nextState);
+    await this.store.saveWorkspaceState(nextState);
     return { graph: nextState.graph };
   }
 
-  getCategories(workspaceId: string): GetCategoriesResponse {
-    const state = this.store.loadWorkspaceState(workspaceId);
+  async getCategories(workspaceId: string): Promise<GetCategoriesResponse> {
+    const state = await this.store.loadWorkspaceState(workspaceId);
     return { catalog: state.categoryCatalog, assignments: state.categoryAssignments };
   }
 
-  assignCategory(request: AssignCategoryRequest): AssignCategoryResponse {
-    const state = this.store.loadWorkspaceState(request.workspaceId);
+  async assignCategory(request: AssignCategoryRequest): Promise<AssignCategoryResponse> {
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
     validateAssignCategoryRequest(request, state.categoryCatalog, createTargetIndex(state));
     const nextState = { ...state, categoryAssignments: [...state.categoryAssignments, request.assignment] };
-    this.store.saveWorkspaceState(nextState);
+    await this.store.saveWorkspaceState(nextState);
     return { assignments: nextState.categoryAssignments };
   }
 
-  getProjection(request: GetProjectionRequest): GetProjectionResponse {
+  async getProjection(request: GetProjectionRequest): Promise<GetProjectionResponse> {
     validateGetProjectionRequest(request);
-    const state = this.store.loadWorkspaceState(request.workspaceId);
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
     return { projection: findById(state.projections, request.projectionId, "Projection") };
   }
 
-  createProjection(request: CreateProjectionRequest): CreateProjectionResponse {
-    const state = this.store.loadWorkspaceState(request.workspaceId);
+  async createProjection(request: CreateProjectionRequest): Promise<CreateProjectionResponse> {
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
     const projection =
       "type" in request.input
         ? createProjectMapProjection(state.graph, request.input)
@@ -242,39 +720,39 @@ export class HiveMapRuntime {
         ? createDiveInProjection(state.graph, request.input)
         : createOverviewProjection(state.graph, request.input);
     const nextState = { ...state, projections: [...state.projections, projection] };
-    this.store.saveWorkspaceState(nextState);
+    await this.store.saveWorkspaceState(nextState);
     return { projection };
   }
 
-  listFeedback(request: ListFeedbackRequest): ListFeedbackResponse {
-    const state = this.store.loadWorkspaceState(request.workspaceId);
+  async listFeedback(request: ListFeedbackRequest): Promise<ListFeedbackResponse> {
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
     return { feedbackEvents: state.feedbackEvents };
   }
 
-  recordFeedback(request: RecordFeedbackRequest): RecordFeedbackResponse {
+  async recordFeedback(request: RecordFeedbackRequest): Promise<RecordFeedbackResponse> {
     validateRecordFeedbackRequest(request);
-    const state = this.store.loadWorkspaceState(request.workspaceId);
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
     const nextState = { ...state, feedbackEvents: [...state.feedbackEvents, request.feedbackEvent] };
-    this.store.saveWorkspaceState(nextState);
+    await this.store.saveWorkspaceState(nextState);
     return { feedbackEvents: nextState.feedbackEvents };
   }
 
-  listProposals(request: ListProposalsRequest): ListProposalsResponse {
-    const state = this.store.loadWorkspaceState(request.workspaceId);
+  async listProposals(request: ListProposalsRequest): Promise<ListProposalsResponse> {
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
     return { proposals: state.proposals };
   }
 
-  createProposal(request: CreateProposalRequest): CreateProposalResponse {
+  async createProposal(request: CreateProposalRequest): Promise<CreateProposalResponse> {
     validateCreateProposalRequest(request);
-    const state = this.store.loadWorkspaceState(request.workspaceId);
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
     const nextState = { ...state, proposals: [...state.proposals, request.proposal] };
-    this.store.saveWorkspaceState(nextState);
+    await this.store.saveWorkspaceState(nextState);
     return { proposal: request.proposal };
   }
 
-  applyProposal(request: ApplyProposalRequest): ApplyProposalResponse {
+  async applyProposal(request: ApplyProposalRequest): Promise<ApplyProposalResponse> {
     validateApplyProposalRequest(request);
-    const state = this.store.loadWorkspaceState(request.workspaceId);
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
     const proposal = findById(state.proposals, request.proposalId, "Proposal");
     const result = applyApprovedProposal(state.graph, proposal);
     const nextState = {
@@ -282,95 +760,88 @@ export class HiveMapRuntime {
       graph: result.graph,
       proposals: state.proposals.map((candidate) => (candidate.id === proposal.id ? result.proposal : candidate)),
     };
-    this.store.saveWorkspaceState(nextState);
+    await this.store.saveWorkspaceState(nextState);
     return { graph: result.graph, proposal: result.proposal };
   }
 
-  approveProposal(request: ApproveProposalRequest): ApproveProposalResponse {
+  async approveProposal(request: ApproveProposalRequest): Promise<ApproveProposalResponse> {
     validateApproveProposalRequest(request);
-    const state = this.store.loadWorkspaceState(request.workspaceId);
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
     const proposal = findById(state.proposals, request.proposalId, "Proposal");
     const approvedProposal = approvePendingProposal(proposal);
     const nextState = {
       ...state,
       proposals: state.proposals.map((candidate) => (candidate.id === approvedProposal.id ? approvedProposal : candidate)),
     };
-    this.store.saveWorkspaceState(nextState);
+    await this.store.saveWorkspaceState(nextState);
     return { proposal: approvedProposal };
   }
 
-  rejectProposal(request: RejectProposalRequest): RejectProposalResponse {
+  async rejectProposal(request: RejectProposalRequest): Promise<RejectProposalResponse> {
     validateRejectProposalRequest(request);
-    const state = this.store.loadWorkspaceState(request.workspaceId);
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
     const proposal = findById(state.proposals, request.proposalId, "Proposal");
     const rejectedProposal = rejectPendingProposal(proposal);
     const nextState = {
       ...state,
       proposals: state.proposals.map((candidate) => (candidate.id === rejectedProposal.id ? rejectedProposal : candidate)),
     };
-    this.store.saveWorkspaceState(nextState);
+    await this.store.saveWorkspaceState(nextState);
     return { proposal: rejectedProposal };
   }
 
-  listSnapshots(request: ListSnapshotsRequest): ListSnapshotsResponse {
-    const state = this.store.loadWorkspaceState(request.workspaceId);
-    return { snapshots: state.snapshots };
+  async listScanProfiles(request: ListScanProfilesRequest): Promise<ListScanProfilesResponse> {
+    return { profiles: (await this.store.loadWorkspaceState(request.workspaceId)).scanProfiles };
   }
 
-  createSnapshot(request: CreateSnapshotRequest): CreateSnapshotResponse {
-    validateCreateSnapshotRequest(request);
-    const state = this.store.loadWorkspaceState(request.workspaceId);
-    const projection = findById(state.projections, request.snapshot.projectionId, "Projection");
-    const snapshot = {
-      id: request.snapshot.id,
-      createdAt: request.snapshot.createdAt,
-      projectionId: request.snapshot.projectionId,
-      graph: state.graph,
-      projection,
-    };
-    const nextState = { ...state, snapshots: [...state.snapshots, snapshot] };
-    this.store.saveWorkspaceState(nextState);
-    return { snapshot };
+  async listScanRuns(request: ListScanRunsRequest): Promise<ListScanRunsResponse> {
+    return { runs: (await this.store.loadWorkspaceState(request.workspaceId)).scanRuns };
   }
 
-  listScanProfiles(request: ListScanProfilesRequest): ListScanProfilesResponse {
-    return { profiles: this.store.loadWorkspaceState(request.workspaceId).scanProfiles };
-  }
-
-  listScanRuns(request: ListScanRunsRequest): ListScanRunsResponse {
-    return { runs: this.store.loadWorkspaceState(request.workspaceId).scanRuns };
-  }
-
-  startScan(request: StartScanRequest): StartScanResponse {
+  async startScan(request: StartScanRequest): Promise<StartScanResponse> {
     validateStartScanRequest(request);
-    const state = this.store.loadWorkspaceState(request.workspaceId);
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
     if (state.scanRuns.some((run) => run.id === request.scan.id)) throw new RuntimeError(`Scan already exists: ${request.scan.id}`);
     const profile = findScanProfile(state, request.scan.profileId, request.scan.profileVersion);
+    const repositoryIndex = await this.store.getRepositoryIndex(request.workspaceId, request.scan.repositoryIndexId);
+    if (repositoryIndex.stage !== "completed" || repositoryIndex.resolvedCommit === undefined) {
+      throw new RuntimeError(`Repository index must be completed before starting a scan: ${repositoryIndex.id}`, {
+        code: "REPOSITORY_INDEX_NOT_COMPLETED",
+        details: { indexId: repositoryIndex.id, stage: repositoryIndex.stage },
+      });
+    }
+    const repositoryFiles = await this.store.listRepositoryIndexFiles(request.workspaceId, request.scan.repositoryIndexId);
     const run: InProgressScanRun = {
-      ...request.scan,
+      id: request.scan.id,
+      profileId: request.scan.profileId,
+      profileVersion: request.scan.profileVersion,
+      repository: createScanRepositoryFromIndex(request.scan.repositoryIndexId, repositoryIndex),
+      actor: request.scan.actor,
+      startedAt: request.scan.startedAt,
       status: "in_progress",
+      coverage: deriveScanCoverage(profile, repositoryFiles),
       appliedCriteria: [],
       declaredOutputs: [],
       findingNodeIds: [],
     };
     validateScanRun(run, state.scanProfiles, state.graph);
-    this.store.saveWorkspaceState({ ...state, scanRuns: [...state.scanRuns, run] });
-    return { run, profile, instructions: createScanInstructions(profile) };
+    await this.store.saveWorkspaceState({ ...state, scanRuns: [...state.scanRuns, run] });
+    return { run, profile, instructions: createScanInstructions(profile, run) };
   }
 
-  recordScanCoverage(request: RecordScanCoverageRequest): RecordScanCoverageResponse {
+  async recordScanCoverage(request: RecordScanCoverageRequest): Promise<RecordScanCoverageResponse> {
     validateRecordScanCoverageRequest(request);
-    const state = this.store.loadWorkspaceState(request.workspaceId);
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
     const run = findInProgressScan(state, request.scanId);
     const updated: InProgressScanRun = { ...run, coverage: request.coverage };
     validateScanRun(updated, state.scanProfiles, state.graph);
-    this.store.saveWorkspaceState({ ...state, scanRuns: replaceById(state.scanRuns, updated) });
+    await this.store.saveWorkspaceState({ ...state, scanRuns: replaceById(state.scanRuns, updated) });
     return { run: updated };
   }
 
-  createScanFinding(request: CreateScanFindingRequest): CreateScanFindingResponse {
+  async createScanFinding(request: CreateScanFindingRequest): Promise<CreateScanFindingResponse> {
     validateCreateScanFindingRequest(request);
-    const state = this.store.loadWorkspaceState(request.workspaceId);
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
     if (state.capturePolicy.mode !== "delegated") {
       throw new RuntimeError(`scan_finding_create requires delegated capture; current mode is ${state.capturePolicy.mode}`);
     }
@@ -389,13 +860,13 @@ export class HiveMapRuntime {
       { id: `scan-${run.id}-finding-${node.id}`, type: "node.create", payload: { node } },
     ]);
     const updated: InProgressScanRun = { ...run, findingNodeIds: [...run.findingNodeIds, node.id] };
-    this.store.saveWorkspaceState({ ...state, graph, scanRuns: replaceById(state.scanRuns, updated) });
+    await this.store.saveWorkspaceState({ ...state, graph, scanRuns: replaceById(state.scanRuns, updated) });
     return { node, run: updated };
   }
 
-  updateFinding(request: UpdateFindingRequest): UpdateFindingResponse {
+  async updateFinding(request: UpdateFindingRequest): Promise<UpdateFindingResponse> {
     validateUpdateFindingRequest(request);
-    const state = this.store.loadWorkspaceState(request.workspaceId);
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
     const current = findById(state.graph.nodes, request.findingNodeId, "Finding node");
     const node = updateFindingNode(current, request.changes);
     const graph = applyGraphCommands(state.graph, [
@@ -408,13 +879,13 @@ export class HiveMapRuntime {
         },
       },
     ]);
-    this.store.saveWorkspaceState({ ...state, graph });
+    await this.store.saveWorkspaceState({ ...state, graph });
     return { node };
   }
 
-  completeScan(request: CompleteScanRequest): CompleteScanResponse {
+  async completeScan(request: CompleteScanRequest): Promise<CompleteScanResponse> {
     validateCompleteScanRequest(request);
-    const state = this.store.loadWorkspaceState(request.workspaceId);
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
     const run = findInProgressScan(state, request.scanId);
     if (run.coverage === undefined) throw new RuntimeError(`Scan coverage has not been recorded: ${run.id}`);
     const findingEvidence = run.findingNodeIds.map((nodeId) => toFindingEvidence(findById(state.graph.nodes, nodeId, "Finding node")));
@@ -429,52 +900,67 @@ export class HiveMapRuntime {
       findingEvidence,
     };
     validateScanRun(completed, state.scanProfiles, state.graph);
-    this.store.saveWorkspaceState({ ...state, scanRuns: replaceById(state.scanRuns, completed) });
+    await this.store.saveWorkspaceState({ ...state, scanRuns: replaceById(state.scanRuns, completed) });
     return { run: completed };
   }
 
-  compareScans(request: CompareScansRequest): CompareScansResponse {
+  async compareScans(request: CompareScansRequest): Promise<CompareScansResponse> {
     validateCompareScansRequest(request);
-    const state = this.store.loadWorkspaceState(request.workspaceId);
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
     const before = findCompletedScan(state, request.beforeScanId);
     const after = findCompletedScan(state, request.afterScanId);
     return { comparison: compareCompletedScans(before, after) };
   }
 
-  exportWorkspace(request: ExportWorkspaceRequest): ExportWorkspaceResponse {
+  async exportWorkspace(request: ExportWorkspaceRequest): Promise<ExportWorkspaceResponse> {
     validateExportWorkspaceRequest(request);
-    const state = this.store.loadWorkspaceState(request.workspaceId);
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
     return { path: request.targetPath, manifest: writeWorkspaceBundle(request.targetPath, state, request.exportedAt) };
   }
 
-  exportWorkspaceBundle(request: ExportWorkspaceBundleRequest): ExportWorkspaceBundleResponse {
+  async exportWorkspaceBundle(request: ExportWorkspaceBundleRequest): Promise<ExportWorkspaceBundleResponse> {
     validateExportWorkspaceBundleRequest(request);
-    return createWorkspaceBundle(this.store.loadWorkspaceState(request.workspaceId), request.exportedAt);
+    return createWorkspaceBundle(await this.store.loadWorkspaceState(request.workspaceId), request.exportedAt);
   }
 
-  importWorkspace(request: ImportWorkspaceRequest): ImportWorkspaceResponse {
+  async importWorkspace(request: ImportWorkspaceRequest): Promise<ImportWorkspaceResponse> {
     validateImportWorkspaceRequest(request);
     return this.persistImportedBundle(readWorkspaceBundle(request.sourcePath), request.mode);
   }
 
-  importWorkspaceBundle(request: ImportWorkspaceBundleRequest): ImportWorkspaceBundleResponse {
+  async importWorkspaceBundle(request: ImportWorkspaceBundleRequest): Promise<ImportWorkspaceBundleResponse> {
     validateImportWorkspaceBundleRequest(request);
     return this.persistImportedBundle(parseWorkspaceBundle(request.bytes), request.mode);
   }
 
-  private persistImportedBundle(
-    bundle: ReturnType<typeof readWorkspaceBundle>,
+  private async persistImportedBundle(
+    bundle: WorkspaceBundle,
     mode: "new" | "replace",
-  ): ImportWorkspaceResponse {
-    const exists = this.store.workspaceExists(bundle.state.workspace.id);
+  ): Promise<ImportWorkspaceResponse> {
+    const exists = await this.store.workspaceExists(bundle.state.workspace.id);
     if (mode === "new" && exists) throw new RuntimeError(`Workspace already exists: ${bundle.state.workspace.id}`);
     if (mode === "replace" && !exists) throw new RuntimeError(`Workspace does not exist for replacement: ${bundle.state.workspace.id}`);
     if (mode === "replace") {
-      this.store.replaceWorkspaceState(bundle.state);
+      await this.store.replaceWorkspaceState(bundle.state);
     } else {
-      this.store.saveWorkspaceState(bundle.state);
+      await this.store.saveWorkspaceState(bundle.state);
     }
     return { workspace: bundle.state.workspace, manifest: bundle.manifest };
+  }
+
+  private async bumpRepositoryIndexStage(
+    workspaceId: string,
+    indexId: string,
+    stage: RepositoryIndexRecord["stage"],
+    changes?: Partial<Pick<RepositoryIndexRecord, "resolvedCommit">>,
+  ): Promise<void> {
+    const current = await this.store.getRepositoryIndex(workspaceId, indexId);
+    await this.store.upsertRepositoryIndex({
+      ...current,
+      stage,
+      updatedAt: this.now(),
+      ...(changes?.resolvedCommit === undefined ? {} : { resolvedCommit: changes.resolvedCommit }),
+    });
   }
 }
 
@@ -489,7 +975,6 @@ function createInitialWorkspaceState(request: CreateWorkspaceRequest): Workspace
     feedbackEvents: [],
     proposals: [],
     projections: [],
-    snapshots: [],
     scanProfiles: INITIAL_SCAN_PROFILES,
     scanRuns: [],
   };
@@ -520,6 +1005,1062 @@ function createTargetIndex(state: WorkspaceState) {
   };
 }
 
+function createScanRepositoryFromIndex(indexId: string, index: RepositoryIndexRecord): InProgressScanRun["repository"] {
+  if (index.resolvedCommit === undefined) {
+    throw new RuntimeError(`Repository index is missing resolved commit: ${index.id}`, {
+      code: "REPOSITORY_INDEX_COMMIT_MISSING",
+      details: { indexId },
+    });
+  }
+  return {
+    repositoryIndexId: indexId,
+    root: `index:${indexId}`,
+    ...(index.repositoryUrl.length === 0 ? {} : { repositoryUrl: index.repositoryUrl }),
+    branch: index.requestedRef ?? "HEAD",
+    revision: index.resolvedCommit,
+  };
+}
+
+function deriveScanCoverage(profile: ScanProfile, files: readonly RepositoryFileRecord[]): ScanCoverage {
+  const discovered = files.map((file) => normalizeRepositoryPath(file.path)).sort();
+  const included: string[] = [];
+  const excluded: ScanCoverage["excluded"] = [];
+
+  for (const target of discovered) {
+    if (!matchesAnyGlob(target, profile.scope.include)) {
+      excluded.push({ target, reason: "excluded by profile include rules" });
+      continue;
+    }
+    if (matchesAnyGlob(target, profile.scope.exclude)) {
+      excluded.push({ target, reason: "excluded by profile exclude rules" });
+      continue;
+    }
+    included.push(target);
+  }
+
+  return {
+    discovered,
+    included,
+    excluded: excluded.sort((left, right) => left.target.localeCompare(right.target)),
+    failed: [],
+  };
+}
+
+function createRepositoryEvidenceCandidates(options: {
+  profile: ScanProfile;
+  criterionId: string;
+  files: readonly RepositoryFileRecord[];
+  chunks: readonly RepositoryChunkRecord[];
+  limit: number;
+}): RepositoryEvidenceCandidate[] {
+  if (options.profile.id !== "documentation-conflicts") {
+    return [];
+  }
+
+  const includedPaths = new Set(deriveScanCoverage(options.profile, options.files).included);
+  const includedFiles = options.files.filter((file) => includedPaths.has(normalizeRepositoryPath(file.path)));
+  const includedChunks = options.chunks.filter((chunk) => includedPaths.has(normalizeRepositoryPath(chunk.filePath)));
+
+  switch (options.criterionId) {
+    case "contradictory-claims":
+      return buildContradictoryClaimCandidates(includedFiles, includedChunks, options.limit);
+    case "stale-documentation":
+      return buildStaleDocumentationCandidates(options.profile, includedFiles, includedChunks, options.limit);
+    case "broken-references":
+      return buildBrokenReferenceCandidates(includedFiles, includedChunks, options.limit);
+    case "duplicate-authority":
+      return buildDuplicateAuthorityCandidates(includedChunks, options.limit);
+    case "missing-owner":
+      return buildMissingOwnerCandidates(includedFiles, includedChunks, options.limit);
+    default:
+      return [];
+  }
+}
+
+function buildBrokenReferenceCandidates(
+  files: readonly RepositoryFileRecord[],
+  chunks: readonly RepositoryChunkRecord[],
+  limit: number,
+): RepositoryEvidenceCandidate[] {
+  const existingPaths = new Set(files.map((file) => normalizeRepositoryPath(file.path)));
+  const headingsByFile = collectMarkdownHeadingsByFile(chunks);
+  const candidates: RepositoryEvidenceCandidate[] = [];
+
+  for (const chunk of chunks) {
+    if (chunk.sourceKind !== "documentation") {
+      continue;
+    }
+    const lines = chunk.text.split("\n");
+    for (let offset = 0; offset < lines.length; offset += 1) {
+      const line = lines[offset] ?? "";
+      for (const match of line.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)) {
+        const rawTarget = (match[1] ?? "").trim();
+        const resolvedReference = resolveRepositoryLinkReference(chunk.filePath, rawTarget);
+        if (resolvedReference === undefined) {
+          continue;
+        }
+        const targetExists = existingPaths.has(resolvedReference.targetPath);
+        const missingFile = !targetExists;
+        const missingHeading =
+          targetExists &&
+          resolvedReference.fragment !== undefined &&
+          !fileContainsHeading(headingsByFile, resolvedReference.targetPath, resolvedReference.fragment);
+        if (!missingFile && !missingHeading) {
+          continue;
+        }
+        const summary = missingFile
+          ? `Repository-relative link points to a missing target: ${resolvedReference.targetPath}`
+          : `Repository-relative link points to a missing heading fragment: ${resolvedReference.targetPath}#${resolvedReference.fragment}`;
+        const whySelected = missingFile
+          ? `Unresolved repository-relative link target: ${rawTarget}`
+          : `Referenced heading fragment was not found: #${resolvedReference.fragment}`;
+        candidates.push({
+          id: createEvidenceCandidateId("broken-reference", chunk.filePath, String(chunk.startLine + offset), rawTarget),
+          criterionId: "broken-references",
+          signal: "broken-reference",
+          kind: "deterministic",
+          title: `Broken repository reference in ${chunk.filePath}`,
+          summary,
+          sources: [
+            {
+              kind: "chunk",
+              filePath: chunk.filePath,
+              language: chunk.language,
+              sourceKind: chunk.sourceKind,
+              startLine: chunk.startLine + offset,
+              endLine: chunk.startLine + offset,
+              snippet: line.trim(),
+              whySelected,
+            },
+          ],
+        });
+        if (candidates.length >= limit) {
+          return candidates;
+        }
+      }
+    }
+  }
+
+  return candidates;
+}
+
+function buildContradictoryClaimCandidates(
+  files: readonly RepositoryFileRecord[],
+  chunks: readonly RepositoryChunkRecord[],
+  limit: number,
+): RepositoryEvidenceCandidate[] {
+  const chunksByFile = new Map<string, RepositoryChunkRecord[]>();
+  for (const chunk of chunks) {
+    const current = chunksByFile.get(chunk.filePath) ?? [];
+    current.push(chunk);
+    chunksByFile.set(chunk.filePath, current);
+  }
+  const contradictionClaims = collectContradictionClaims(
+    files.filter((file) => isMaterialContradictionDocument(file, chunksByFile.get(file.path) ?? [])),
+    chunks,
+  );
+  const candidates: RepositoryEvidenceCandidate[] = [];
+
+  for (let leftIndex = 0; leftIndex < contradictionClaims.length; leftIndex += 1) {
+    const left = contradictionClaims[leftIndex];
+    if (left === undefined) {
+      continue;
+    }
+    for (let rightIndex = leftIndex + 1; rightIndex < contradictionClaims.length; rightIndex += 1) {
+      const right = contradictionClaims[rightIndex];
+      if (right === undefined || right.filePath === left.filePath || right.kind !== left.kind) {
+        continue;
+      }
+      const contradictionMatch = matchContradictionClaimPair(left, right);
+      if (contradictionMatch?.kind === "status" && left.kind === "status" && right.kind === "status") {
+        candidates.push({
+          id: createEvidenceCandidateId("contradictory-claims", left.filePath, String(left.line), right.filePath, String(right.line)),
+          criterionId: "contradictory-claims",
+          signal: "contradictory-claim",
+          kind: "requires_interpretation",
+          title: "Two documentation sources make opposite status claims",
+          summary: `Two sources make opposite ${left.group} claims about ${contradictionMatch.sharedSubjects.join(", ")} within ${contradictionMatch.sharedContext.join(", ")}.`,
+          sources: [left.source, right.source],
+        });
+      } else if (contradictionMatch?.kind === "selection" && left.kind === "selection" && right.kind === "selection") {
+        candidates.push({
+          id: createEvidenceCandidateId("contradictory-claims", left.filePath, String(left.line), right.filePath, String(right.line)),
+          criterionId: "contradictory-claims",
+          signal: "contradictory-claim",
+          kind: "requires_interpretation",
+          title: "Two documentation sources choose different primary/default owners",
+          summary: `Two sources assign different ${left.qualifier} selections for the same concern: ${contradictionMatch.sharedContext.join(", ")}.`,
+          sources: [left.source, right.source],
+        });
+      } else {
+        continue;
+      }
+      if (candidates.length >= limit) {
+        return candidates;
+      }
+    }
+  }
+
+  return candidates;
+}
+
+function buildStaleDocumentationCandidates(
+  profile: ScanProfile,
+  files: readonly RepositoryFileRecord[],
+  chunks: readonly RepositoryChunkRecord[],
+  limit: number,
+): RepositoryEvidenceCandidate[] {
+  const chunksByFile = new Map<string, RepositoryChunkRecord[]>();
+  for (const chunk of chunks) {
+    const current = chunksByFile.get(chunk.filePath) ?? [];
+    current.push(chunk);
+    chunksByFile.set(chunk.filePath, current);
+  }
+  const materialFiles = files.filter((file) => isMaterialContradictionDocument(file, chunksByFile.get(file.path) ?? []));
+  const fileByPath = new Map(materialFiles.map((file) => [file.path, file] as const));
+  const contradictionClaims = collectContradictionClaims(materialFiles, chunks);
+  const candidates: RepositoryEvidenceCandidate[] = [];
+  const emittedCandidateIds = new Set<string>();
+
+  for (let leftIndex = 0; leftIndex < contradictionClaims.length; leftIndex += 1) {
+    const left = contradictionClaims[leftIndex];
+    if (left === undefined) {
+      continue;
+    }
+    for (let rightIndex = leftIndex + 1; rightIndex < contradictionClaims.length; rightIndex += 1) {
+      const right = contradictionClaims[rightIndex];
+      if (right === undefined || right.filePath === left.filePath || right.kind !== left.kind) {
+        continue;
+      }
+      const contradictionMatch = matchContradictionClaimPair(left, right);
+      if (contradictionMatch === undefined) {
+        continue;
+      }
+      const stalePair = selectStaleDocumentationPair(profile, left.filePath, right.filePath);
+      if (stalePair === undefined) {
+        continue;
+      }
+      const staleFile = fileByPath.get(stalePair.staleFilePath);
+      const authoritativeFile = fileByPath.get(stalePair.authoritativeFilePath);
+      const staleChunks = chunksByFile.get(stalePair.staleFilePath) ?? [];
+      const authoritativeChunks = chunksByFile.get(stalePair.authoritativeFilePath) ?? [];
+      if (
+        staleFile === undefined ||
+        authoritativeFile === undefined ||
+        !isCurrentLookingDocumentationSource(staleFile, staleChunks) ||
+        !isCurrentLookingDocumentationSource(authoritativeFile, authoritativeChunks)
+      ) {
+        continue;
+      }
+      const staleClaim = left.filePath === stalePair.staleFilePath ? left : right;
+      const authoritativeClaim = left.filePath === stalePair.authoritativeFilePath ? left : right;
+      const candidateId = createEvidenceCandidateId("stale-documentation", stalePair.staleFilePath, stalePair.authoritativeFilePath, String(staleClaim.line));
+      if (emittedCandidateIds.has(candidateId)) {
+        continue;
+      }
+      emittedCandidateIds.add(candidateId);
+      candidates.push({
+        id: candidateId,
+        criterionId: "stale-documentation",
+        signal: "stale-documentation",
+        kind: "requires_interpretation",
+        title: `Lower-precedence documentation may be stale in ${stalePair.staleFilePath}`,
+        summary: createStaleDocumentationSummary(contradictionMatch, stalePair.staleFilePath, stalePair.authoritativeFilePath),
+        sources: [staleClaim.source, authoritativeClaim.source],
+      });
+      if (candidates.length >= limit) {
+        return candidates;
+      }
+    }
+  }
+
+  return candidates;
+}
+
+function matchContradictionClaimPair(
+  left:
+    | {
+        kind: "status";
+        filePath: string;
+        line: number;
+        group: string;
+        polarity: "positive" | "negative";
+        subjectTokens: string[];
+        contextTokens: string[];
+        source: RepositoryEvidenceSource;
+      }
+    | {
+        kind: "selection";
+        filePath: string;
+        line: number;
+        qualifier: "primary" | "default" | "canonical";
+        subjectTokens: string[];
+        contextTokens: string[];
+        source: RepositoryEvidenceSource;
+      },
+  right:
+    | {
+        kind: "status";
+        filePath: string;
+        line: number;
+        group: string;
+        polarity: "positive" | "negative";
+        subjectTokens: string[];
+        contextTokens: string[];
+        source: RepositoryEvidenceSource;
+      }
+    | {
+        kind: "selection";
+        filePath: string;
+        line: number;
+        qualifier: "primary" | "default" | "canonical";
+        subjectTokens: string[];
+        contextTokens: string[];
+        source: RepositoryEvidenceSource;
+      },
+):
+  | { kind: "status"; sharedSubjects: string[]; sharedContext: string[] }
+  | { kind: "selection"; sharedContext: string[] }
+  | undefined {
+  if (left.kind === "status" && right.kind === "status") {
+    if (left.group !== right.group || left.polarity === right.polarity) {
+      return undefined;
+    }
+    const sharedSubjects = intersectNormalizedTokens(left.subjectTokens, right.subjectTokens);
+    const sharedContext = intersectNormalizedTokens(left.contextTokens, right.contextTokens);
+    if (sharedSubjects.length === 0 || sharedContext.length === 0) {
+      return undefined;
+    }
+    return { kind: "status", sharedSubjects, sharedContext };
+  }
+  if (left.kind === "selection" && right.kind === "selection") {
+    if (left.qualifier !== right.qualifier) {
+      return undefined;
+    }
+    const sharedContext = intersectNormalizedTokens(left.contextTokens, right.contextTokens);
+    if (sharedContext.length < 2 || haveSameNormalizedTokens(left.subjectTokens, right.subjectTokens)) {
+      return undefined;
+    }
+    return { kind: "selection", sharedContext };
+  }
+  return undefined;
+}
+
+function selectStaleDocumentationPair(
+  profile: ScanProfile,
+  leftFilePath: string,
+  rightFilePath: string,
+): { staleFilePath: string; authoritativeFilePath: string } | undefined {
+  const leftPrecedence = scoreSsotPrecedence(leftFilePath, profile.ssotOrder);
+  const rightPrecedence = scoreSsotPrecedence(rightFilePath, profile.ssotOrder);
+  if (leftPrecedence === rightPrecedence) {
+    return undefined;
+  }
+  if (leftPrecedence < rightPrecedence) {
+    return { staleFilePath: rightFilePath, authoritativeFilePath: leftFilePath };
+  }
+  return { staleFilePath: leftFilePath, authoritativeFilePath: rightFilePath };
+}
+
+function scoreSsotPrecedence(filePath: string, ssotOrder: readonly string[]): number {
+  for (let index = 0; index < ssotOrder.length; index += 1) {
+    const pattern = ssotOrder[index];
+    if (pattern === undefined || pattern === "implementation") {
+      continue;
+    }
+    if (matchesGlob(normalizeRepositoryPath(filePath), normalizeRepositoryPath(pattern))) {
+      return index;
+    }
+  }
+  return ssotOrder.length + 1;
+}
+
+function createStaleDocumentationSummary(
+  contradictionMatch: { kind: "status"; sharedSubjects: string[]; sharedContext: string[] } | { kind: "selection"; sharedContext: string[] },
+  staleFilePath: string,
+  authoritativeFilePath: string,
+): string {
+  if (contradictionMatch.kind === "status") {
+    return `${staleFilePath} makes a lower-precedence status claim about ${contradictionMatch.sharedSubjects.join(", ")} that conflicts with stronger SSOT in ${authoritativeFilePath}.`;
+  }
+  return `${staleFilePath} makes a lower-precedence primary/default/canonical selection that conflicts with stronger SSOT in ${authoritativeFilePath} for ${contradictionMatch.sharedContext.join(", ")}.`;
+}
+
+function buildDuplicateAuthorityCandidates(
+  chunks: readonly RepositoryChunkRecord[],
+  limit: number,
+): RepositoryEvidenceCandidate[] {
+  const authorityClaims = collectAuthorityClaims(chunks);
+  const candidates: RepositoryEvidenceCandidate[] = [];
+
+  for (let leftIndex = 0; leftIndex < authorityClaims.length; leftIndex += 1) {
+    const left = authorityClaims[leftIndex];
+    if (left === undefined) {
+      continue;
+    }
+    for (let rightIndex = leftIndex + 1; rightIndex < authorityClaims.length; rightIndex += 1) {
+      const right = authorityClaims[rightIndex];
+      if (right === undefined || right.filePath === left.filePath) {
+        continue;
+      }
+      const sharedTokens = intersectNormalizedTokens(left.topicTokens, right.topicTokens);
+      if (sharedTokens.length === 0) {
+        continue;
+      }
+      candidates.push({
+        id: createEvidenceCandidateId("duplicate-authority", left.filePath, String(left.line), right.filePath, String(right.line)),
+        criterionId: "duplicate-authority",
+        signal: "authority-claim",
+        kind: "requires_interpretation",
+        title: "Multiple documentation sources make authority-style claims",
+        summary: `Two documentation sources contain authority-style language about the same concern: ${sharedTokens.join(", ")}.`,
+        sources: [left.source, right.source],
+      });
+      if (candidates.length >= limit) {
+        return candidates;
+      }
+    }
+  }
+
+  return candidates;
+}
+
+function buildMissingOwnerCandidates(
+  files: readonly RepositoryFileRecord[],
+  chunks: readonly RepositoryChunkRecord[],
+  limit: number,
+): RepositoryEvidenceCandidate[] {
+  const documentationFiles = files.filter((file) => file.sourceKind === "documentation");
+  const authorityFilePaths = new Set(collectAuthorityClaims(chunks).map((claim) => claim.filePath));
+  const chunksByFile = new Map<string, RepositoryChunkRecord[]>();
+  for (const chunk of chunks) {
+    const current = chunksByFile.get(chunk.filePath) ?? [];
+    current.push(chunk);
+    chunksByFile.set(chunk.filePath, current);
+  }
+
+  const candidates: RepositoryEvidenceCandidate[] = [];
+  for (const file of documentationFiles) {
+    if (authorityFilePaths.has(file.path)) {
+      continue;
+    }
+    if (!isMaterialOwnershipDocument(file, chunksByFile.get(file.path) ?? [])) {
+      continue;
+    }
+    const firstChunk = (chunksByFile.get(file.path) ?? [])[0];
+    const source =
+      firstChunk === undefined
+        ? createFileEvidenceSource(file)
+        : createChunkEvidenceSource(
+            firstChunk,
+            summarizeChunkSnippet(firstChunk.text),
+            "No explicit owner or authority markers were detected in a material documentation source.",
+          );
+    candidates.push({
+      id: createEvidenceCandidateId("missing-owner", file.path),
+      criterionId: "missing-owner",
+      signal: "missing-owner",
+      kind: "requires_interpretation",
+      title: `No explicit owner markers detected in ${file.path}`,
+      summary:
+        "This documentation source does not contain simple owner, authority, or source-of-truth markers. An agent should verify whether ownership is intentionally omitted or missing.",
+      sources: [source],
+    });
+    if (candidates.length >= limit) {
+      return candidates;
+    }
+  }
+
+  return candidates;
+}
+
+function collectAuthorityClaims(chunks: readonly RepositoryChunkRecord[]): Array<{
+  filePath: string;
+  line: number;
+  source: RepositoryEvidenceSource;
+  topicTokens: string[];
+}> {
+  const claims: Array<{ filePath: string; line: number; source: RepositoryEvidenceSource; topicTokens: string[] }> = [];
+  for (const chunk of chunks) {
+    if (chunk.sourceKind !== "documentation") {
+      continue;
+    }
+    const lines = chunk.text.split("\n");
+    let currentHeading: string | undefined;
+    for (let offset = 0; offset < lines.length; offset += 1) {
+      const line = lines[offset] ?? "";
+      const heading = parseMarkdownHeading(line);
+      if (heading !== undefined) {
+        currentHeading = heading;
+      }
+      const phrase = matchAuthorityPhrase(line);
+      if (phrase === undefined) {
+        continue;
+      }
+      claims.push({
+        filePath: chunk.filePath,
+        line: chunk.startLine + offset,
+        topicTokens: extractAuthorityTopicTokens(line, currentHeading),
+        source: createChunkEvidenceSource(
+          chunk,
+          line.trim(),
+          `Authority-style phrase detected: ${phrase}`,
+          chunk.startLine + offset,
+          chunk.startLine + offset,
+        ),
+      });
+    }
+  }
+  return claims;
+}
+
+function collectContradictionClaims(
+  files: readonly RepositoryFileRecord[],
+  chunks: readonly RepositoryChunkRecord[],
+): Array<
+  | {
+      kind: "status";
+      filePath: string;
+      line: number;
+      group: string;
+      polarity: "positive" | "negative";
+      subjectTokens: string[];
+      contextTokens: string[];
+      source: RepositoryEvidenceSource;
+    }
+  | {
+      kind: "selection";
+      filePath: string;
+      line: number;
+      qualifier: "primary" | "default" | "canonical";
+      subjectTokens: string[];
+      contextTokens: string[];
+      source: RepositoryEvidenceSource;
+    }
+> {
+  const includedFilePaths = new Set(files.map((file) => file.path));
+  const claims: Array<
+    | {
+        kind: "status";
+        filePath: string;
+        line: number;
+        group: string;
+        polarity: "positive" | "negative";
+        subjectTokens: string[];
+        contextTokens: string[];
+        source: RepositoryEvidenceSource;
+      }
+    | {
+        kind: "selection";
+        filePath: string;
+        line: number;
+        qualifier: "primary" | "default" | "canonical";
+        subjectTokens: string[];
+        contextTokens: string[];
+        source: RepositoryEvidenceSource;
+      }
+  > = [];
+  for (const chunk of chunks) {
+    if (chunk.sourceKind !== "documentation" || !includedFilePaths.has(chunk.filePath)) {
+      continue;
+    }
+    const lines = chunk.text.split("\n");
+    let currentHeading: string | undefined;
+    for (let offset = 0; offset < lines.length; offset += 1) {
+      const line = lines[offset] ?? "";
+      const heading = parseMarkdownHeading(line);
+      if (heading !== undefined) {
+        currentHeading = heading;
+      }
+      const lineNumber = chunk.startLine + offset;
+      const statusClaim = matchContradictoryStatusClaim(chunk, line, lineNumber, currentHeading);
+      if (statusClaim !== undefined) {
+        claims.push(statusClaim);
+      }
+      const selectionClaim = matchExclusiveSelectionClaim(chunk, line, lineNumber, currentHeading);
+      if (selectionClaim !== undefined) {
+        claims.push(selectionClaim);
+      }
+    }
+  }
+  return claims;
+}
+
+function matchContradictoryStatusClaim(
+  chunk: RepositoryChunkRecord,
+  line: string,
+  lineNumber: number,
+  currentHeading?: string,
+):
+  | {
+      kind: "status";
+      filePath: string;
+      line: number;
+      group: string;
+      polarity: "positive" | "negative";
+      subjectTokens: string[];
+      contextTokens: string[];
+      source: RepositoryEvidenceSource;
+    }
+  | undefined {
+  for (const pattern of CONTRADICTION_STATUS_PATTERNS) {
+    const match = line.match(pattern.pattern);
+    if (match === null) {
+      continue;
+    }
+    const subject = match.groups?.subject?.trim() ?? "";
+    const context = `${currentHeading ?? ""} ${match.groups?.context?.trim() ?? ""}`.trim();
+    const subjectTokens = normalizeClaimTokens(subject);
+    const contextTokens = normalizeClaimTokens(context);
+    if (subjectTokens.length === 0 || contextTokens.length === 0) {
+      continue;
+    }
+    return {
+      kind: "status",
+      filePath: chunk.filePath,
+      line: lineNumber,
+      group: pattern.group,
+      polarity: pattern.polarity,
+      subjectTokens,
+      contextTokens,
+      source: createChunkEvidenceSource(
+        chunk,
+        line.trim(),
+        `${capitalize(pattern.polarity)} ${pattern.group} phrase detected for ${subject}.`,
+        lineNumber,
+        lineNumber,
+      ),
+    };
+  }
+  return undefined;
+}
+
+function matchExclusiveSelectionClaim(
+  chunk: RepositoryChunkRecord,
+  line: string,
+  lineNumber: number,
+  currentHeading?: string,
+):
+  | {
+      kind: "selection";
+      filePath: string;
+      line: number;
+      qualifier: "primary" | "default" | "canonical";
+      subjectTokens: string[];
+      contextTokens: string[];
+      source: RepositoryEvidenceSource;
+    }
+  | undefined {
+  const match = line.match(
+    /^(?<subject>.+?)\s+(?:is|are|remains)\s+(?:the\s+)?(?<qualifier>primary|default|canonical)\s+(?<context>.+)$/i,
+  );
+  if (match === null) {
+    return undefined;
+  }
+  const qualifier = match.groups?.qualifier?.toLocaleLowerCase();
+  if (qualifier !== "primary" && qualifier !== "default" && qualifier !== "canonical") {
+    return undefined;
+  }
+  const subjectTokens = normalizeClaimTokens(match.groups?.subject ?? "");
+  const contextTokens = normalizeClaimTokens(`${currentHeading ?? ""} ${match.groups?.context ?? ""}`);
+  if (subjectTokens.length === 0 || contextTokens.length < 2) {
+    return undefined;
+  }
+  return {
+    kind: "selection",
+    filePath: chunk.filePath,
+    line: lineNumber,
+    qualifier,
+    subjectTokens,
+    contextTokens,
+    source: createChunkEvidenceSource(
+      chunk,
+      line.trim(),
+      `${capitalize(qualifier)} selection phrase detected for ${subjectTokens.join(", ")}.`,
+      lineNumber,
+      lineNumber,
+    ),
+  };
+}
+
+function matchAuthorityPhrase(value: string): string | undefined {
+  const match = value.match(/\b(single source of truth|source of truth|canonical|authoritative|owner(?:ship)?|owned by)\b/i);
+  return match?.[1];
+}
+
+function resolveRepositoryLinkReference(
+  sourceFilePath: string,
+  rawTarget: string,
+): { targetPath: string; fragment?: string } | undefined {
+  if (rawTarget.length === 0 || /^[a-z][a-z0-9+.-]*:/i.test(rawTarget)) {
+    return undefined;
+  }
+  const hashIndex = rawTarget.indexOf("#");
+  const fragmentPart = hashIndex >= 0 ? rawTarget.slice(hashIndex + 1).trim() : undefined;
+  const targetPart = hashIndex >= 0 ? rawTarget.slice(0, hashIndex) : rawTarget;
+  const [targetWithoutQuery] = targetPart.split("?", 1);
+  const trimmedTarget = targetWithoutQuery?.trim() ?? "";
+  const targetPath =
+    trimmedTarget.length === 0 ? sourceFilePath : resolveRepositoryLinkTargetPath(sourceFilePath, trimmedTarget);
+  if (targetPath === undefined) {
+    return undefined;
+  }
+  return {
+    targetPath,
+    ...(fragmentPart === undefined || fragmentPart.length === 0 ? {} : { fragment: normalizeMarkdownHeadingSlug(fragmentPart) }),
+  };
+}
+
+function resolveRepositoryLinkTargetPath(sourceFilePath: string, rawTargetPath: string): string | undefined {
+  const normalized =
+    rawTargetPath.startsWith("/")
+      ? pathPosix.normalize(rawTargetPath.slice(1))
+      : pathPosix.normalize(pathPosix.join(pathPosix.dirname(sourceFilePath), rawTargetPath));
+  if (normalized.length === 0 || normalized === "." || normalized === ".." || normalized.startsWith("../")) {
+    return undefined;
+  }
+  return normalizeRepositoryPath(normalized);
+}
+
+function collectMarkdownHeadingsByFile(chunks: readonly RepositoryChunkRecord[]): Map<string, Set<string>> {
+  const headingsByFile = new Map<string, Set<string>>();
+  for (const chunk of chunks) {
+    if (chunk.sourceKind !== "documentation") {
+      continue;
+    }
+    const headings = headingsByFile.get(chunk.filePath) ?? new Set<string>();
+    for (const line of chunk.text.split("\n")) {
+      const heading = parseMarkdownHeading(line);
+      if (heading !== undefined) {
+        headings.add(normalizeMarkdownHeadingSlug(heading));
+      }
+    }
+    headingsByFile.set(chunk.filePath, headings);
+  }
+  return headingsByFile;
+}
+
+function fileContainsHeading(headingsByFile: ReadonlyMap<string, Set<string>>, filePath: string, fragment: string): boolean {
+  return headingsByFile.get(filePath)?.has(normalizeMarkdownHeadingSlug(fragment)) ?? false;
+}
+
+function parseMarkdownHeading(line: string): string | undefined {
+  const match = line.match(/^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/);
+  return match?.[1]?.trim() || undefined;
+}
+
+function normalizeMarkdownHeadingSlug(value: string): string {
+  return value
+    .trim()
+    .toLocaleLowerCase()
+    .replace(/[`*_~]/g, "")
+    .replace(/[^\p{L}\p{N}\s-]/gu, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-");
+}
+
+function extractAuthorityTopicTokens(line: string, heading?: string): string[] {
+  return normalizeTopicTokens([heading ?? "", line].join(" "));
+}
+
+function normalizeTopicTokens(value: string): string[] {
+  const tokens = value
+    .toLocaleLowerCase()
+    .split(/[^a-z0-9]+/i)
+    .map((token) => normalizeTopicToken(token))
+    .filter((token) => token.length > 1 && !IGNORED_TOPIC_TOKENS.has(token));
+  return [...new Set(tokens)];
+}
+
+function normalizeClaimTokens(value: string): string[] {
+  return normalizeTopicTokens(value).filter((token) => !IGNORED_CLAIM_TOKENS.has(token));
+}
+
+function normalizeTopicToken(value: string): string {
+  if (/^owner(?:ship)?$/.test(value) || /^owned$/.test(value) || /^owning$/.test(value)) {
+    return "owner";
+  }
+  if (/^docs?$/.test(value) || /^document(?:ation)?$/.test(value)) {
+    return "doc";
+  }
+  if (/^workflows?$/.test(value)) {
+    return "workflow";
+  }
+  if (/^architect(?:ure|ural)?$/.test(value)) {
+    return "architecture";
+  }
+  if (/^guides?$/.test(value) || /^guidance$/.test(value)) {
+    return "guide";
+  }
+  return value;
+}
+
+function intersectNormalizedTokens(left: readonly string[], right: readonly string[]): string[] {
+  const rightTokens = new Set(right);
+  return left.filter((token) => rightTokens.has(token));
+}
+
+function haveSameNormalizedTokens(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+  const rightTokens = new Set(right);
+  return left.every((token) => rightTokens.has(token));
+}
+
+function capitalize(value: string): string {
+  return value.length === 0 ? value : `${value[0]?.toLocaleUpperCase() ?? ""}${value.slice(1)}`;
+}
+
+function isMaterialOwnershipDocument(file: RepositoryFileRecord, chunks: readonly RepositoryChunkRecord[]): boolean {
+  const normalizedPath = normalizeRepositoryPath(file.path).toLocaleLowerCase();
+  const baseName = pathPosix.basename(normalizedPath);
+  const fullText = chunks.map((chunk) => chunk.text).join("\n").toLocaleLowerCase();
+  if (IGNORED_MISSING_OWNER_PATH_PATTERNS.some((pattern) => normalizedPath.includes(pattern) || baseName.includes(pattern))) {
+    return false;
+  }
+  if (baseName === "agents.md" || baseName === "readme.md") {
+    return true;
+  }
+  if (MATERIAL_OWNER_PATH_KEYWORDS.some((keyword) => normalizedPath.includes(keyword) || baseName.includes(keyword))) {
+    return true;
+  }
+  return MATERIAL_OWNER_TEXT_KEYWORDS.some((keyword) => fullText.includes(keyword));
+}
+
+function isMaterialContradictionDocument(file: RepositoryFileRecord, chunks: readonly RepositoryChunkRecord[]): boolean {
+  const normalizedPath = normalizeRepositoryPath(file.path).toLocaleLowerCase();
+  const baseName = pathPosix.basename(normalizedPath);
+  const fullText = chunks.map((chunk) => chunk.text).join("\n").toLocaleLowerCase();
+  if (IGNORED_CONTRADICTION_PATH_PATTERNS.some((pattern) => normalizedPath.includes(pattern) || baseName.includes(pattern))) {
+    return false;
+  }
+  if (baseName === "agents.md" || baseName === "readme.md") {
+    return true;
+  }
+  if (MATERIAL_CONTRADICTION_PATH_KEYWORDS.some((keyword) => normalizedPath.includes(keyword) || baseName.includes(keyword))) {
+    return true;
+  }
+  return MATERIAL_CONTRADICTION_TEXT_KEYWORDS.some((keyword) => fullText.includes(keyword));
+}
+
+function isCurrentLookingDocumentationSource(file: RepositoryFileRecord, chunks: readonly RepositoryChunkRecord[]): boolean {
+  const normalizedPath = normalizeRepositoryPath(file.path).toLocaleLowerCase();
+  const fullText = chunks.map((chunk) => chunk.text).join("\n").toLocaleLowerCase();
+  if (NON_CURRENT_DOCUMENT_PATH_PATTERNS.some((pattern) => normalizedPath.includes(pattern))) {
+    return false;
+  }
+  if (NON_CURRENT_DOCUMENT_TEXT_PATTERNS.some((pattern) => fullText.includes(pattern))) {
+    return false;
+  }
+  return true;
+}
+
+function summarizeChunkSnippet(value: string): string {
+  return value.split("\n").map((line) => line.trim()).filter((line) => line.length > 0).slice(0, 2).join(" ");
+}
+
+const IGNORED_TOPIC_TOKENS = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "as",
+  "authoritative",
+  "be",
+  "by",
+  "canonical",
+  "doc",
+  "file",
+  "for",
+  "here",
+  "is",
+  "it",
+  "lives",
+  "of",
+  "on",
+  "page",
+  "source",
+  "the",
+  "this",
+  "truth",
+]);
+
+const IGNORED_CLAIM_TOKENS = new Set([
+  "available",
+  "canonical",
+  "current",
+  "default",
+  "deprecated",
+  "implemented",
+  "not",
+  "part",
+  "primary",
+  "removed",
+  "remains",
+  "supported",
+  "target",
+  "unavailable",
+]);
+
+const IGNORED_MISSING_OWNER_PATH_PATTERNS = ["glossary", "changelog", "release-notes", "terms", "archive", "history"];
+const MATERIAL_OWNER_PATH_KEYWORDS = ["architecture", "design", "spec", "contract", "policy", "workflow", "runbook", "playbook", "guide", "deploy", "operations", "runtime"];
+const MATERIAL_OWNER_TEXT_KEYWORDS = ["must ", "should ", "architecture", "design", "contract", "workflow", "deployment", "runtime", "policy", "runbook"];
+const IGNORED_CONTRADICTION_PATH_PATTERNS = ["glossary", "changelog", "release-notes", "terms", "archive", "history"];
+const MATERIAL_CONTRADICTION_PATH_KEYWORDS = ["architecture", "design", "spec", "contract", "policy", "workflow", "runbook", "playbook", "guide", "deploy", "operations", "runtime", "storage", "transport"];
+const MATERIAL_CONTRADICTION_TEXT_KEYWORDS = ["primary", "default", "supported", "deprecated", "removed", "deferred", "runtime", "backend", "interface", "target"];
+const NON_CURRENT_DOCUMENT_PATH_PATTERNS = ["legacy", "deprecated", "archive", "histor", "changelog", "release-notes"];
+const NON_CURRENT_DOCUMENT_TEXT_PATTERNS = [
+  "legacy documentation",
+  "legacy doc",
+  "historical reference",
+  "for historical reference",
+  "archived document",
+  "archived for reference",
+  "superseded by",
+  "this document is obsolete",
+  "this document is deprecated",
+];
+const CONTRADICTION_STATUS_PATTERNS = [
+  {
+    group: "support",
+    polarity: "negative" as const,
+    pattern: /^(?<subject>.+?)\s+(?:is|are|remains)\s+not\s+supported\b(?<context>.*)$/i,
+  },
+  {
+    group: "support",
+    polarity: "negative" as const,
+    pattern: /^(?<subject>.+?)\s+is\s+no\s+longer\s+supported\b(?<context>.*)$/i,
+  },
+  {
+    group: "support",
+    polarity: "positive" as const,
+    pattern: /^(?<subject>.+?)\s+(?:is|are|remains)\s+supported\b(?<context>.*)$/i,
+  },
+  {
+    group: "membership",
+    polarity: "negative" as const,
+    pattern: /^(?<subject>.+?)\s+(?:is|are|remains)\s+not\s+part\s+of\b(?<context>.*)$/i,
+  },
+  {
+    group: "membership",
+    polarity: "positive" as const,
+    pattern: /^(?<subject>.+?)\s+(?:is|are|remains)\s+part\s+of\b(?<context>.*)$/i,
+  },
+  {
+    group: "availability",
+    polarity: "negative" as const,
+    pattern: /^(?<subject>.+?)\s+(?:is|are|remains)\s+not\s+available\b(?<context>.*)$/i,
+  },
+  {
+    group: "availability",
+    polarity: "negative" as const,
+    pattern: /^(?<subject>.+?)\s+(?:is|are|remains)\s+unavailable\b(?<context>.*)$/i,
+  },
+  {
+    group: "availability",
+    polarity: "positive" as const,
+    pattern: /^(?<subject>.+?)\s+(?:is|are|remains)\s+available\b(?<context>.*)$/i,
+  },
+];
+
+function createFileEvidenceSource(file: RepositoryFileRecord): RepositoryEvidenceSource {
+  return {
+    kind: "file",
+    filePath: file.path,
+    language: file.language,
+    sourceKind: file.sourceKind,
+    snippet: file.path,
+    whySelected: "Documentation file was included in repository coverage.",
+  };
+}
+
+function createChunkEvidenceSource(
+  chunk: RepositoryChunkRecord,
+  snippet: string,
+  whySelected: string,
+  startLine = chunk.startLine,
+  endLine = chunk.endLine,
+): RepositoryEvidenceSource {
+  return {
+    kind: "chunk",
+    filePath: chunk.filePath,
+    language: chunk.language,
+    sourceKind: chunk.sourceKind,
+    startLine,
+    endLine,
+    snippet,
+    whySelected,
+  };
+}
+
+function createEvidenceCandidateId(...parts: string[]): string {
+  return createHash("sha256").update(parts.join("::")).digest("hex").slice(0, 24);
+}
+
+function normalizeRepositoryPath(value: string): string {
+  return value.replace(/\\/g, "/");
+}
+
+function matchesAnyGlob(path: string, patterns: readonly string[]): boolean {
+  return patterns.some((pattern) => matchesGlob(normalizeRepositoryPath(path), normalizeRepositoryPath(pattern)));
+}
+
+function matchesGlob(path: string, pattern: string): boolean {
+  return matchGlobSegments(path.split("/"), pattern.split("/"), 0, 0);
+}
+
+function matchGlobSegments(pathSegments: readonly string[], patternSegments: readonly string[], pathIndex: number, patternIndex: number): boolean {
+  if (patternIndex >= patternSegments.length) {
+    return pathIndex >= pathSegments.length;
+  }
+  const patternSegment = patternSegments[patternIndex] ?? "";
+  if (patternSegment === "**") {
+    if (patternIndex === patternSegments.length - 1) {
+      return true;
+    }
+    for (let nextPathIndex = pathIndex; nextPathIndex <= pathSegments.length; nextPathIndex += 1) {
+      if (matchGlobSegments(pathSegments, patternSegments, nextPathIndex, patternIndex + 1)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  if (pathIndex >= pathSegments.length) {
+    return false;
+  }
+  if (!matchesGlobSegment(pathSegments[pathIndex] ?? "", patternSegment)) {
+    return false;
+  }
+  return matchGlobSegments(pathSegments, patternSegments, pathIndex + 1, patternIndex + 1);
+}
+
+function matchesGlobSegment(value: string, pattern: string): boolean {
+  return matchGlobSegmentChars(value, pattern, 0, 0);
+}
+
+function matchGlobSegmentChars(value: string, pattern: string, valueIndex: number, patternIndex: number): boolean {
+  if (patternIndex >= pattern.length) {
+    return valueIndex >= value.length;
+  }
+  const patternChar = pattern[patternIndex] ?? "";
+  if (patternChar === "*") {
+    for (let nextValueIndex = valueIndex; nextValueIndex <= value.length; nextValueIndex += 1) {
+      if (matchGlobSegmentChars(value, pattern, nextValueIndex, patternIndex + 1)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  if (valueIndex >= value.length) {
+    return false;
+  }
+  if (patternChar !== "?" && patternChar !== value[valueIndex]) {
+    return false;
+  }
+  return matchGlobSegmentChars(value, pattern, valueIndex + 1, patternIndex + 1);
+}
+
 function normalizeWorkspaceRef(value: string): string {
   return value.trim().toLocaleLowerCase();
 }
@@ -543,6 +2084,65 @@ function scoreWorkspaceSummaryMatch(workspace: WorkspaceSummary, query: string):
   }
 
   return 0;
+}
+
+function isRepositoryIndexStageActive(stage: RepositoryIndexRecord["stage"]): boolean {
+  return stage !== "requested" && stage !== "completed" && stage !== "failed" && stage !== "cancelled";
+}
+
+function isRepositoryIndexTerminalStage(stage: RepositoryIndexRecord["stage"]): boolean {
+  return stage === "completed" || stage === "failed" || stage === "cancelled";
+}
+
+function normalizeRepositoryIndexFailure(error: unknown): { code: string; message: string } {
+  if (error instanceof RepositoryIndexExecutionError) {
+    return { code: error.code, message: error.message };
+  }
+  if (error instanceof RuntimeError) {
+    return { code: error.code, message: error.message };
+  }
+  if (error instanceof Error) {
+    return { code: error.name, message: error.message };
+  }
+  return { code: "UNKNOWN_REPOSITORY_INDEX_ERROR", message: "Unknown repository indexing error" };
+}
+
+function stripRepositoryIndexOptionalState(index: RepositoryIndexRecord): RepositoryIndexRecord {
+  return {
+    id: index.id,
+    workspaceId: index.workspaceId,
+    repositoryUrl: index.repositoryUrl,
+    ...(index.requestedRef === undefined ? {} : { requestedRef: index.requestedRef }),
+    ...(index.resolvedCommit === undefined ? {} : { resolvedCommit: index.resolvedCommit }),
+    mode: index.mode,
+    stage: index.stage,
+    requestedAt: index.requestedAt,
+    updatedAt: index.updatedAt,
+    ...(index.completedAt === undefined ? {} : { completedAt: index.completedAt }),
+    actor: {
+      agentId: index.actor.agentId,
+      tool: index.actor.tool,
+    },
+    ...(index.failure === undefined ? {} : { failure: { ...index.failure } }),
+    ...(index.stats === undefined ? {} : { stats: { ...index.stats } }),
+  };
+}
+
+function createRepositoryIndexExecutionRecord(index: RepositoryIndexRecord, updatedAt: string): RepositoryIndexRecord {
+  return {
+    id: index.id,
+    workspaceId: index.workspaceId,
+    repositoryUrl: index.repositoryUrl,
+    ...(index.requestedRef === undefined ? {} : { requestedRef: index.requestedRef }),
+    mode: index.mode,
+    stage: "resolving_ref",
+    requestedAt: index.requestedAt,
+    updatedAt,
+    actor: {
+      agentId: index.actor.agentId,
+      tool: index.actor.tool,
+    },
+  };
 }
 
 function compareWorkspaceSummaries(left: WorkspaceSummary, right: WorkspaceSummary, query?: string): number {
@@ -588,6 +2188,14 @@ function createWorkspaceAmbiguousError(ref: string, candidates: readonly Workspa
   });
 }
 
+function findNodeById(graph: WorkspaceState["graph"], nodeId: string) {
+  const node = graph.nodes.find((candidate) => candidate.id === nodeId);
+  if (node === undefined) {
+    throw new RuntimeError(`Node not found: ${nodeId}`, { code: "NODE_NOT_FOUND" });
+  }
+  return node;
+}
+
 function findById<T extends { id: string }>(items: readonly T[], id: string, label: string): T {
   const item = items.find((candidate) => candidate.id === id);
   if (item === undefined) {
@@ -618,11 +2226,132 @@ function replaceById<T extends { id: string }>(items: readonly T[], replacement:
   return items.map((item) => (item.id === replacement.id ? replacement : item));
 }
 
-function createScanInstructions(profile: ReturnType<typeof findScanProfile>): string[] {
+function createConceptEmbeddingSource(node: { id: string; label: string; type: string; notes?: string }) {
+  const notes = node.notes?.trim();
+  return {
+    contentDigest: createHash("sha256")
+      .update(
+        stableJson({
+          nodeId: node.id,
+          type: node.type,
+          label: node.label,
+          notes: node.notes ?? "",
+        }),
+      )
+      .digest("hex"),
+    contentText: [`Type: ${node.type}`, `Label: ${node.label}`, ...(notes === undefined || notes.length === 0 ? [] : [`Notes: ${notes}`])].join(
+      "\n",
+    ),
+  };
+}
+
+function resolveEmbeddingModelRef(
+  providers: EmbeddingProviderRegistry,
+  modelRef: string,
+): { provider: EmbeddingProviderRegistry[string]; providerModel: string } {
+  const separatorIndex = modelRef.indexOf(":");
+  if (separatorIndex < 1 || separatorIndex === modelRef.length - 1) {
+    throw new RuntimeError(`Provider-backed embedding refresh requires a model ref in provider:model form: ${modelRef}`, {
+      code: "EMBEDDING_MODEL_REF_INVALID",
+    });
+  }
+
+  const providerId = modelRef.slice(0, separatorIndex);
+  const providerModel = modelRef.slice(separatorIndex + 1);
+  const provider = providers[providerId];
+  if (provider === undefined) {
+    throw new RuntimeError(`Embedding provider is not configured: ${providerId}`, {
+      code: "EMBEDDING_PROVIDER_NOT_CONFIGURED",
+      details: { providerId, modelRef },
+    });
+  }
+
+  return { provider, providerModel };
+}
+
+function selectConceptNodes(
+  concepts: Array<{ id: string; label: string; type: "concept"; notes?: string }>,
+  conceptById: Map<string, { id: string; label: string; type: "concept"; notes?: string }>,
+  requestedNodeIds: string[] | undefined,
+  limit: number | undefined,
+) {
+  const selected = requestedNodeIds === undefined ? concepts : requestedNodeIds.map((nodeId) => findRequestedConceptNode(conceptById, nodeId));
+  return limit === undefined ? selected : selected.slice(0, limit);
+}
+
+function findRequestedConceptNode(
+  conceptById: Map<string, { id: string; label: string; type: "concept"; notes?: string }>,
+  nodeId: string,
+) {
+  const node = conceptById.get(nodeId);
+  if (node === undefined) {
+    throw new RuntimeError(`Concept node not found for embedding refresh: ${nodeId}`, {
+      code: "EMBEDDING_CONCEPT_NODE_NOT_FOUND",
+    });
+  }
+  return node;
+}
+
+function isConceptNode(node: WorkspaceState["graph"]["nodes"][number]): node is WorkspaceState["graph"]["nodes"][number] & { type: "concept" } {
+  return node.type === "concept";
+}
+
+function chunkEmbeddingInputs<T>(items: T[], maxBatchSize: number | undefined): T[][] {
+  if (items.length === 0) {
+    return [];
+  }
+  if (maxBatchSize === undefined || maxBatchSize < 1 || maxBatchSize >= items.length) {
+    return [items];
+  }
+
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += maxBatchSize) {
+    chunks.push(items.slice(index, index + maxBatchSize));
+  }
+  return chunks;
+}
+
+async function embedWithProvider<T>(providerId: string, modelRef: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (error) {
+    if (error instanceof EmbeddingProviderError) {
+      throw new RuntimeError(`Embedding provider ${providerId} failed for model ${modelRef}: ${error.message}`, {
+        code: error.code,
+        details: error.details,
+      });
+    }
+    throw error;
+  }
+}
+
+function toSimilarConceptMatch(
+  candidate: SimilarConceptMatchRecord,
+  conceptNodes: Map<string, { id: string; label: string }>,
+): ListSimilarConceptsResponse["matches"][number] {
+  const node = conceptNodes.get(candidate.nodeId);
+  if (node === undefined) {
+    throw new RuntimeError(`Concept node not found for similarity result: ${candidate.nodeId}`, {
+      code: "SIMILARITY_NODE_NOT_FOUND",
+    });
+  }
+  return {
+    nodeId: candidate.nodeId,
+    label: node.label,
+    score: candidate.score,
+    updatedAt: candidate.updatedAt,
+  };
+}
+
+function createScanInstructions(profile: ReturnType<typeof findScanProfile>, run: InProgressScanRun): string[] {
   return [
     ...profile.instructions,
-    `Rediscover sources using include patterns: ${profile.scope.include.join(", ")}.`,
-    `Exclude only sources matching: ${profile.scope.exclude.join(", ")}.`,
+    `Use the repository-index-derived coverage already attached to this run from ${run.repository.root} at revision ${run.repository.revision}.`,
+    `Review only coverage.included sources for normal scan execution; do not rediscover or expand inventory from a live repository.`,
+    `When available for a profile criterion, retrieve repository evidence candidates first so agent review stays bounded to curated evidence packets instead of raw repository discovery.`,
+    `Use scan_record_coverage only when you need one explicit full correction to the derived discovered/included/excluded/failed inventory.`,
+    `Coverage was derived from include patterns: ${profile.scope.include.join(", ")}.`,
+    `Coverage excludes sources matching: ${profile.scope.exclude.join(", ")}.`,
     `Apply every criterion: ${profile.criteria.map((criterion) => criterion.id).join(", ")}.`,
     `Declare outputs: ${profile.requiredOutputs.join(", ")}.`,
   ];
