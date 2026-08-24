@@ -5,9 +5,15 @@ import { tmpdir } from "node:os";
 import { extname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
-import type { RepositoryChunkRecord, RepositoryFileRecord, RepositorySymbolRecord } from "@hivemap/storage";
+import type {
+  RepositoryChunkRecord,
+  RepositoryDependencyRecord,
+  RepositoryFileRecord,
+  RepositoryReferenceRecord,
+  RepositorySymbolRecord,
+} from "@hivemap/storage";
 
-import { createRepositorySymbols } from "./repository-syntax.js";
+import { createRepositoryDependencies, createRepositorySyntaxFacts } from "./repository-syntax.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -16,6 +22,8 @@ export type SafeRepositoryIndexResult = {
   files: RepositoryFileRecord[];
   chunks: RepositoryChunkRecord[];
   symbols?: RepositorySymbolRecord[];
+  references?: RepositoryReferenceRecord[];
+  dependencies?: RepositoryDependencyRecord[];
   stats: {
     fileCount: number;
     chunkCount: number;
@@ -54,6 +62,8 @@ export const executeSafeRepositoryIndex: RepositoryIndexExecutor = async (option
     const files: RepositoryFileRecord[] = [];
     const chunks: RepositoryChunkRecord[] = [];
     const symbols: RepositorySymbolRecord[] = [];
+    const references: RepositoryReferenceRecord[] = [];
+    const dependencies: RepositoryDependencyRecord[] = [];
     let indexedBytes = 0;
 
     for (const relativePath of trackedFiles) {
@@ -90,22 +100,33 @@ export const executeSafeRepositoryIndex: RepositoryIndexExecutor = async (option
         text,
       });
       chunks.push(...nextChunks);
-      symbols.push(
-        ...createRepositorySymbols({
-          workspaceId: options.workspaceId,
-          indexId: options.indexId,
-          filePath: normalizedPath,
-          language,
-          text,
-        }),
-      );
+      const facts = createRepositorySyntaxFacts({
+        workspaceId: options.workspaceId,
+        indexId: options.indexId,
+        filePath: normalizedPath,
+        language,
+        sourceKind,
+        text,
+      });
+      symbols.push(...facts.symbols);
+      references.push(...facts.references);
     }
+
+    dependencies.push(
+      ...createRepositoryDependencies({
+        files,
+        symbols,
+        references,
+      }),
+    );
 
     return {
       resolvedCommit,
       files,
       chunks,
       symbols,
+      references,
+      dependencies,
       stats: {
         fileCount: files.length,
         chunkCount: chunks.length,

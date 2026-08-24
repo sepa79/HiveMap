@@ -150,6 +150,7 @@ import {
   type WorkspaceBundle,
   type HiveMapStore,
   type RepositoryFileRecord,
+  type RepositoryDependencyRecord,
   type SimilarConceptMatchRecord,
   type RepositoryIndexRecord,
   type RepositoryChunkRecord,
@@ -356,6 +357,8 @@ export class HiveMapRuntime {
         result.files,
         result.chunks,
         result.symbols ?? [],
+        result.references ?? [],
+        result.dependencies ?? [],
       );
 
       const completedAt = this.now();
@@ -432,6 +435,7 @@ export class HiveMapRuntime {
     const files = await this.store.listRepositoryIndexFiles(request.workspaceId, request.indexId);
     const chunks = await this.store.listRepositoryIndexChunks(request.workspaceId, request.indexId);
     const symbols = await this.store.listRepositoryIndexSymbols(request.workspaceId, request.indexId);
+    const dependencies = await this.store.listRepositoryIndexDependencies(request.workspaceId, request.indexId);
     const profileContext = resolveScanProfileContext(profile, files, chunks, symbols);
 
     return {
@@ -449,6 +453,7 @@ export class HiveMapRuntime {
         files,
         chunks,
         symbols,
+        dependencies,
         limit: request.limit ?? 20,
       }),
     };
@@ -1318,12 +1323,14 @@ function createRepositoryEvidenceCandidates(options: {
   files: readonly RepositoryFileRecord[];
   chunks: readonly RepositoryChunkRecord[];
   symbols: readonly RepositorySymbolRecord[];
+  dependencies: readonly RepositoryDependencyRecord[];
   limit: number;
 }): RepositoryEvidenceCandidate[] {
   const includedPaths = new Set(deriveScanCoverage(options.profile, options.files).included);
   const includedFiles = options.files.filter((file) => includedPaths.has(normalizeRepositoryPath(file.path)));
   const includedChunks = options.chunks.filter((chunk) => includedPaths.has(normalizeRepositoryPath(chunk.filePath)));
   const includedSymbols = options.symbols.filter((symbol) => includedPaths.has(normalizeRepositoryPath(symbol.filePath)));
+  const includedDependencies = options.dependencies.filter((dependency) => includedPaths.has(normalizeRepositoryPath(dependency.filePath)));
 
   switch (options.profile.id) {
     case "documentation-conflicts":
@@ -1344,7 +1351,7 @@ function createRepositoryEvidenceCandidates(options: {
     case "code-quality-review":
       switch (options.criterionId) {
         case "duplicate-responsibility":
-          return buildDuplicateResponsibilityCandidates(includedFiles, includedSymbols, options.limit);
+          return buildDuplicateResponsibilityCandidates(includedFiles, includedSymbols, includedDependencies, options.limit);
         default:
           return [];
       }
@@ -1354,18 +1361,44 @@ function createRepositoryEvidenceCandidates(options: {
 }
 
 const TOP_LEVEL_RESPONSIBILITY_SYMBOL_KINDS = new Set(["class", "interface", "enum", "record", "function"]);
+const NON_MATERIAL_DUPLICATE_RESPONSIBILITY_PATH_PATTERNS = [
+  "**/archive/**",
+  "**/archives/**",
+  "**/archived/**",
+  "**/legacy/**",
+  "**/deprecated/**",
+  "**/generated/**",
+  "**/__generated__/**",
+  "**/*.generated.*",
+  "**/fixtures/**",
+  "**/__fixtures__/**",
+  "**/examples/**",
+  "**/example/**",
+  "**/samples/**",
+  "**/sample/**",
+  "**/demo/**",
+  "**/demos/**",
+  "**/mocks/**",
+  "**/__mocks__/**",
+  "**/*.mock.*",
+  "**/*.stories.*",
+  "**/storybook/**",
+] as const;
 
 function buildDuplicateResponsibilityCandidates(
   files: readonly RepositoryFileRecord[],
   symbols: readonly RepositorySymbolRecord[],
+  dependencies: readonly RepositoryDependencyRecord[],
   limit: number,
 ): RepositoryEvidenceCandidate[] {
   const codePaths = new Set(
     files
       .filter((file) => file.sourceKind === "code")
+      .filter((file) => isMaterialDuplicateResponsibilityPath(file.path))
       .map((file) => normalizeRepositoryPath(file.path)),
   );
   const groups = new Map<string, RepositorySymbolRecord[]>();
+  const dependencyNeighborhoods = createDependencyNeighborhoodIndex(codePaths, dependencies);
 
   for (const symbol of symbols) {
     if (!codePaths.has(normalizeRepositoryPath(symbol.filePath))) {
@@ -1393,28 +1426,44 @@ function buildDuplicateResponsibilityCandidates(
   }
 
   return [...groups.entries()]
-    .map(([normalizedName, group]) => ({
+    .map(([normalizedName, group]) => {
+      const topology = describeDuplicateResponsibilityTopology(group, dependencyNeighborhoods);
+      return {
       normalizedName,
       group: group.sort(compareRepositorySymbols),
-    }))
+      topology,
+    };
+    })
     .filter(({ group }) => new Set(group.map((symbol) => symbol.filePath)).size > 1)
     .sort((left, right) => {
       const countDelta = right.group.length - left.group.length;
       if (countDelta !== 0) {
         return countDelta;
       }
+      const sharedDependencyDelta = right.topology.sharedDependencyCount - left.topology.sharedDependencyCount;
+      if (sharedDependencyDelta !== 0) {
+        return sharedDependencyDelta;
+      }
+      const directDependencyDelta = right.topology.directDependencyCount - left.topology.directDependencyCount;
+      if (directDependencyDelta !== 0) {
+        return directDependencyDelta;
+      }
       return left.normalizedName.localeCompare(right.normalizedName);
     })
     .slice(0, limit)
-    .map(({ normalizedName, group }) => {
+    .map(({ normalizedName, group, topology }) => {
       const displayName = group[0]?.name ?? normalizedName;
+      const topologySummary = createDuplicateResponsibilityTopologySummary(topology);
       return {
         id: `duplicate-responsibility:${normalizedName}`,
         criterionId: "duplicate-responsibility",
         signal: "duplicate-responsibility",
         kind: "requires_interpretation",
         title: `Repeated top-level symbol: ${displayName}`,
-        summary: `Top-level exported/public symbol '${displayName}' appears in multiple covered code files. Review whether responsibility is intentionally split or duplicated.`,
+        summary:
+          topologySummary === undefined
+            ? `Top-level exported/public symbol '${displayName}' appears in multiple covered code files. Review whether responsibility is intentionally split or duplicated.`
+            : `Top-level exported/public symbol '${displayName}' appears in multiple covered code files. ${topologySummary} Review whether responsibility is intentionally split or duplicated.`,
         sources: group.map((symbol) => ({
           kind: "chunk",
           filePath: symbol.filePath,
@@ -1423,10 +1472,14 @@ function buildDuplicateResponsibilityCandidates(
           snippet: `${symbol.kind} ${symbol.qualifiedName}`,
           startLine: symbol.startLine,
           endLine: symbol.endLine,
-          whySelected: "Covered code file exposes the same top-level symbol name as another module.",
+          whySelected: createDuplicateResponsibilityWhySelected(symbol.filePath, topology),
         })),
       };
     });
+}
+
+function isMaterialDuplicateResponsibilityPath(path: string): boolean {
+  return !matchesAnyGlob(normalizeRepositoryPath(path).toLocaleLowerCase(), NON_MATERIAL_DUPLICATE_RESPONSIBILITY_PATH_PATTERNS);
 }
 
 function compareRepositorySymbols(left: RepositorySymbolRecord, right: RepositorySymbolRecord): number {
@@ -1439,6 +1492,119 @@ function compareRepositorySymbols(left: RepositorySymbolRecord, right: Repositor
     return lineDelta;
   }
   return left.qualifiedName.localeCompare(right.qualifiedName);
+}
+
+function createDependencyNeighborhoodIndex(
+  codePaths: ReadonlySet<string>,
+  dependencies: readonly RepositoryDependencyRecord[],
+): Map<string, Set<string>> {
+  const neighborhoods = new Map<string, Set<string>>();
+  for (const dependency of dependencies) {
+    const sourcePath = normalizeRepositoryPath(dependency.filePath);
+    if (!codePaths.has(sourcePath)) {
+      continue;
+    }
+    const identity = createDependencyTopologyIdentity(dependency);
+    if (identity === undefined) {
+      continue;
+    }
+    const existing = neighborhoods.get(sourcePath);
+    if (existing === undefined) {
+      neighborhoods.set(sourcePath, new Set([identity]));
+    } else {
+      existing.add(identity);
+    }
+  }
+  return neighborhoods;
+}
+
+function createDependencyTopologyIdentity(dependency: RepositoryDependencyRecord): string | undefined {
+  if (dependency.targetFilePath !== undefined) {
+    return `${dependency.kind}:${normalizeRepositoryPath(dependency.targetFilePath).toLocaleLowerCase()}`;
+  }
+  if (dependency.kind === "call") {
+    return undefined;
+  }
+  const normalizedTargetText = dependency.targetText.trim().toLocaleLowerCase();
+  return normalizedTargetText.length === 0 ? undefined : `${dependency.kind}:${normalizedTargetText}`;
+}
+
+function describeDuplicateResponsibilityTopology(
+  group: readonly RepositorySymbolRecord[],
+  dependencyNeighborhoods: Map<string, Set<string>>,
+): {
+  sharedDependencyCount: number;
+  directDependencyCount: number;
+  perFileSharedCounts: Map<string, number>;
+} {
+  const filePaths = [...new Set(group.map((symbol) => normalizeRepositoryPath(symbol.filePath)))];
+  const groupPathSet = new Set(filePaths.map((filePath) => filePath.toLocaleLowerCase()));
+  const dependencyOccurrences = new Map<string, Set<string>>();
+  const perFileSharedCounts = new Map<string, number>();
+  let directDependencyCount = 0;
+
+  for (const filePath of filePaths) {
+    const neighborhood = dependencyNeighborhoods.get(filePath) ?? new Set<string>();
+    for (const identity of neighborhood) {
+      const filesForDependency = dependencyOccurrences.get(identity);
+      if (filesForDependency === undefined) {
+        dependencyOccurrences.set(identity, new Set([filePath]));
+      } else {
+        filesForDependency.add(filePath);
+      }
+      const targetPath = identity.slice(identity.indexOf(":") + 1);
+      if (groupPathSet.has(targetPath) && targetPath !== filePath.toLocaleLowerCase()) {
+        directDependencyCount += 1;
+      }
+    }
+  }
+
+  let sharedDependencyCount = 0;
+  for (const filesForDependency of dependencyOccurrences.values()) {
+    if (filesForDependency.size < 2) {
+      continue;
+    }
+    sharedDependencyCount += 1;
+    for (const filePath of filesForDependency) {
+      perFileSharedCounts.set(filePath, (perFileSharedCounts.get(filePath) ?? 0) + 1);
+    }
+  }
+
+  return {
+    sharedDependencyCount,
+    directDependencyCount,
+    perFileSharedCounts,
+  };
+}
+
+function createDuplicateResponsibilityTopologySummary(topology: {
+  sharedDependencyCount: number;
+  directDependencyCount: number;
+}): string | undefined {
+  if (topology.sharedDependencyCount > 0) {
+    const dependencyLabel = topology.sharedDependencyCount === 1 ? "dependency target" : "dependency targets";
+    return `The peer modules share ${topology.sharedDependencyCount} ${dependencyLabel}.`;
+  }
+  if (topology.directDependencyCount > 0) {
+    return "The peer modules depend on one another directly.";
+  }
+  return undefined;
+}
+
+function createDuplicateResponsibilityWhySelected(
+  filePath: string,
+  topology: {
+    sharedDependencyCount: number;
+    perFileSharedCounts: Map<string, number>;
+  },
+): string {
+  const normalizedPath = normalizeRepositoryPath(filePath);
+  const sharedCount = topology.perFileSharedCounts.get(normalizedPath) ?? 0;
+  if (sharedCount > 0) {
+    const dependencyLabel = sharedCount === 1 ? "dependency target" : "dependency targets";
+    return `Covered code file exposes the same top-level symbol name and shares ${sharedCount} ${dependencyLabel} with peer modules.`;
+  }
+  return "Covered code file exposes the same top-level symbol name as another module.";
 }
 
 function buildBrokenReferenceCandidates(

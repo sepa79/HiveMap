@@ -294,6 +294,31 @@ describe("HiveMapRuntime", () => {
         }),
       ]),
     });
+
+    await expect(store.listRepositoryIndexReferences("workspace-a", "repo-index-a")).resolves.toEqual([
+      expect.objectContaining({
+        kind: "import",
+        targetText: "./guide",
+        filePath: "src/index.ts",
+      }),
+      expect.objectContaining({
+        kind: "call",
+        targetText: "describeOwnership",
+        filePath: "src/index.ts",
+      }),
+    ]);
+    await expect(store.listRepositoryIndexDependencies("workspace-a", "repo-index-a")).resolves.toEqual([
+      expect.objectContaining({
+        kind: "import",
+        targetText: "./guide",
+        filePath: "src/index.ts",
+      }),
+      expect.objectContaining({
+        kind: "call",
+        targetText: "describeOwnership",
+        filePath: "src/index.ts",
+      }),
+    ]);
   });
 
   it("builds bounded repository evidence candidates for documentation scan criteria", async () => {
@@ -494,6 +519,110 @@ describe("HiveMapRuntime", () => {
               snippet: "class RuntimePolicy",
             }),
           ],
+        }),
+      ],
+    }));
+  });
+
+  it("suppresses legacy, generated, and supporting-code paths from duplicate responsibility candidates", async () => {
+    await seedWorkspaceFixture();
+    const structuralRuntime = new HiveMapRuntime({
+      store,
+      embeddingProviders: { test: createTestEmbeddingProvider() },
+      repositoryIndexExecutor: async ({ workspaceId, indexId }) =>
+        createRepositoryStructuralPrecisionIndexResult(workspaceId, indexId),
+      now: () => "2026-08-20T18:15:00.000Z",
+    });
+
+    await structuralRuntime.startRepositoryIndex({
+      workspaceId: "workspace-a",
+      index: {
+        id: "repo-index-structural-precision",
+        repositoryUrl: "/fixtures/repo",
+        requestedRef: "main",
+        mode: "safe",
+        requestedAt: "2026-08-20T18:15:00.000Z",
+        actor: {
+          agentId: "codex",
+          tool: "mcp",
+        },
+      },
+    });
+    await structuralRuntime.executeRepositoryIndex({ workspaceId: "workspace-a", indexId: "repo-index-structural-precision" });
+
+    await expect(
+      structuralRuntime.listRepositoryEvidenceCandidates({
+        workspaceId: "workspace-a",
+        indexId: "repo-index-structural-precision",
+        profileId: "code-quality-review",
+        profileVersion: 1,
+        criterionId: "duplicate-responsibility",
+      }),
+    ).resolves.toEqual(expect.objectContaining({
+      indexId: "repo-index-structural-precision",
+      profileId: "code-quality-review",
+      profileVersion: 1,
+      criterionId: "duplicate-responsibility",
+      ...expectDefaultOverlayMetadata("code-quality-review", ".hivemap/scan-profiles/code-quality.yaml"),
+      candidates: [
+        expect.objectContaining({
+          signal: "duplicate-responsibility",
+          sources: [
+            expect.objectContaining({ filePath: "packages/runtime/src/runtime-policy/RuntimePolicy.ts" }),
+            expect.objectContaining({ filePath: "packages/storage/src/runtime-policy/RuntimePolicy.ts" }),
+          ],
+        }),
+      ],
+    }));
+  });
+
+  it("ranks duplicate responsibility candidates higher when peer modules share topology", async () => {
+    await seedWorkspaceFixture();
+    const structuralRuntime = new HiveMapRuntime({
+      store,
+      embeddingProviders: { test: createTestEmbeddingProvider() },
+      repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryStructuralTopologyIndexResult(workspaceId, indexId),
+      now: () => "2026-08-20T18:30:00.000Z",
+    });
+
+    await structuralRuntime.startRepositoryIndex({
+      workspaceId: "workspace-a",
+      index: {
+        id: "repo-index-structural-topology",
+        repositoryUrl: "/fixtures/repo",
+        requestedRef: "main",
+        mode: "safe",
+        requestedAt: "2026-08-20T18:30:00.000Z",
+        actor: {
+          agentId: "codex",
+          tool: "mcp",
+        },
+      },
+    });
+    await structuralRuntime.executeRepositoryIndex({ workspaceId: "workspace-a", indexId: "repo-index-structural-topology" });
+
+    await expect(
+      structuralRuntime.listRepositoryEvidenceCandidates({
+        workspaceId: "workspace-a",
+        indexId: "repo-index-structural-topology",
+        profileId: "code-quality-review",
+        profileVersion: 1,
+        criterionId: "duplicate-responsibility",
+      }),
+    ).resolves.toEqual(expect.objectContaining({
+      candidates: [
+        expect.objectContaining({
+          title: "Repeated top-level symbol: RuntimePolicy",
+          summary: expect.stringContaining("share 1 dependency target"),
+          sources: expect.arrayContaining([
+            expect.objectContaining({
+              filePath: "packages/runtime/src/runtime-policy/RuntimePolicy.ts",
+              whySelected: expect.stringContaining("shares 1 dependency target"),
+            }),
+          ]),
+        }),
+        expect.objectContaining({
+          title: "Repeated top-level symbol: Manager",
         }),
       ],
     }));
@@ -1484,6 +1613,11 @@ function createSequenceRepositoryIndexExecutor(sequence: Array<ReturnType<typeof
       ...next,
       files: next.files.map((file) => ({ ...file, workspaceId, indexId })),
       chunks: next.chunks.map((chunk) => ({ ...chunk, workspaceId, indexId })),
+      ...(next.symbols === undefined ? {} : { symbols: next.symbols.map((symbol) => ({ ...symbol, workspaceId, indexId })) }),
+      ...(next.references === undefined ? {} : { references: next.references.map((reference) => ({ ...reference, workspaceId, indexId })) }),
+      ...(next.dependencies === undefined
+        ? {}
+        : { dependencies: next.dependencies.map((dependency) => ({ ...dependency, workspaceId, indexId })) }),
     };
   };
 }
@@ -1566,6 +1700,78 @@ function createRepositoryIndexResult(
         endLine: 3,
         text: "export function describeOwnership() { return 'ownership is tracked in one place'; }",
         contentHash: "chunk-hash-src",
+      },
+    ],
+    references: [
+      {
+        workspaceId,
+        indexId,
+        key: "ref-src-import",
+        filePath: "src/index.ts",
+        language: "typescript",
+        sourceKind: "code",
+        kind: "import",
+        targetText: "./guide",
+        startLine: 1,
+        startColumn: 20,
+        endLine: 1,
+        endColumn: 29,
+        resolutionConfidence: "low",
+        producerTool: "tree-sitter",
+        producerVersion: "test",
+      },
+      {
+        workspaceId,
+        indexId,
+        key: "ref-src-call",
+        filePath: "src/index.ts",
+        language: "typescript",
+        sourceKind: "code",
+        kind: "call",
+        targetText: "describeOwnership",
+        startLine: 2,
+        startColumn: 0,
+        endLine: 2,
+        endColumn: 17,
+        resolutionConfidence: "low",
+        producerTool: "tree-sitter",
+        producerVersion: "test",
+      },
+    ],
+    dependencies: [
+      {
+        workspaceId,
+        indexId,
+        key: "dep-src-import",
+        filePath: "src/index.ts",
+        language: "typescript",
+        sourceKind: "code",
+        kind: "import",
+        targetText: "./guide",
+        startLine: 1,
+        startColumn: 20,
+        endLine: 1,
+        endColumn: 29,
+        resolutionConfidence: "low",
+        producerTool: "tree-sitter",
+        producerVersion: "test",
+      },
+      {
+        workspaceId,
+        indexId,
+        key: "dep-src-call",
+        filePath: "src/index.ts",
+        language: "typescript",
+        sourceKind: "code",
+        kind: "call",
+        targetText: "describeOwnership",
+        startLine: 2,
+        startColumn: 0,
+        endLine: 2,
+        endColumn: 17,
+        resolutionConfidence: "low",
+        producerTool: "tree-sitter",
+        producerVersion: "test",
       },
     ],
     stats: {
@@ -2077,6 +2283,284 @@ function createRepositoryStructuralEvidenceIndexResult(
       fileCount: 4,
       chunkCount: 1,
       indexedBytes: 428,
+    },
+  };
+}
+
+function createRepositoryStructuralPrecisionIndexResult(
+  workspaceId = "workspace-a",
+  indexId = "repo-index-a",
+): Awaited<ReturnType<RepositoryIndexExecutor>> {
+  const result = createRepositoryStructuralEvidenceIndexResult(workspaceId, indexId);
+  return {
+    ...result,
+    files: [
+      ...result.files,
+      {
+        workspaceId,
+        indexId,
+        path: "legacy/runtime-policy/RuntimePolicy.ts",
+        language: "typescript",
+        sourceKind: "code",
+        contentHash: "struct-legacy-policy",
+        byteSize: 96,
+      },
+      {
+        workspaceId,
+        indexId,
+        path: "generated/runtime-policy/RuntimePolicy.generated.ts",
+        language: "typescript",
+        sourceKind: "code",
+        contentHash: "struct-generated-policy",
+        byteSize: 96,
+      },
+      {
+        workspaceId,
+        indexId,
+        path: "packages/runtime/__fixtures__/RuntimePolicy.ts",
+        language: "typescript",
+        sourceKind: "code",
+        contentHash: "struct-fixture-policy",
+        byteSize: 96,
+      },
+    ],
+    symbols: [
+      ...(result.symbols ?? []),
+      {
+        workspaceId,
+        indexId,
+        key: "legacy-policy",
+        filePath: "legacy/runtime-policy/RuntimePolicy.ts",
+        language: "typescript",
+        name: "RuntimePolicy",
+        qualifiedName: "RuntimePolicy",
+        kind: "class",
+        startLine: 1,
+        startColumn: 0,
+        endLine: 5,
+        endColumn: 1,
+        isExported: true,
+        isPublic: false,
+        producerTool: "test",
+        producerVersion: "1",
+      },
+      {
+        workspaceId,
+        indexId,
+        key: "generated-policy",
+        filePath: "generated/runtime-policy/RuntimePolicy.generated.ts",
+        language: "typescript",
+        name: "RuntimePolicy",
+        qualifiedName: "RuntimePolicy",
+        kind: "class",
+        startLine: 1,
+        startColumn: 0,
+        endLine: 5,
+        endColumn: 1,
+        isExported: true,
+        isPublic: false,
+        producerTool: "test",
+        producerVersion: "1",
+      },
+      {
+        workspaceId,
+        indexId,
+        key: "fixture-policy",
+        filePath: "packages/runtime/__fixtures__/RuntimePolicy.ts",
+        language: "typescript",
+        name: "RuntimePolicy",
+        qualifiedName: "RuntimePolicy",
+        kind: "class",
+        startLine: 1,
+        startColumn: 0,
+        endLine: 5,
+        endColumn: 1,
+        isExported: true,
+        isPublic: false,
+        producerTool: "test",
+        producerVersion: "1",
+      },
+    ],
+    stats: {
+      fileCount: 7,
+      chunkCount: result.stats.chunkCount,
+      indexedBytes: result.stats.indexedBytes + 288,
+    },
+  };
+}
+
+function createRepositoryStructuralTopologyIndexResult(
+  workspaceId = "workspace-a",
+  indexId = "repo-index-a",
+): Awaited<ReturnType<RepositoryIndexExecutor>> {
+  const result = createRepositoryStructuralEvidenceIndexResult(workspaceId, indexId);
+  return {
+    ...result,
+    files: [
+      ...result.files,
+      {
+        workspaceId,
+        indexId,
+        path: "packages/runtime/src/managers/Manager.ts",
+        language: "typescript",
+        sourceKind: "code",
+        contentHash: "manager-runtime",
+        byteSize: 96,
+      },
+      {
+        workspaceId,
+        indexId,
+        path: "packages/storage/src/managers/Manager.ts",
+        language: "typescript",
+        sourceKind: "code",
+        contentHash: "manager-storage",
+        byteSize: 96,
+      },
+      {
+        workspaceId,
+        indexId,
+        path: "packages/shared/src/runtime-policy/PolicyShape.ts",
+        language: "typescript",
+        sourceKind: "code",
+        contentHash: "policy-shape",
+        byteSize: 72,
+      },
+      {
+        workspaceId,
+        indexId,
+        path: "packages/runtime/src/logging/Logger.ts",
+        language: "typescript",
+        sourceKind: "code",
+        contentHash: "logger-file",
+        byteSize: 72,
+      },
+      {
+        workspaceId,
+        indexId,
+        path: "packages/storage/src/persistence/Store.ts",
+        language: "typescript",
+        sourceKind: "code",
+        contentHash: "store-file",
+        byteSize: 72,
+      },
+    ],
+    symbols: [
+      ...(result.symbols ?? []),
+      {
+        workspaceId,
+        indexId,
+        key: "runtime-manager",
+        filePath: "packages/runtime/src/managers/Manager.ts",
+        language: "typescript",
+        name: "Manager",
+        qualifiedName: "Manager",
+        kind: "class",
+        startLine: 1,
+        startColumn: 0,
+        endLine: 6,
+        endColumn: 1,
+        isExported: true,
+        isPublic: false,
+        producerTool: "test",
+        producerVersion: "1",
+      },
+      {
+        workspaceId,
+        indexId,
+        key: "storage-manager",
+        filePath: "packages/storage/src/managers/Manager.ts",
+        language: "typescript",
+        name: "Manager",
+        qualifiedName: "Manager",
+        kind: "class",
+        startLine: 1,
+        startColumn: 0,
+        endLine: 6,
+        endColumn: 1,
+        isExported: true,
+        isPublic: false,
+        producerTool: "test",
+        producerVersion: "1",
+      },
+    ],
+    dependencies: [
+      {
+        workspaceId,
+        indexId,
+        key: "runtime-policy-dep",
+        filePath: "packages/runtime/src/runtime-policy/RuntimePolicy.ts",
+        language: "typescript",
+        sourceKind: "code",
+        kind: "import",
+        targetText: "../shared/runtime-policy/PolicyShape",
+        targetFilePath: "packages/shared/src/runtime-policy/PolicyShape.ts",
+        startLine: 1,
+        startColumn: 0,
+        endLine: 1,
+        endColumn: 42,
+        resolutionConfidence: "high",
+        producerTool: "test",
+        producerVersion: "1",
+      },
+      {
+        workspaceId,
+        indexId,
+        key: "storage-policy-dep",
+        filePath: "packages/storage/src/runtime-policy/RuntimePolicy.ts",
+        language: "typescript",
+        sourceKind: "code",
+        kind: "import",
+        targetText: "../../shared/runtime-policy/PolicyShape",
+        targetFilePath: "packages/shared/src/runtime-policy/PolicyShape.ts",
+        startLine: 1,
+        startColumn: 0,
+        endLine: 1,
+        endColumn: 45,
+        resolutionConfidence: "high",
+        producerTool: "test",
+        producerVersion: "1",
+      },
+      {
+        workspaceId,
+        indexId,
+        key: "runtime-manager-dep",
+        filePath: "packages/runtime/src/managers/Manager.ts",
+        language: "typescript",
+        sourceKind: "code",
+        kind: "import",
+        targetText: "../logging/Logger",
+        targetFilePath: "packages/runtime/src/logging/Logger.ts",
+        startLine: 1,
+        startColumn: 0,
+        endLine: 1,
+        endColumn: 30,
+        resolutionConfidence: "high",
+        producerTool: "test",
+        producerVersion: "1",
+      },
+      {
+        workspaceId,
+        indexId,
+        key: "storage-manager-dep",
+        filePath: "packages/storage/src/managers/Manager.ts",
+        language: "typescript",
+        sourceKind: "code",
+        kind: "import",
+        targetText: "../persistence/Store",
+        targetFilePath: "packages/storage/src/persistence/Store.ts",
+        startLine: 1,
+        startColumn: 0,
+        endLine: 1,
+        endColumn: 33,
+        resolutionConfidence: "high",
+        producerTool: "test",
+        producerVersion: "1",
+      },
+    ],
+    stats: {
+      fileCount: 9,
+      chunkCount: 1,
+      indexedBytes: 736,
     },
   };
 }

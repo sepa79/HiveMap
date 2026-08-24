@@ -1,9 +1,15 @@
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
+import { posix as pathPosix } from "node:path";
 
 import Parser from "tree-sitter";
 
-import type { RepositorySymbolRecord } from "@hivemap/storage";
+import type {
+  RepositoryDependencyRecord,
+  RepositoryFileRecord,
+  RepositoryReferenceRecord,
+  RepositorySymbolRecord,
+} from "@hivemap/storage";
 
 const require = createRequire(import.meta.url);
 const TypeScript = require("tree-sitter-typescript") as {
@@ -17,16 +23,20 @@ const PRODUCER_VERSION = "tree-sitter@0.25.0/typescript@0.23.2/java@0.23.5";
 
 type SupportedSyntaxLanguage = "typescript" | "tsx" | "java";
 
-export function createRepositorySymbols(options: {
+export function createRepositorySyntaxFacts(options: {
   workspaceId: string;
   indexId: string;
   filePath: string;
   language: string;
+  sourceKind: string;
   text: string;
-}): RepositorySymbolRecord[] {
+}): {
+  symbols: RepositorySymbolRecord[];
+  references: RepositoryReferenceRecord[];
+} {
   const syntaxLanguage = resolveSyntaxLanguage(options.language);
   if (syntaxLanguage === undefined) {
-    return [];
+    return { symbols: [], references: [] };
   }
 
   const parser = new Parser();
@@ -36,12 +46,49 @@ export function createRepositorySymbols(options: {
   switch (syntaxLanguage) {
     case "typescript":
     case "tsx":
-      return extractTypeScriptSymbols(options, tree.rootNode);
+      return extractTypeScriptFacts(options, tree.rootNode);
     case "java":
-      return extractJavaSymbols(options, tree.rootNode);
+      return extractJavaFacts(options, tree.rootNode);
     default:
-      return [];
+      return { symbols: [], references: [] };
   }
+}
+
+export function createRepositorySymbols(options: {
+  workspaceId: string;
+  indexId: string;
+  filePath: string;
+  language: string;
+  text: string;
+}): RepositorySymbolRecord[] {
+  return createRepositorySyntaxFacts({ ...options, sourceKind: "code" }).symbols;
+}
+
+export function createRepositoryReferences(options: {
+  workspaceId: string;
+  indexId: string;
+  filePath: string;
+  language: string;
+  sourceKind: string;
+  text: string;
+}): RepositoryReferenceRecord[] {
+  return createRepositorySyntaxFacts(options).references;
+}
+
+export function createRepositoryDependencies(options: {
+  files: readonly RepositoryFileRecord[];
+  symbols: readonly RepositorySymbolRecord[];
+  references: readonly RepositoryReferenceRecord[];
+}): RepositoryDependencyRecord[] {
+  const importTargetIndex = createImportTargetIndex(options.files);
+  const symbolsByKey = new Map(options.symbols.map((symbol) => [symbol.key, symbol]));
+  const symbolLookup = createReferenceSymbolIndex(options.symbols);
+
+  return dedupeDependencies(
+    options.references.map((reference) =>
+      createDependencyRecord(reference, resolveDependencyTarget(reference, symbolsByKey, symbolLookup, importTargetIndex)),
+    ),
+  );
 }
 
 function resolveSyntaxLanguage(language: string): SupportedSyntaxLanguage | undefined {
@@ -70,15 +117,16 @@ function selectTreeSitterLanguage(language: SupportedSyntaxLanguage): Parser.Lan
   }
 }
 
-function extractTypeScriptSymbols(
+function extractTypeScriptFacts(
   options: {
     workspaceId: string;
     indexId: string;
     filePath: string;
     language: string;
+    sourceKind: string;
   },
   rootNode: Parser.SyntaxNode,
-): RepositorySymbolRecord[] {
+): { symbols: RepositorySymbolRecord[]; references: RepositoryReferenceRecord[] } {
   const symbols: RepositorySymbolRecord[] = [];
   for (const node of rootNode.namedChildren) {
     collectTypeScriptNodeSymbols({
@@ -89,7 +137,10 @@ function extractTypeScriptSymbols(
       symbols,
     });
   }
-  return symbols;
+  return {
+    symbols,
+    references: extractTypeScriptReferences(options, rootNode, symbols),
+  };
 }
 
 function collectTypeScriptNodeSymbols(options: {
@@ -190,15 +241,16 @@ function collectTypeScriptNodeSymbols(options: {
   }
 }
 
-function extractJavaSymbols(
+function extractJavaFacts(
   options: {
     workspaceId: string;
     indexId: string;
     filePath: string;
     language: string;
+    sourceKind: string;
   },
   rootNode: Parser.SyntaxNode,
-): RepositorySymbolRecord[] {
+): { symbols: RepositorySymbolRecord[]; references: RepositoryReferenceRecord[] } {
   const symbols: RepositorySymbolRecord[] = [];
   const packageNode = rootNode.namedChildren.find((node) => node.type === "package_declaration");
   let packageSymbol: RepositorySymbolRecord | undefined;
@@ -228,7 +280,10 @@ function extractJavaSymbols(
     });
   }
 
-  return symbols;
+  return {
+    symbols,
+    references: extractJavaReferences(options, rootNode, symbols),
+  };
 }
 
 function collectJavaDeclarationSymbols(options: {
@@ -289,6 +344,366 @@ function collectJavaDeclarationSymbols(options: {
   }
 }
 
+function extractTypeScriptReferences(
+  options: {
+    workspaceId: string;
+    indexId: string;
+    filePath: string;
+    language: string;
+    sourceKind: string;
+  },
+  rootNode: Parser.SyntaxNode,
+  symbols: readonly RepositorySymbolRecord[],
+): RepositoryReferenceRecord[] {
+  const references: RepositoryReferenceRecord[] = [];
+  const symbolIndex = createReferenceSymbolIndex(symbols);
+
+  for (const node of rootNode.namedChildren) {
+    if (node.type === "import_statement") {
+      const sourceNode = node.namedChildren.find((child) => child.type === "string");
+      const sourceText = sourceNode?.text.replace(/^['"]|['"]$/gu, "").trim();
+      if (sourceNode !== undefined && sourceText !== undefined && sourceText.length > 0) {
+        references.push(createReferenceRecord(options, sourceNode, "import", sourceText, symbolIndex));
+      }
+      continue;
+    }
+    collectTypeScriptNodeReferences(options, node, symbolIndex, references);
+  }
+
+  return dedupeReferences(references);
+}
+
+function collectTypeScriptNodeReferences(
+  options: {
+    workspaceId: string;
+    indexId: string;
+    filePath: string;
+    language: string;
+    sourceKind: string;
+  },
+  node: Parser.SyntaxNode,
+  symbolIndex: Map<string, RepositorySymbolRecord>,
+  references: RepositoryReferenceRecord[],
+): void {
+  if (node.type === "class_declaration") {
+    const heritage = node.namedChildren.find((child) => child.type === "class_heritage");
+    if (heritage !== undefined) {
+      for (const clause of heritage.namedChildren) {
+        if (clause.type === "extends_clause") {
+          const targetNode = clause.namedChildren.find((child) => child.type === "identifier" || child.type === "type_identifier");
+          if (targetNode !== undefined) {
+            references.push(createReferenceRecord(options, targetNode, "extends", targetNode.text, symbolIndex));
+          }
+          continue;
+        }
+        if (clause.type === "implements_clause") {
+          for (const targetNode of clause.namedChildren.filter((child) => child.type === "identifier" || child.type === "type_identifier")) {
+            references.push(createReferenceRecord(options, targetNode, "implements", targetNode.text, symbolIndex));
+          }
+        }
+      }
+    }
+  }
+
+  if (node.type === "new_expression") {
+    const constructorNode = node.namedChildren.find((child) => child.type === "identifier" || child.type === "type_identifier");
+    if (constructorNode !== undefined) {
+      references.push(createReferenceRecord(options, constructorNode, "instantiation", constructorNode.text, symbolIndex));
+    }
+  }
+
+  if (node.type === "call_expression") {
+    const functionNode = node.childForFieldName("function") ?? node.namedChildren[0];
+    const targetText = extractCallableTargetText(functionNode);
+    if (functionNode !== undefined && targetText !== undefined) {
+      references.push(createReferenceRecord(options, functionNode, "call", targetText, symbolIndex));
+    }
+  }
+
+  for (const child of node.namedChildren) {
+    collectTypeScriptNodeReferences(options, child, symbolIndex, references);
+  }
+}
+
+function extractJavaReferences(
+  options: {
+    workspaceId: string;
+    indexId: string;
+    filePath: string;
+    language: string;
+    sourceKind: string;
+  },
+  rootNode: Parser.SyntaxNode,
+  symbols: readonly RepositorySymbolRecord[],
+): RepositoryReferenceRecord[] {
+  const references: RepositoryReferenceRecord[] = [];
+  const symbolIndex = createReferenceSymbolIndex(symbols);
+
+  for (const node of rootNode.namedChildren) {
+    if (node.type === "import_declaration") {
+      const targetNode = node.namedChildren.find((child) => child.type === "scoped_identifier" || child.type === "identifier");
+      if (targetNode !== undefined) {
+        references.push(createReferenceRecord(options, targetNode, "import", normalizeJavaQualifiedName(targetNode.text), symbolIndex));
+      }
+      continue;
+    }
+    collectJavaNodeReferences(options, node, symbolIndex, references);
+  }
+
+  return dedupeReferences(references);
+}
+
+function collectJavaNodeReferences(
+  options: {
+    workspaceId: string;
+    indexId: string;
+    filePath: string;
+    language: string;
+    sourceKind: string;
+  },
+  node: Parser.SyntaxNode,
+  symbolIndex: Map<string, RepositorySymbolRecord>,
+  references: RepositoryReferenceRecord[],
+): void {
+  if (node.type === "class_declaration" || node.type === "interface_declaration" || node.type === "record_declaration" || node.type === "enum_declaration") {
+    const superclass = node.namedChildren.find((child) => child.type === "superclass");
+    const superInterfaces = node.namedChildren.find((child) => child.type === "super_interfaces");
+    const superType = superclass?.namedChildren.find((child) => child.type === "type_identifier");
+    if (superType !== undefined) {
+      references.push(createReferenceRecord(options, superType, "extends", superType.text, symbolIndex));
+    }
+    if (superInterfaces !== undefined) {
+      for (const targetNode of findNamedChildren(superInterfaces, "type_identifier")) {
+        references.push(createReferenceRecord(options, targetNode, "implements", targetNode.text, symbolIndex));
+      }
+    }
+  }
+
+  if (node.type === "object_creation_expression") {
+    const typeNode = node.namedChildren.find((child) => child.type === "type_identifier");
+    if (typeNode !== undefined) {
+      references.push(createReferenceRecord(options, typeNode, "instantiation", typeNode.text, symbolIndex));
+    }
+  }
+
+  if (node.type === "method_invocation") {
+    const targetText = extractJavaMethodInvocationTarget(node);
+    if (targetText !== undefined) {
+      references.push(createReferenceRecord(options, node, "call", targetText, symbolIndex));
+    }
+  }
+
+  for (const child of node.namedChildren) {
+    collectJavaNodeReferences(options, child, symbolIndex, references);
+  }
+}
+
+function createReferenceSymbolIndex(symbols: readonly RepositorySymbolRecord[]): Map<string, RepositorySymbolRecord> {
+  const counts = new Map<string, number>();
+  for (const symbol of symbols) {
+    for (const lookup of new Set([symbol.name, symbol.qualifiedName])) {
+      counts.set(lookup, (counts.get(lookup) ?? 0) + 1);
+    }
+  }
+
+  const index = new Map<string, RepositorySymbolRecord>();
+  for (const symbol of symbols) {
+    for (const lookup of new Set([symbol.name, symbol.qualifiedName])) {
+      if ((counts.get(lookup) ?? 0) === 1) {
+        index.set(lookup, symbol);
+      }
+    }
+  }
+  return index;
+}
+
+function createReferenceRecord(
+  options: {
+    workspaceId: string;
+    indexId: string;
+    filePath: string;
+    language: string;
+    sourceKind: string;
+  },
+  node: Parser.SyntaxNode,
+  kind: string,
+  targetText: string,
+  symbolIndex: Map<string, RepositorySymbolRecord>,
+): RepositoryReferenceRecord {
+  const normalizedTargetText = targetText.trim();
+  const resolvedSymbolKey = symbolIndex.get(normalizedTargetText)?.key;
+  const key = createHash("sha256")
+    .update([options.filePath, kind, normalizedTargetText, String(node.startIndex), String(node.endIndex)].join("::"))
+    .digest("hex")
+    .slice(0, 24);
+  return {
+    workspaceId: options.workspaceId,
+    indexId: options.indexId,
+    key,
+    filePath: options.filePath,
+    language: options.language,
+    sourceKind: options.sourceKind,
+    kind,
+    targetText: normalizedTargetText,
+    ...(resolvedSymbolKey === undefined ? {} : { resolvedSymbolKey }),
+    startLine: node.startPosition.row + 1,
+    startColumn: node.startPosition.column,
+    endLine: node.endPosition.row + 1,
+    endColumn: node.endPosition.column,
+    resolutionConfidence: resolvedSymbolKey === undefined ? "low" : "high",
+    producerTool: PRODUCER_TOOL,
+    producerVersion: PRODUCER_VERSION,
+  };
+}
+
+function createDependencyRecord(
+  reference: RepositoryReferenceRecord,
+  resolution: {
+    targetFilePath?: string;
+    targetSymbolKey?: string;
+    resolutionConfidence: string;
+  },
+): RepositoryDependencyRecord {
+  const key = createHash("sha256")
+    .update(
+      [
+        reference.filePath,
+        reference.kind,
+        reference.targetText,
+        resolution.targetFilePath ?? "",
+        resolution.targetSymbolKey ?? "",
+        String(reference.startLine),
+        String(reference.startColumn),
+        String(reference.endLine),
+        String(reference.endColumn),
+      ].join("::"),
+    )
+    .digest("hex")
+    .slice(0, 24);
+  return {
+    workspaceId: reference.workspaceId,
+    indexId: reference.indexId,
+    key,
+    filePath: reference.filePath,
+    language: reference.language,
+    sourceKind: reference.sourceKind,
+    kind: reference.kind,
+    targetText: reference.targetText,
+    ...(resolution.targetFilePath === undefined ? {} : { targetFilePath: resolution.targetFilePath }),
+    ...(resolution.targetSymbolKey === undefined ? {} : { targetSymbolKey: resolution.targetSymbolKey }),
+    startLine: reference.startLine,
+    startColumn: reference.startColumn,
+    endLine: reference.endLine,
+    endColumn: reference.endColumn,
+    resolutionConfidence: resolution.resolutionConfidence,
+    producerTool: reference.producerTool,
+    producerVersion: reference.producerVersion,
+  };
+}
+
+function resolveDependencyTarget(
+  reference: RepositoryReferenceRecord,
+  symbolsByKey: Map<string, RepositorySymbolRecord>,
+  symbolLookup: Map<string, RepositorySymbolRecord>,
+  importTargetIndex: Map<string, string>,
+): {
+  targetFilePath?: string;
+  targetSymbolKey?: string;
+  resolutionConfidence: string;
+} {
+  const directSymbol = reference.resolvedSymbolKey === undefined ? undefined : symbolsByKey.get(reference.resolvedSymbolKey);
+  if (directSymbol !== undefined) {
+    return {
+      targetFilePath: directSymbol.filePath,
+      targetSymbolKey: directSymbol.key,
+      resolutionConfidence: "high",
+    };
+  }
+
+  if (reference.kind === "import") {
+    const targetFilePath = resolveImportTargetFilePath(reference.filePath, reference.targetText, importTargetIndex);
+    if (targetFilePath !== undefined) {
+      return { targetFilePath, resolutionConfidence: "high" };
+    }
+  }
+
+  for (const lookupKey of createDependencyLookupKeys(reference.targetText)) {
+    const symbol = symbolLookup.get(lookupKey);
+    if (symbol !== undefined) {
+      return {
+        targetFilePath: symbol.filePath,
+        targetSymbolKey: symbol.key,
+        resolutionConfidence: "high",
+      };
+    }
+  }
+
+  return { resolutionConfidence: "low" };
+}
+
+function createDependencyLookupKeys(targetText: string): string[] {
+  const normalized = targetText.trim();
+  if (normalized.length === 0) {
+    return [];
+  }
+  const lookups = [normalized];
+  if (normalized.includes(".")) {
+    const trailingSegment = normalized.split(".").at(-1)?.trim();
+    if (trailingSegment !== undefined && trailingSegment.length > 0 && trailingSegment !== normalized) {
+      lookups.push(trailingSegment);
+    }
+  }
+  return lookups;
+}
+
+function createImportTargetIndex(files: readonly RepositoryFileRecord[]): Map<string, string> {
+  const counts = new Map<string, number>();
+  const aliases = new Map<string, string>();
+
+  for (const file of files) {
+    const normalizedPath = normalizeRepositoryPath(file.path);
+    for (const alias of createImportAliases(normalizedPath)) {
+      counts.set(alias, (counts.get(alias) ?? 0) + 1);
+      aliases.set(alias, normalizedPath);
+    }
+  }
+
+  const unique = new Map<string, string>();
+  for (const [alias, filePath] of aliases.entries()) {
+    if ((counts.get(alias) ?? 0) === 1) {
+      unique.set(alias, filePath);
+    }
+  }
+  return unique;
+}
+
+function createImportAliases(filePath: string): string[] {
+  const strippedExtension = stripRepositoryModuleExtension(filePath);
+  const aliases = [strippedExtension];
+  const parentDirectory = pathPosix.dirname(strippedExtension);
+  if (pathPosix.basename(strippedExtension) === "index" && parentDirectory !== ".") {
+    aliases.push(parentDirectory);
+  }
+  return aliases;
+}
+
+function resolveImportTargetFilePath(sourceFilePath: string, targetText: string, importTargetIndex: Map<string, string>): string | undefined {
+  if (!targetText.startsWith(".")) {
+    return importTargetIndex.get(targetText.trim());
+  }
+  const resolved = normalizeRepositoryPath(pathPosix.join(pathPosix.dirname(normalizeRepositoryPath(sourceFilePath)), targetText.trim()));
+  return importTargetIndex.get(resolved);
+}
+
+function stripRepositoryModuleExtension(filePath: string): string {
+  return filePath.replace(/(?:\.d)?\.(?:ts|tsx|js|jsx|mjs|cjs|mts|cts|java)$/u, "");
+}
+
+function normalizeRepositoryPath(filePath: string): string {
+  const normalized = pathPosix.normalize(filePath.replace(/\\/gu, "/"));
+  return normalized.startsWith("./") ? normalized.slice(2) : normalized;
+}
+
 function createSymbolRecord(
   options: {
     workspaceId: string;
@@ -336,6 +751,73 @@ function createSymbolRecord(
     producerTool: PRODUCER_TOOL,
     producerVersion: PRODUCER_VERSION,
   };
+}
+
+function extractCallableTargetText(node: Parser.SyntaxNode | null | undefined): string | undefined {
+  if (node === null || node === undefined) {
+    return undefined;
+  }
+  if (node.type === "identifier" || node.type === "type_identifier" || node.type === "property_identifier") {
+    return node.text;
+  }
+  if (node.type === "member_expression") {
+    return node.text;
+  }
+  return undefined;
+}
+
+function extractJavaMethodInvocationTarget(node: Parser.SyntaxNode): string | undefined {
+  const target = node.namedChildren
+    .filter((child) => child.type !== "argument_list")
+    .map((child) => child.text)
+    .join(".");
+    return target.trim().length === 0 ? undefined : target;
+}
+
+function dedupeReferences(references: readonly RepositoryReferenceRecord[]): RepositoryReferenceRecord[] {
+  const seen = new Set<string>();
+  const deduped: RepositoryReferenceRecord[] = [];
+  for (const reference of references) {
+    const fingerprint = [
+      reference.filePath,
+      reference.kind,
+      reference.targetText,
+      reference.startLine,
+      reference.startColumn,
+      reference.endLine,
+      reference.endColumn,
+    ].join("::");
+    if (seen.has(fingerprint)) {
+      continue;
+    }
+    seen.add(fingerprint);
+    deduped.push(reference);
+  }
+  return deduped;
+}
+
+function dedupeDependencies(dependencies: readonly RepositoryDependencyRecord[]): RepositoryDependencyRecord[] {
+  const seen = new Set<string>();
+  const deduped: RepositoryDependencyRecord[] = [];
+  for (const dependency of dependencies) {
+    const fingerprint = [
+      dependency.filePath,
+      dependency.kind,
+      dependency.targetText,
+      dependency.targetFilePath ?? "",
+      dependency.targetSymbolKey ?? "",
+      dependency.startLine,
+      dependency.startColumn,
+      dependency.endLine,
+      dependency.endColumn,
+    ].join("::");
+    if (seen.has(fingerprint)) {
+      continue;
+    }
+    seen.add(fingerprint);
+    deduped.push(dependency);
+  }
+  return deduped;
 }
 
 function getNodeText(node: Parser.SyntaxNode | null): string | undefined {

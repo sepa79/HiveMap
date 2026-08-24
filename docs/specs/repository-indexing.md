@@ -275,7 +275,10 @@ Current concrete slice status:
 
 - implemented now: persisted `RepositorySymbol` extraction for TypeScript, TSX, JavaScript/JSX via the TSX grammar, and Java;
 - implemented now: package/type/member/function/export visibility facts where the parser can see them directly;
-- not implemented yet: `RepositoryReference`, `RepositoryDependency`, `RepositoryDiagnostic`, Gherkin/Cucumber facts, and `ast-grep` correlation rules;
+- implemented now: persisted `RepositoryReference` extraction for TypeScript/JavaScript and Java imports, extends/implements relationships, constructor calls, and direct call-site targets when the parser can see them deterministically;
+- implemented now: persisted `RepositoryDependency` edges derived deterministically from normalized syntax references, with resolved target files/symbols when relative imports or unique symbol matches make that possible;
+- implemented now: `duplicate-responsibility` candidate ranking prefers repeated top-level symbols whose peer modules share dependency topology;
+- not implemented yet: `RepositoryDiagnostic`, Gherkin/Cucumber facts, documentation code/symbol references, and `ast-grep` correlation rules;
 - not implemented yet: compiler-backed resolution, dependency installation, or repository-provided execution.
 
 ### Storage Boundary
@@ -490,7 +493,7 @@ Current quality constraints for that first slice:
 - `duplicate-authority` only emits interpretation candidates when authority-style claims overlap on a shared topic rather than pairing every authority phrase in the repository;
 - `stale-documentation` currently reuses contradiction-style claims plus SSOT precedence and only flags lower-precedence, current-looking docs when they conflict with stronger sources such as `AGENTS.md`, `docs/specs/*`, or other higher-ranked SSOT entries;
 - `missing-owner` is intentionally limited to material documentation sources such as architecture, design, spec, policy, workflow, guide, runbook, and similar operational/contract docs, not generic glossaries or history pages.
-- `duplicate-responsibility` is currently limited to repeated top-level `public` or `exported` code symbols under scan coverage and intentionally ignores test/doc files plus nested members to keep the first structural signal bounded.
+- `duplicate-responsibility` is currently limited to repeated top-level `public` or `exported` code symbols under scan coverage and intentionally ignores test/doc files, nested members, and clearly non-current/supporting code paths such as archive, legacy, generated, fixture, example, mock, and storybook surfaces to keep the first structural signal bounded.
 
 ### repository_index_delete
 
