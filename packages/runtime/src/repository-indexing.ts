@@ -314,25 +314,28 @@ export function createRepositoryChunks(options: {
   const segments =
     options.sourceKind === "documentation" || options.language === "markdown"
       ? splitDocumentationSegments(lines)
+      : options.sourceKind === "config"
+        ? [{ startLine: 1, endLine: lines.length }]
       : splitFixedLineSegments(lines, 40);
 
   return segments
     .map((segment) => {
-      const text = lines.slice(segment.startLine - 1, segment.endLine).join("\n").trim();
-      if (text.length === 0) {
+      const text = lines.slice(segment.startLine - 1, segment.endLine).join("\n");
+      const chunkText = options.sourceKind === "config" ? text : text.trim();
+      if (chunkText.length === 0) {
         return undefined;
       }
       return {
         workspaceId: options.workspaceId,
         indexId: options.indexId,
-        id: digestText(`${options.filePath}:${segment.startLine}:${segment.endLine}:${text}`).slice(0, 24),
+        id: digestText(`${options.filePath}:${segment.startLine}:${segment.endLine}:${chunkText}`).slice(0, 24),
         filePath: options.filePath,
         language: options.language,
         sourceKind: options.sourceKind,
         startLine: segment.startLine,
         endLine: segment.endLine,
-        text,
-        contentHash: digestText(text),
+        text: chunkText,
+        contentHash: digestText(chunkText),
       } satisfies RepositoryChunkRecord;
     })
     .filter((chunk): chunk is RepositoryChunkRecord => chunk !== undefined);

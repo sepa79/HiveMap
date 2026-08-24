@@ -55,6 +55,8 @@ Draft MCP surface for agents. MCP is the primary HiveMap agent interface for alp
 
 The MCP app exposes tool handlers over the shared HiveMap runtime. Transport-specific MCP server wiring must stay thin and must not reimplement graph, category, projection, feedback, or proposal behavior.
 
+For repository-backed scans, transport and agent UX should expose one explicit calibration checkpoint between `scan_start` and final findings. The caller should be asked to confirm that the effective profile, derived coverage, and preliminary evidence shape make sense before the workflow proceeds to durable findings or `scan_complete`.
+
 ## Workspace Discovery Flow
 
 Agents discover a workspace before calling graph or scan tools:
@@ -79,10 +81,12 @@ Scan flow in the current repository-index-backed phase:
 1. `repository_index_start({ workspaceId, index })` persists one explicit repository-index request.
 2. `repository_index_execute({ workspaceId, indexId })` completes the safe-mode file/chunk index for one exact revision.
 3. `scan_start({ workspaceId, scan: { id, profileId, profileVersion, repositoryIndexId, actor, startedAt } })` starts one scan from that completed index, derives coverage from the effective profile include/exclude rules, snapshots that effective profile onto the run, and returns the base profile, effective profile, overlay status, coverage summary, and instructions.
-4. `repository_evidence_candidates(...)` should be called per criterion when the selected profile/rule can use bounded evidence packets instead of raw repository discovery.
-5. `scan_boundary_map_build({ workspaceId, scanId })` derives one candidate typed `boundaryMap` artifact from the current scan coverage plus the selected completed repository index facts.
-6. `scan_record_coverage({ workspaceId, scanId, coverage })` remains available only when the caller needs an explicit coverage override or correction.
-7. `scan_complete({ workspaceId, scanId, completedAt, appliedCriteria, declaredOutputs, boundaryMap? })` may carry an optional typed `boundaryMap` artifact, but only when `declaredOutputs` includes `boundary-map`.
+4. The caller should treat `scan_start` as a calibration checkpoint and review the returned effective profile, overlay status, and coverage summary before creating findings.
+5. `repository_evidence_candidates(...)` should be called per criterion when the selected profile/rule can use bounded evidence packets instead of raw repository discovery.
+6. `scan_boundary_map_build({ workspaceId, scanId })` derives one candidate typed `boundaryMap` artifact from the current scan coverage plus the selected completed repository index facts and is a preferred calibration step for unfamiliar code/test/tool layouts.
+7. If calibration shows that the repository shape is wrong, the caller should refine the repository-local overlay or record one explicit coverage correction, then restart with a new scan id from the same completed repository index rather than forcing findings through the provisional run.
+8. `scan_record_coverage({ workspaceId, scanId, coverage })` remains available only when the caller needs an explicit coverage override or correction.
+9. `scan_complete({ workspaceId, scanId, completedAt, appliedCriteria, declaredOutputs, boundaryMap? })` may carry an optional typed `boundaryMap` artifact, but only when `declaredOutputs` includes `boundary-map`.
 
 Overlay discovery rules in the current phase:
 

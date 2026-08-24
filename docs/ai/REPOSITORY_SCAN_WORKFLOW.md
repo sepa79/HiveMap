@@ -8,7 +8,20 @@ Use this workflow when an agent maps documentation, code, tests, deployment, or 
 2. Load or import the target HiveMap workspace.
 3. Call `scan_profile_list` and select an explicit profile id and version.
 4. Resolve or create a completed repository index for the target repository and revision.
-5. Call `scan_start` with the explicit `repositoryIndexId`. Treat the returned instructions, derived coverage, criteria, SSOT order, and outputs as the run checklist.
+5. Call `scan_start` with the explicit `repositoryIndexId`. Treat the returned instructions, derived coverage, criteria, SSOT order, outputs, and overlay status as a provisional run checklist, not immediate permission to file final findings.
+
+## Calibration Loop
+
+Before recording findings on a new repository shape or newly refined profile, run one explicit calibration pass:
+
+1. Review the `scan_start` response for effective profile identity, overlay status, included inventory shape, and coverage warnings.
+2. Call `repository_evidence_candidates` for representative criteria before broad repository reading.
+3. For code/test/tool scans, call `scan_boundary_map_build` before filing findings when the repository shape is new, uncertain, or suspiciously broad.
+4. Inspect the preliminary output for structural mismatches such as fixture corpora treated as first-class boundaries, missing docs or CLI surfaces, helper exports treated as public API, or tests attached to the wrong boundary.
+5. If the profile shape is wrong, refine the repository-local overlay or record one explicit coverage correction and then restart the scan from the same completed repository index with a new scan id.
+6. Only after the preliminary pass looks coherent should the agent proceed into the normal findings workflow.
+
+This loop is the preferred place to discover that a repository needs different include/exclude scope, SSOT order, criteria emphasis, or boundary-map heuristics. Do not paper over those issues by pushing low-confidence findings into the first pass.
 
 ## Retrieve Evidence Packets
 

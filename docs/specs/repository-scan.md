@@ -45,8 +45,10 @@ Overlay rules are explicit:
 scan.start
   -> resolve completed repository index + derive coverage
   -> in_progress run + resolved profile and instructions
+  -> preliminary calibration gate
   -> optional repository_evidence_candidates retrieval per criterion
-  -> optional scan.record_coverage adjustment
+  -> optional scan_boundary_map_build review
+  -> optional profile/overlay refinement or scan.record_coverage adjustment
   -> graph commands and scan.finding_create/update
   -> scan.complete validation
   -> immutable evidence snapshot
@@ -70,6 +72,28 @@ Completion requires:
 - every referenced finding to exist as a valid finding node originating in the run.
 
 Completed runs cannot be modified.
+
+## Preliminary Calibration Gate
+
+The first repository-backed pass for a profile/revision pair is provisional until the agent confirms that the active profile shape matches the repository.
+
+Before creating or completing findings, the agent should review:
+
+- effective profile identity, criteria, required outputs, and overlay status from `scan_start`;
+- coverage summary and included inventory shape from `scan_start`;
+- bounded evidence candidates for representative criteria when they are available;
+- candidate boundary-map output when the scan touches code/test/tool structure or when repository shape is unfamiliar.
+
+This gate exists to catch profile mismatches early, for example:
+
+- fixture corpora or generated material treated as first-class product boundaries;
+- root docs or CLI surfaces missing from the active profile scope;
+- helper/test-only exports treated as public entrypoints;
+- contract, tool, and test boundaries that are not being linked coherently.
+
+If the preliminary pass shows that the repository shape is wrong, the agent must stop before filing final findings, refine the repository-local overlay or recorded coverage explicitly, and restart the scan from the same completed repository index with a new scan id. Do not silently continue from a mis-scoped preliminary pass into `scan_complete`.
+
+MCP/API integrations should surface this as an explicit confirmation checkpoint between `scan_start` and final findings rather than assuming that derived coverage is automatically good enough on the first attempt.
 
 ## Coverage
 
