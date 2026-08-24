@@ -15,6 +15,7 @@ Draft MCP surface for agents. MCP is the primary HiveMap agent interface for alp
 - `repository_index_execute`
 - `repository_search`
 - `repository_evidence_candidates`
+- `scan_boundary_map_build`
 - `scan_profile_overlay_help`
 - `graph_command`
 - `category_assign`
@@ -71,21 +72,24 @@ Repository index flow in the current phase:
 4. `repository_index_get({ workspaceId, indexId })` reads one job record and its current lifecycle stage.
 5. `repository_search({ workspaceId, indexId, query, limit })` searches bounded file/chunk evidence inside one completed repository index.
 6. `repository_evidence_candidates({ workspaceId, indexId, profileId, profileVersion, criterionId, limit })` returns bounded criterion-scoped evidence packets plus the effective profile, overlay status, and coverage summary when HiveMap can pre-select deterministic or interpretation-ready sources.
-7. `scan_profile_overlay_help({ workspaceId, profileId, profileVersion })` explains the optional repository-local overlay contract at `.hivemap/scan-profiles/<profile>.yaml`, including template, merge rules, defaults behavior, and fail-fast validation.
+7. `scan_profile_overlay_help({ workspaceId, profileId, profileVersion })` explains the optional repository-local overlay contract at `.hivemap/scan-profiles/<profile>.yaml`, including template, merge rules, defaults behavior, fail-fast validation, and which profile fields are append-vs-replace.
 
 Scan flow in the current repository-index-backed phase:
 
 1. `repository_index_start({ workspaceId, index })` persists one explicit repository-index request.
 2. `repository_index_execute({ workspaceId, indexId })` completes the safe-mode file/chunk index for one exact revision.
-3. `scan_start({ workspaceId, scan: { id, profileId, profileVersion, repositoryIndexId, actor, startedAt } })` starts one scan from that completed index, derives coverage from the effective profile include/exclude rules, and returns the base profile, effective profile, overlay status, coverage summary, and instructions.
+3. `scan_start({ workspaceId, scan: { id, profileId, profileVersion, repositoryIndexId, actor, startedAt } })` starts one scan from that completed index, derives coverage from the effective profile include/exclude rules, snapshots that effective profile onto the run, and returns the base profile, effective profile, overlay status, coverage summary, and instructions.
 4. `repository_evidence_candidates(...)` should be called per criterion when the selected profile/rule can use bounded evidence packets instead of raw repository discovery.
-5. `scan_record_coverage({ workspaceId, scanId, coverage })` remains available only when the caller needs an explicit coverage override or correction.
+5. `scan_boundary_map_build({ workspaceId, scanId })` derives one candidate typed `boundaryMap` artifact from the current scan coverage plus the selected completed repository index facts.
+6. `scan_record_coverage({ workspaceId, scanId, coverage })` remains available only when the caller needs an explicit coverage override or correction.
+7. `scan_complete({ workspaceId, scanId, completedAt, appliedCriteria, declaredOutputs, boundaryMap? })` may carry an optional typed `boundaryMap` artifact, but only when `declaredOutputs` includes `boundary-map`.
 
 Overlay discovery rules in the current phase:
 
 - Scan-profile overlays are optional repository-local YAML files under `.hivemap/scan-profiles/<profile>.yaml`.
 - Missing overlay files keep the built-in profile defaults active.
 - Invalid overlay files fail `scan_start` and `repository_evidence_candidates` clearly; there is no silent fallback.
+- Overlay may replace repository-specific profile recipe fields such as name, description, instructions, source types, criteria, SSOT order, required outputs, and boundary-map heuristics.
 - Agents should call `scan_profile_overlay_help` instead of guessing overlay fields or merge behavior.
 
 `workspace_resolve` error codes:

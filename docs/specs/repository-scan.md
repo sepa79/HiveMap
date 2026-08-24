@@ -29,13 +29,14 @@ Profiles describe repeatable discovery rules. They must not freeze the file inve
 
 The MVP includes `documentation-conflicts@1` and `code-quality-review@1` profiles in every new workspace.
 
-An optional repository-local overlay may refine a built-in profile without changing the canonical workspace scan profile definition. In the current phase, the overlay path is `.hivemap/scan-profiles/<profile>.yaml`, where `<profile>` is the MCP-exposed overlay stem for the selected profile. The overlay appends repository-specific include and exclude globs to the built-in scope.
+An optional repository-local overlay may refine a built-in profile without changing the canonical workspace scan profile definition. In the current phase, the overlay path is `.hivemap/scan-profiles/<profile>.yaml`, where `<profile>` is the MCP-exposed overlay stem for the selected profile. The overlay appends repository-specific include and exclude globs to the built-in scope and may also replace repository-specific profile fields such as name, description, instructions, source types, criteria, SSOT order, required outputs, and boundary-map heuristics such as root-to-boundary rules, contract-doc markers, ignored match tokens, test-directory names, and entrypoint-detection suffix/path markers.
 
 Overlay rules are explicit:
 
 - the overlay is resolved from the selected indexed repository revision, not from an untracked local working-tree file outside that revision;
 - missing overlay means built-in profile defaults remain active;
 - invalid overlay fails `scan.start` and `repository_evidence_candidates` clearly;
+- when the overlay changes profile criteria or required outputs, the resolved effective profile is snapshotted onto the scan run so later validation uses the same immutable repository-index-backed contract;
 - agents should discover the overlay contract through HiveMap MCP `scan_profile_overlay_help` instead of guessing file shape from repo docs.
 
 ## Scan Run Lifecycle
@@ -65,6 +66,7 @@ Completion requires:
 - explicit reasons for exclusions and read failures;
 - every profile criterion to appear in `appliedCriteria`;
 - all required outputs to be declared;
+- every declared typed artifact output to carry its matching validated artifact payload;
 - every referenced finding to exist as a valid finding node originating in the run.
 
 Completed runs cannot be modified.
@@ -75,9 +77,37 @@ Coverage records discovered source targets, included source targets, excluded ta
 
 The next scan repeats profile discovery against the selected completed repository index. Prior coverage is evidence and a comparison baseline, not the current inventory.
 
-When HiveMap can pre-select bounded evidence candidates for a criterion, the candidate packets are the preferred review unit. Coverage remains the bounded repository inventory and fallback source set, not a mandate that the agent must reread every included file on every run.
+When HiveMap can pre-select bounded evidence candidates for a criterion, the candidate packets are the preferred review unit. Coverage remains the bounded repository inventory and last-resort source set, not a mandate that the agent must reread every included file on every run.
 
 `scan_start` and `repository_evidence_candidates` also return overlay resolution metadata and a coverage summary so the agent can tell whether built-in defaults or repository-local overrides were applied before interpreting results.
+
+When a repository-backed code scan needs a first implementation boundary pass, `scan_boundary_map_build` should derive a candidate typed artifact from the current run coverage plus persisted repository facts. The agent reviews that candidate artifact and only then decides whether to submit it through `scan_complete`.
+
+## Boundary Map Artifact
+
+When a scan declares output `boundary-map`, the completed run may carry one typed boundary-map artifact.
+
+The minimal typed artifact is evidence, not semantic graph truth. It contains:
+
+- one or more boundaries with stable ids, human labels, generic kinds, owned repository paths, owned symbol keys, public entrypoints, contract source refs, test source refs, confidence, and optional open questions;
+- zero or more relations between boundaries with stable ids, generic relation kinds, and bounded evidence source refs.
+
+The first slice is intentionally product-agnostic. Boundary kinds, entrypoint kinds, and relation kinds stay generic enough to describe arbitrary repositories without encoding product-specific architecture vocabularies.
+
+The current build workflow is explicit:
+
+- start the scan from one completed repository index;
+- adjust coverage only if the derived run inventory is materially wrong;
+- call `scan_boundary_map_build` to derive candidate boundaries, public entrypoints, contract/test links, and inter-boundary relations from the current run coverage;
+- review and, if acceptable, submit that typed artifact through `scan_complete(..., boundaryMap)`.
+
+The build heuristics must stay product-agnostic and repo-overridable:
+
+- built-in defaults are only a baseline for repositories that do not provide an overlay;
+- repository-local overlay may also replace repository-specific profile recipe fields such as instructions, criteria, SSOT order, and required outputs;
+- repository-local overlay fields replace, not merge with, the built-in boundary-map heuristics they target;
+- boundary-map build must fail clearly when included coverage paths cannot be classified by the active root rules or test-directory markers;
+- agent prompts and docs should point humans to the overlay contract instead of encoding one repository shape in code.
 
 ## Finding Node
 

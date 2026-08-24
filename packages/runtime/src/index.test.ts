@@ -628,6 +628,223 @@ describe("HiveMapRuntime", () => {
     }));
   });
 
+  it("builds a candidate boundary map from current scan coverage and repository facts", async () => {
+    await seedWorkspaceFixture();
+    const structuralRuntime = new HiveMapRuntime({
+      store,
+      embeddingProviders: { test: createTestEmbeddingProvider() },
+      repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryStructuralTopologyIndexResult(workspaceId, indexId),
+      now: () => "2026-08-20T18:45:00.000Z",
+    });
+
+    await structuralRuntime.startRepositoryIndex({
+      workspaceId: "workspace-a",
+      index: {
+        id: "repo-index-boundary-map",
+        repositoryUrl: "/fixtures/repo",
+        requestedRef: "main",
+        mode: "safe",
+        requestedAt: "2026-08-20T18:45:00.000Z",
+        actor: {
+          agentId: "codex",
+          tool: "mcp",
+        },
+      },
+    });
+    await structuralRuntime.executeRepositoryIndex({ workspaceId: "workspace-a", indexId: "repo-index-boundary-map" });
+
+    await structuralRuntime.startScan({
+      workspaceId: "workspace-a",
+      scan: {
+        id: "scan-boundary-map",
+        profileId: "code-quality-review",
+        profileVersion: 1,
+        repositoryIndexId: "repo-index-boundary-map",
+        actor: { agentId: "agent-a", tool: "codex" },
+        startedAt: "2026-08-20T18:46:00.000Z",
+      },
+    });
+
+    await expect(structuralRuntime.buildScanBoundaryMap({ workspaceId: "workspace-a", scanId: "scan-boundary-map" })).resolves.toEqual(
+      expect.objectContaining({
+        scanId: "scan-boundary-map",
+        profileId: "code-quality-review",
+        profileVersion: 1,
+        repositoryIndexId: "repo-index-boundary-map",
+        coverageSummary: expect.objectContaining({
+          includedCodeFileCount: 7,
+          includedTopLevelCodeSymbolCount: 4,
+        }),
+        boundaryMap: {
+          boundaries: expect.arrayContaining([
+            expect.objectContaining({
+              id: "package:packages-runtime",
+              kind: "package",
+              ownedPaths: expect.arrayContaining([
+                "packages/runtime/src/logging/Logger.ts",
+                "packages/runtime/src/managers/Manager.ts",
+                "packages/runtime/src/runtime-policy/RuntimePolicy.ts",
+              ]),
+              ownedSymbolKeys: expect.arrayContaining(["runtime-manager", "runtime-policy"]),
+              publicEntrypoints: expect.arrayContaining([
+                expect.objectContaining({ label: "Manager" }),
+                expect.objectContaining({ label: "RuntimePolicy" }),
+              ]),
+              testSourceRefs: expect.arrayContaining([
+                expect.objectContaining({ target: "packages/runtime/tests/RuntimePolicyHarness.ts" }),
+              ]),
+            }),
+            expect.objectContaining({
+              id: "package:packages-storage",
+              kind: "package",
+              ownedPaths: expect.arrayContaining([
+                "packages/storage/src/managers/Manager.ts",
+                "packages/storage/src/persistence/Store.ts",
+                "packages/storage/src/runtime-policy/RuntimePolicy.ts",
+              ]),
+            }),
+            expect.objectContaining({
+              id: "package:packages-shared",
+              kind: "package",
+              ownedPaths: ["packages/shared/src/runtime-policy/PolicyShape.ts"],
+            }),
+            expect.objectContaining({
+              id: "test-suite:packages-runtime-tests",
+              kind: "test-suite",
+              ownedPaths: ["packages/runtime/tests/RuntimePolicyHarness.ts"],
+              ownedSymbolKeys: ["test-policy-harness"],
+            }),
+          ]),
+          relations: expect.arrayContaining([
+            expect.objectContaining({
+              fromBoundaryId: "package:packages-runtime",
+              toBoundaryId: "package:packages-shared",
+              kind: "depends-on",
+            }),
+            expect.objectContaining({
+              fromBoundaryId: "package:packages-storage",
+              toBoundaryId: "package:packages-shared",
+              kind: "depends-on",
+            }),
+            expect.objectContaining({
+              fromBoundaryId: "test-suite:packages-runtime-tests",
+              toBoundaryId: "package:packages-runtime",
+              kind: "verifies",
+              sourceRefs: expect.arrayContaining([
+                expect.objectContaining({
+                  role: "verifies",
+                  source: "test",
+                  target: "packages/runtime/tests/RuntimePolicyHarness.ts",
+                }),
+              ]),
+            }),
+          ]),
+        },
+      }),
+    );
+  });
+
+  it("builds a boundary map with repository-local boundary heuristics from the overlay", async () => {
+    await seedWorkspaceFixture();
+    const overlayRuntime = new HiveMapRuntime({
+      store,
+      embeddingProviders: { test: createTestEmbeddingProvider() },
+      repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryOverlayEvidenceIndexResult(workspaceId, indexId),
+      now: () => "2026-08-20T19:05:00.000Z",
+    });
+
+    await overlayRuntime.startRepositoryIndex({
+      workspaceId: "workspace-a",
+      index: {
+        id: "repo-index-overlay-boundary-map",
+        repositoryUrl: "/fixtures/repo",
+        requestedRef: "main",
+        mode: "safe",
+        requestedAt: "2026-08-20T19:05:00.000Z",
+        actor: {
+          agentId: "codex",
+          tool: "mcp",
+        },
+      },
+    });
+    await overlayRuntime.executeRepositoryIndex({ workspaceId: "workspace-a", indexId: "repo-index-overlay-boundary-map" });
+
+    await overlayRuntime.startScan({
+      workspaceId: "workspace-a",
+      scan: {
+        id: "scan-overlay-boundary-map",
+        profileId: "code-quality-review",
+        profileVersion: 1,
+        repositoryIndexId: "repo-index-overlay-boundary-map",
+        actor: { agentId: "agent-a", tool: "codex" },
+        startedAt: "2026-08-20T19:06:00.000Z",
+      },
+    });
+
+    const response = await overlayRuntime.buildScanBoundaryMap({ workspaceId: "workspace-a", scanId: "scan-overlay-boundary-map" });
+
+    expect(response.coverageSummary).toEqual(expect.objectContaining({ includedCodeFileCount: 2 }));
+    expect(response.boundaryMap.boundaries).toEqual([
+      expect.objectContaining({
+        id: "library:services-runtime",
+        kind: "library",
+        ownedPaths: ["services/runtime/RuntimePolicy.ts"],
+        publicEntrypoints: [expect.objectContaining({ kind: "api", label: "RuntimePolicy" })],
+      }),
+      expect.objectContaining({
+        id: "library:services-storage",
+        kind: "library",
+        ownedPaths: ["services/storage/RuntimePolicy.ts"],
+        publicEntrypoints: [expect.objectContaining({ kind: "api", label: "RuntimePolicy" })],
+      }),
+    ]);
+  });
+
+  it("fails clearly when boundary-map coverage includes paths outside configured root rules", async () => {
+    await seedWorkspaceFixture();
+    const overlayRuntime = new HiveMapRuntime({
+      store,
+      embeddingProviders: { test: createTestEmbeddingProvider() },
+      repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryBoundaryMapUnmappedRootIndexResult(workspaceId, indexId),
+      now: () => "2026-08-20T19:10:00.000Z",
+    });
+
+    await overlayRuntime.startRepositoryIndex({
+      workspaceId: "workspace-a",
+      index: {
+        id: "repo-index-unmapped-boundary-map",
+        repositoryUrl: "/fixtures/repo",
+        requestedRef: "main",
+        mode: "safe",
+        requestedAt: "2026-08-20T19:10:00.000Z",
+        actor: {
+          agentId: "codex",
+          tool: "mcp",
+        },
+      },
+    });
+    await overlayRuntime.executeRepositoryIndex({ workspaceId: "workspace-a", indexId: "repo-index-unmapped-boundary-map" });
+
+    await overlayRuntime.startScan({
+      workspaceId: "workspace-a",
+      scan: {
+        id: "scan-unmapped-boundary-map",
+        profileId: "code-quality-review",
+        profileVersion: 1,
+        repositoryIndexId: "repo-index-unmapped-boundary-map",
+        actor: { agentId: "agent-a", tool: "codex" },
+        startedAt: "2026-08-20T19:11:00.000Z",
+      },
+    });
+
+    await expect(
+      overlayRuntime.buildScanBoundaryMap({ workspaceId: "workspace-a", scanId: "scan-unmapped-boundary-map" }),
+    ).rejects.toMatchObject({
+      code: "BOUNDARY_MAP_BUILD_FAILED",
+      message: expect.stringContaining("boundaryMapRoots"),
+    });
+  });
+
   it("applies a repository scan profile overlay from indexed repository files", async () => {
     await seedWorkspaceFixture();
     const overlayRuntime = new HiveMapRuntime({
@@ -678,6 +895,19 @@ describe("HiveMapRuntime", () => {
         warnings: [],
       }),
       effectiveProfile: expect.objectContaining({
+        name: "Services code quality review",
+        description: "Repository-specific service review profile.",
+        instructions: [
+          "Review service boundaries before filing local findings.",
+          "Treat services/** as the primary implementation surface.",
+        ],
+        sourceTypes: ["specification", "code", "test"],
+        criteria: [
+          expect.objectContaining({ id: "duplicate-responsibility" }),
+          expect.objectContaining({ id: "undocumented-api" }),
+        ],
+        ssotOrder: ["AGENTS.md", "docs/specs/**", "services/**"],
+        requiredOutputs: ["document-inventory", "findings", "boundary-map"],
         scope: expect.objectContaining({
           include: expect.arrayContaining(["services/**"]),
         }),
@@ -1991,8 +2221,9 @@ function createRepositoryOverlayEvidenceIndexResult(
         language: "yaml",
         sourceKind: "config",
         startLine: 1,
-        endLine: 7,
-        text: "formatVersion: 1\nprofileId: code-quality-review\ninclude:\n  - services/**\nlegacyPatterns:\n  - legacy/**",
+        endLine: 26,
+        text:
+          "formatVersion: 1\nprofileId: code-quality-review\nname: Services code quality review\ndescription: Repository-specific service review profile.\ninstructions:\n  - Review service boundaries before filing local findings.\n  - Treat services/** as the primary implementation surface.\ninclude:\n  - services/**\nlegacyPatterns:\n  - legacy/**\nsourceTypes:\n  - specification\n  - code\n  - test\ncriteria:\n  - duplicate-responsibility: Multiple services own the same runtime policy behavior.\n  - undocumented-api: A public service behavior lacks an owning contract.\nssotOrder:\n  - AGENTS.md\n  - docs/specs/**\n  - services/**\nrequiredOutputs:\n  - document-inventory\n  - findings\n  - boundary-map\nboundaryMapRoots:\n  - services:library\nboundaryMapIgnoredTokens:\n  - docs\n  - tests\nboundaryMapApiNameSuffixes:\n  - policy",
         contentHash: "chunk-hash-overlay",
       },
       {
@@ -2081,6 +2312,86 @@ function createRepositoryInvalidOverlayIndexResult(
           }
         : chunk,
     ),
+  };
+}
+
+function createRepositoryBoundaryMapUnmappedRootIndexResult(
+  workspaceId = "workspace-a",
+  indexId = "repo-index-a",
+): Awaited<ReturnType<RepositoryIndexExecutor>> {
+  return {
+    resolvedCommit: "5555555555555555555555555555555555555555",
+    files: [
+      {
+        workspaceId,
+        indexId,
+        path: ".hivemap/scan-profiles/code-quality.yaml",
+        language: "yaml",
+        sourceKind: "config",
+        contentHash: "hash-overlay-unmapped",
+        byteSize: 176,
+      },
+      {
+        workspaceId,
+        indexId,
+        path: "misc/runtime/RuntimePolicy.ts",
+        language: "typescript",
+        sourceKind: "code",
+        contentHash: "hash-misc-runtime",
+        byteSize: 120,
+      },
+    ],
+    chunks: [
+      {
+        workspaceId,
+        indexId,
+        id: "chunk-overlay-unmapped",
+        filePath: ".hivemap/scan-profiles/code-quality.yaml",
+        language: "yaml",
+        sourceKind: "config",
+        startLine: 1,
+        endLine: 7,
+        text: "formatVersion: 1\nprofileId: code-quality-review\ninclude:\n  - misc/**\nboundaryMapRoots:\n  - services:service\n  - packages:package",
+        contentHash: "chunk-hash-overlay-unmapped",
+      },
+      {
+        workspaceId,
+        indexId,
+        id: "chunk-misc-runtime",
+        filePath: "misc/runtime/RuntimePolicy.ts",
+        language: "typescript",
+        sourceKind: "code",
+        startLine: 1,
+        endLine: 3,
+        text: "export class RuntimePolicy {\n  describe() { return 'misc'; }\n}",
+        contentHash: "chunk-hash-misc-runtime",
+      },
+    ],
+    symbols: [
+      {
+        workspaceId,
+        indexId,
+        key: "misc/runtime/RuntimePolicy.ts::RuntimePolicy",
+        filePath: "misc/runtime/RuntimePolicy.ts",
+        language: "typescript",
+        name: "RuntimePolicy",
+        qualifiedName: "RuntimePolicy",
+        kind: "class",
+        startLine: 1,
+        startColumn: 1,
+        endLine: 3,
+        endColumn: 1,
+        isExported: true,
+        isPublic: true,
+        producerTool: "tree-sitter",
+        producerVersion: "test",
+      },
+    ],
+    stats: {
+      fileCount: 2,
+      chunkCount: 2,
+      indexedBytes: 296,
+    },
   };
 }
 
@@ -2552,6 +2863,24 @@ function createRepositoryStructuralTopologyIndexResult(
         startColumn: 0,
         endLine: 1,
         endColumn: 33,
+        resolutionConfidence: "high",
+        producerTool: "test",
+        producerVersion: "1",
+      },
+      {
+        workspaceId,
+        indexId,
+        key: "runtime-test-dep",
+        filePath: "packages/runtime/tests/RuntimePolicyHarness.ts",
+        language: "typescript",
+        sourceKind: "test",
+        kind: "import",
+        targetText: "../src/runtime-policy/RuntimePolicy",
+        targetFilePath: "packages/runtime/src/runtime-policy/RuntimePolicy.ts",
+        startLine: 1,
+        startColumn: 0,
+        endLine: 1,
+        endColumn: 40,
         resolutionConfidence: "high",
         producerTool: "test",
         producerVersion: "1",

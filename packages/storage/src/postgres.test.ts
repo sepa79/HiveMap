@@ -119,6 +119,67 @@ describeIfPostgres("PostgresHiveMapStore", () => {
     await store.deleteWorkspace(workspaceId);
   });
 
+  it("round-trips completed scan boundary-map artifacts", async () => {
+    const workspaceId = `pg-${randomUUID()}`;
+    const state = createState(workspaceId);
+    state.scanRuns = [
+      {
+        id: `${workspaceId}-scan-a`,
+        profileId: "code-quality-review",
+        profileVersion: 1,
+        effectiveProfile: {
+          id: "code-quality-review",
+          version: 1,
+          name: "Services code quality review",
+          description: "Repository-specific service review profile.",
+          overlayStem: "code-quality",
+          instructions: ["Review service boundaries before filing local findings."],
+          scope: { include: ["services/**"], exclude: ["node_modules/**"] },
+          sourceTypes: ["code", "test"],
+          criteria: [{ id: "duplicate-responsibility", description: "Multiple services own the same runtime policy behavior." }],
+          ssotOrder: ["AGENTS.md", "docs/specs/**", "services/**"],
+          requiredOutputs: ["findings", "boundary-map"],
+        },
+        repository: {
+          root: "/repo",
+          repositoryUrl: "/repo",
+          branch: "main",
+          revision: "abc123",
+        },
+        actor: { agentId: "agent-a", tool: "codex" },
+        startedAt: "2026-08-24T14:00:00.000Z",
+        status: "completed",
+        coverage: { discovered: ["packages/runtime/src/index.ts"], included: ["packages/runtime/src/index.ts"], excluded: [], failed: [] },
+        appliedCriteria: ["duplicate-responsibility"],
+        declaredOutputs: ["findings", "boundary-map"],
+        findingNodeIds: [],
+        completedAt: "2026-08-24T14:05:00.000Z",
+        graphDigest: `${workspaceId}-digest-a`,
+        findingEvidence: [],
+        boundaryMap: {
+          boundaries: [
+            {
+              id: "boundary-runtime",
+              label: "Runtime",
+              kind: "module",
+              ownedPaths: ["packages/runtime/**"],
+              ownedSymbolKeys: ["runtime:HiveMapRuntime"],
+              publicEntrypoints: [{ id: "runtime-export", label: "HiveMapRuntime", kind: "export", symbolKey: "runtime:HiveMapRuntime" }],
+              contractSourceRefs: [{ role: "defines", source: "repo-doc", target: "docs/architecture.md" }],
+              testSourceRefs: [{ role: "verifies", source: "test", target: "packages/runtime/src/index.test.ts" }],
+              confidence: "high",
+            },
+          ],
+          relations: [],
+        },
+      },
+    ];
+
+    await store.saveWorkspaceState(state);
+    await expect(store.loadWorkspaceState(workspaceId)).resolves.toEqual(state);
+    await store.deleteWorkspace(workspaceId);
+  });
+
   it("lists workspace records with canonical ISO timestamps", async () => {
     const workspaceId = `pg-${randomUUID()}`;
     const state = createState(workspaceId);
@@ -162,6 +223,19 @@ describeIfPostgres("PostgresHiveMapStore", () => {
       ],
       edges: [],
     };
+    state.projections = [
+      createOverviewProjection(state.graph, {
+        id: `${workspaceId}-projection-a`,
+        name: "Overview",
+        maxNodes: 3,
+      }),
+    ];
+    const projectionId = state.projections[0]?.id;
+    if (projectionId === undefined) throw new Error("Expected a rebuilt overview projection");
+    state.categoryAssignments = state.categoryAssignments.map((assignment) =>
+      assignment.targetType === "projection" ? { ...assignment, targetId: projectionId } : assignment,
+    );
+    state.feedbackEvents = state.feedbackEvents.map((event) => ({ ...event, projectionId }));
 
     await store.saveWorkspaceState(state);
 
@@ -220,6 +294,8 @@ describeIfPostgres("PostgresHiveMapStore", () => {
 
     expect(definitions.some((definition) => definition.includes("stats_file_count") && definition.includes("stats_chunk_count"))).toBe(true);
     expect(definitions.some((definition) => definition.includes("stats_file_count") && definition.includes("stats_indexed_bytes"))).toBe(true);
-    expect(definitions.some((definition) => definition.includes("stats_file_count >= 0") && definition.includes("stats_indexed_bytes >= 0"))).toBe(true);
+    expect(definitions.some((definition) => definition.includes("stats_file_count >= 0"))).toBe(true);
+    expect(definitions.some((definition) => definition.includes("stats_chunk_count >= 0"))).toBe(true);
+    expect(definitions.some((definition) => definition.includes("stats_indexed_bytes >= 0"))).toBe(true);
   });
 });

@@ -2,6 +2,7 @@ import type {
   McpToolName,
   McpToolRequestMap,
   BackfillConceptEmbeddingsResponse,
+  BuildScanBoundaryMapResponse,
   ExecuteRepositoryIndexResponse,
   GetScanProfileOverlayHelpResponse,
   GetWorkspaceSummaryResponse,
@@ -51,6 +52,7 @@ export const HIVEMAP_MCP_TOOL_NAMES: readonly McpToolName[] = [
   "repository_index_execute",
   "repository_search",
   "repository_evidence_candidates",
+  "scan_boundary_map_build",
   "scan_profile_overlay_help",
   "concept_embedding_upsert",
   "concept_embedding_refresh",
@@ -88,6 +90,7 @@ export type McpToolResponseMap = {
   repository_index_execute: ExecuteRepositoryIndexResponse;
   repository_search: SearchRepositoryIndexResponse;
   repository_evidence_candidates: ListRepositoryEvidenceCandidatesResponse;
+  scan_boundary_map_build: BuildScanBoundaryMapResponse;
   scan_profile_overlay_help: GetScanProfileOverlayHelpResponse;
   concept_embedding_upsert: UpsertConceptEmbeddingResponse;
   concept_embedding_refresh: RefreshConceptEmbeddingResponse;
@@ -191,6 +194,8 @@ async function dispatchMcpTool<T extends McpToolName>(
       return (await runtime.listRepositoryEvidenceCandidates(
         request as McpToolRequestMap["repository_evidence_candidates"],
       )) as McpToolResponseMap[T];
+    case "scan_boundary_map_build":
+      return (await runtime.buildScanBoundaryMap(request as McpToolRequestMap["scan_boundary_map_build"])) as McpToolResponseMap[T];
     case "scan_profile_overlay_help":
       return (await runtime.getScanProfileOverlayHelp(
         request as McpToolRequestMap["scan_profile_overlay_help"],

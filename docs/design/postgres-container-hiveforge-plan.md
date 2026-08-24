@@ -1,6 +1,6 @@
 # Postgres, Container, HiveForge Plan
 
-Last updated: 2026-08-20
+Last updated: 2026-08-24
 
 ## Goal
 
@@ -33,6 +33,7 @@ Upgrade HiveMap from the current local-first SQLite alpha shape to a container-f
 - [x] This tracked execution path covers Postgres runtime, containerization, local Docker validation, and HiveForge readiness.
 - [x] The base Postgres/container/HiveForge milestone did not block on embedding-provider work; provider-backed refresh/backfill is now a follow-on slice on top of that base.
 - [x] `pgvector` remains part of the target backend direction, but vector-powered behavior is not required to complete the base runtime/container milestone.
+- [x] Once the remaining Phase 4 and Phase 6 work is closed, the next deliberate feature track is generic repository boundary mapping for scans, built on repository-indexing structural facts rather than PocketHive-specific heuristics.
 
 ## Phase 0 — Workflow Baseline
 
@@ -107,6 +108,13 @@ Current state:
 - [ ] Decide whether Streamable HTTP MCP lives in the same runtime process as REST or a separate boundary.
 - [ ] Define the auth story before any non-local exposure.
 - [ ] Add hosted MCP only after the local container runtime and HiveForge path are stable.
+
+## Next Feature Track After Base Runtime
+
+- [ ] Start a generic repository boundary-mapping track after the base runtime/container/HiveForge exit criteria are closed.
+- [ ] Keep that track product-agnostic: derive candidate boundaries, owned paths/symbols, contract/test links, and boundary-to-boundary relations from repository-index structural facts rather than repository-specific hardcoding.
+- [ ] Use PocketHive and HiveMap as proving repositories for the workflow, not as special-case contracts.
+- [ ] Treat hosted MCP as a separate follow-up after the runtime base is stable; do not let it displace the first generic boundary-mapping slice once the current runtime/HiveForge work is complete.
 
 ## Deferred Product Follow-Up
 

@@ -31,6 +31,7 @@ describe("MCP tool adapter", () => {
       "repository_index_execute",
       "repository_search",
       "repository_evidence_candidates",
+      "scan_boundary_map_build",
       "scan_profile_overlay_help",
       "concept_embedding_upsert",
       "concept_embedding_refresh",
@@ -583,6 +584,40 @@ describe("MCP tool adapter", () => {
         expect.stringContaining("Use the repository-index-derived coverage already attached to this run"),
       );
     }
+  });
+
+  it("builds a candidate boundary map for an in-progress code scan through MCP", async () => {
+    await createWorkspaceWithNode();
+    await createCompletedRepositoryIndex();
+
+    await handleMcpTool(runtime, "scan_start", {
+      workspaceId: "workspace-a",
+      scan: {
+        id: "scan-boundary",
+        profileId: "code-quality-review",
+        profileVersion: 1,
+        repositoryIndexId: "repo-index-scan",
+        actor: { agentId: "agent-a", tool: "codex" },
+        startedAt: "2026-08-20T12:10:00.000Z",
+      },
+    });
+
+    await expect(handleMcpTool(runtime, "scan_boundary_map_build", { workspaceId: "workspace-a", scanId: "scan-boundary" })).resolves.toEqual({
+      ok: true,
+      tool: "scan_boundary_map_build",
+      value: expect.objectContaining({
+        scanId: "scan-boundary",
+        profileId: "code-quality-review",
+        boundaryMap: expect.objectContaining({
+          boundaries: [
+            expect.objectContaining({
+              id: "module:src",
+              ownedPaths: ["src/index.ts"],
+            }),
+          ],
+        }),
+      }),
+    });
   });
 });
 

@@ -69,7 +69,7 @@ The SQL below is the target Postgres schema contract. The current SQLite alpha i
 
 ## Target Postgres Schema Version
 
-The target Postgres runtime schema version is `10`.
+The target Postgres runtime schema version is `13`.
 
 The current SQLite alpha implementation uses schema version `4` and remains legacy import evidence only, not the ZIP compatibility contract for the Postgres runtime.
 
@@ -85,7 +85,7 @@ CREATE TABLE schema_metadata (
 Required row for the Postgres runtime:
 
 - `key = 'schema_version'`
-- `value = '10'`
+- `value = '13'`
 
 ## Postgres Types
 
@@ -119,7 +119,7 @@ CREATE TYPE feedback_event_type AS ENUM (
 );
 CREATE TYPE graph_proposal_status AS ENUM ('pending', 'approved', 'rejected', 'applied', 'superseded');
 CREATE TYPE projection_type AS ENUM ('conversation-map', 'project-map', 'overview', 'dive-in');
-CREATE TYPE scan_required_output AS ENUM ('document-inventory', 'concept-map', 'findings', 'coverage-report');
+CREATE TYPE scan_required_output AS ENUM ('document-inventory', 'concept-map', 'findings', 'coverage-report', 'boundary-map');
 CREATE TYPE scan_run_status AS ENUM ('in_progress', 'completed');
 CREATE TYPE repository_index_mode AS ENUM ('safe', 'deep');
 CREATE TYPE repository_index_stage AS ENUM (
@@ -324,6 +324,7 @@ CREATE TABLE scan_profiles (
   ordinal INTEGER NOT NULL,
   name TEXT NOT NULL,
   description TEXT NOT NULL,
+  overlay_stem TEXT,
   instructions TEXT[] NOT NULL,
   scope_include TEXT[] NOT NULL,
   scope_exclude TEXT[] NOT NULL,
@@ -338,6 +339,7 @@ CREATE TABLE scan_profiles (
   CHECK (version > 0),
   CHECK (btrim(name) <> ''),
   CHECK (btrim(description) <> ''),
+  CHECK (overlay_stem IS NULL OR btrim(overlay_stem) <> ''),
   CHECK (cardinality(instructions) > 0),
   CHECK (cardinality(scope_include) > 0),
   CHECK (cardinality(source_types) > 0),
@@ -351,6 +353,7 @@ CREATE TABLE scan_runs (
   ordinal INTEGER NOT NULL,
   profile_id TEXT NOT NULL,
   profile_version INTEGER NOT NULL,
+  effective_profile JSONB,
   status scan_run_status NOT NULL,
   repository_index_id TEXT,
   repository_root TEXT NOT NULL,
@@ -368,6 +371,7 @@ CREATE TABLE scan_runs (
   completed_at TIMESTAMPTZ,
   graph_digest TEXT,
   finding_evidence JSONB,
+  boundary_map JSONB,
   PRIMARY KEY (workspace_id, id),
   UNIQUE (workspace_id, ordinal),
   FOREIGN KEY (workspace_id, profile_id, profile_version) REFERENCES scan_profiles(workspace_id, id, version) ON DELETE RESTRICT,
@@ -382,8 +386,10 @@ CREATE TABLE scan_runs (
   CHECK (btrim(repository_revision) <> ''),
   CHECK (btrim(actor_agent_id) <> ''),
   CHECK (btrim(actor_tool) <> ''),
+  CHECK (effective_profile IS NULL OR jsonb_typeof(effective_profile) = 'object'),
   CHECK (coverage IS NULL OR jsonb_typeof(coverage) = 'object'),
   CHECK (finding_evidence IS NULL OR jsonb_typeof(finding_evidence) = 'array'),
+  CHECK (boundary_map IS NULL OR jsonb_typeof(boundary_map) = 'object'),
   CHECK (
     (status = 'in_progress' AND completed_at IS NULL AND graph_digest IS NULL AND finding_evidence IS NULL)
     OR

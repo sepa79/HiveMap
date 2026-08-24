@@ -9,6 +9,8 @@ import {
   validateApproveProposalRequest,
   validateAssignCategoryRequest,
   validateBackfillConceptEmbeddingsRequest,
+  validateBuildScanBoundaryMapRequest,
+  validateCompleteScanRequest,
   validateCreateProposalRequest,
   validateGetRepositoryIndexRequest,
   validateCreateWorkspaceRequest,
@@ -128,6 +130,54 @@ describe("api contracts", () => {
         profileVersion: 1,
       }),
     ).not.toThrow();
+    expect(() => validateBuildScanBoundaryMapRequest({ workspaceId: "workspace-a", scanId: "scan-a" })).not.toThrow();
+  });
+
+  it("rejects semantically invalid boundary-map payloads on scan completion", () => {
+    expect(() =>
+      validateCompleteScanRequest({
+        workspaceId: "workspace-a",
+        scanId: "scan-a",
+        completedAt: "2026-08-24T12:00:00.000Z",
+        appliedCriteria: ["contract-drift"],
+        declaredOutputs: ["findings", "boundary-map"],
+        boundaryMap: {
+          boundaries: [
+            {
+              id: "boundary-runtime",
+              label: "Runtime",
+              kind: "module",
+              ownedPaths: ["packages/runtime/src/index.ts"],
+              ownedSymbolKeys: ["runtime:index"],
+              publicEntrypoints: [],
+              contractSourceRefs: [{ role: "defines", source: "repo-doc", target: "docs/architecture.md" }],
+              testSourceRefs: [{ role: "verifies", source: "test", target: "packages/runtime/src/index.test.ts" }],
+              confidence: "medium",
+            },
+            {
+              id: "boundary-shared",
+              label: "Shared",
+              kind: "module",
+              ownedPaths: ["packages/shared/src/index.ts"],
+              ownedSymbolKeys: ["shared:index"],
+              publicEntrypoints: [],
+              contractSourceRefs: [{ role: "defines", source: "repo-doc", target: "docs/shared.md" }],
+              testSourceRefs: [{ role: "verifies", source: "test", target: "packages/shared/src/index.test.ts" }],
+              confidence: "medium",
+            },
+          ],
+          relations: [
+            {
+              id: "runtime-depends-on-shared",
+              fromBoundaryId: "boundary-runtime",
+              toBoundaryId: "boundary-shared",
+              kind: "depends-on",
+              sourceRefs: [{ role: "implements", source: "code", target: "packages/runtime/src/index.ts" }],
+            },
+          ],
+        },
+      }),
+    ).toThrow("depends-on");
   });
 
   it("rejects empty graph command batches", () => {

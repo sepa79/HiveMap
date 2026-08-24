@@ -768,6 +768,11 @@ export class PostgresHiveMapStore implements HiveMapStore {
         schemaVersion = "12";
       }
 
+      if (schemaVersion === "12") {
+        await client.query(POSTGRES_V12_TO_V13_SQL);
+        schemaVersion = "13";
+      }
+
       if (schemaVersion !== POSTGRES_STORAGE_SCHEMA_VERSION) {
         throw new StorageError(`Unsupported Postgres storage schema version: ${schemaVersion}`);
       }
@@ -1665,7 +1670,7 @@ export class PostgresHiveMapStore implements HiveMapStore {
   private async replaceScanProfiles(client: PoolClient, workspaceId: string, profiles: readonly ScanProfile[]): Promise<void> {
     for (const [ordinal, profile] of profiles.entries()) {
       await client.query(
-        "INSERT INTO scan_profiles (workspace_id, id, version, ordinal, name, description, instructions, scope_include, scope_exclude, source_types, criteria, ssot_order, required_outputs) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+        "INSERT INTO scan_profiles (workspace_id, id, version, ordinal, name, description, overlay_stem, instructions, scope_include, scope_exclude, source_types, criteria, ssot_order, required_outputs) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
         [
           workspaceId,
           profile.id,
@@ -1673,6 +1678,7 @@ export class PostgresHiveMapStore implements HiveMapStore {
           ordinal,
           profile.name,
           profile.description,
+          profile.overlayStem ?? null,
           profile.instructions,
           profile.scope.include,
           profile.scope.exclude,
@@ -1692,6 +1698,7 @@ export class PostgresHiveMapStore implements HiveMapStore {
         version: number;
         name: string;
         description: string;
+        overlay_stem: NullableString;
         instructions: string[];
         scope_include: string[];
         scope_exclude: string[];
@@ -1700,7 +1707,7 @@ export class PostgresHiveMapStore implements HiveMapStore {
         ssot_order: string[];
         required_outputs: ScanProfile["requiredOutputs"];
       }>(
-        "SELECT id, version, name, description, instructions, scope_include, scope_exclude, source_types, criteria::text AS criteria_json, ssot_order, required_outputs::text[] AS required_outputs FROM scan_profiles WHERE workspace_id = $1 ORDER BY ordinal",
+        "SELECT id, version, name, description, overlay_stem, instructions, scope_include, scope_exclude, source_types, criteria::text AS criteria_json, ssot_order, required_outputs::text[] AS required_outputs FROM scan_profiles WHERE workspace_id = $1 ORDER BY ordinal",
         [workspaceId],
       )
     ).rows;
@@ -1709,6 +1716,7 @@ export class PostgresHiveMapStore implements HiveMapStore {
       version: row.version,
       name: row.name,
       description: row.description,
+      ...(row.overlay_stem === null ? {} : { overlayStem: row.overlay_stem }),
       instructions: row.instructions,
       scope: {
         include: row.scope_include,
@@ -1724,13 +1732,14 @@ export class PostgresHiveMapStore implements HiveMapStore {
   private async replaceScanRuns(client: PoolClient, workspaceId: string, runs: readonly ScanRun[]): Promise<void> {
     for (const [ordinal, run] of runs.entries()) {
       await client.query(
-        "INSERT INTO scan_runs (workspace_id, id, ordinal, profile_id, profile_version, status, repository_index_id, repository_root, repository_url, repository_branch, repository_revision, repository_worktree_digest, actor_agent_id, actor_tool, started_at, coverage, applied_criteria, declared_outputs, finding_node_ids, completed_at, graph_digest, finding_evidence) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)",
+        "INSERT INTO scan_runs (workspace_id, id, ordinal, profile_id, profile_version, effective_profile, status, repository_index_id, repository_root, repository_url, repository_branch, repository_revision, repository_worktree_digest, actor_agent_id, actor_tool, started_at, coverage, applied_criteria, declared_outputs, finding_node_ids, completed_at, graph_digest, finding_evidence, boundary_map) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)",
         [
           workspaceId,
           run.id,
           ordinal,
           run.profileId,
           run.profileVersion,
+          run.effectiveProfile === undefined ? null : JSON.stringify(run.effectiveProfile),
           run.status,
           run.repository.repositoryIndexId ?? null,
           run.repository.root,
@@ -1748,6 +1757,7 @@ export class PostgresHiveMapStore implements HiveMapStore {
           run.status === "completed" ? run.completedAt : null,
           run.status === "completed" ? run.graphDigest : null,
           run.status === "completed" ? JSON.stringify(run.findingEvidence) : null,
+          run.status === "completed" && run.boundaryMap !== undefined ? JSON.stringify(run.boundaryMap) : null,
         ],
       );
     }
@@ -1759,6 +1769,7 @@ export class PostgresHiveMapStore implements HiveMapStore {
         id: string;
         profile_id: string;
         profile_version: number;
+        effective_profile_json: NullableString;
         status: ScanRun["status"];
         repository_index_id: NullableString;
         repository_root: string;
@@ -1776,8 +1787,9 @@ export class PostgresHiveMapStore implements HiveMapStore {
         completed_at: NullableString;
         graph_digest: NullableString;
         finding_evidence_json: NullableString;
+        boundary_map_json: NullableString;
       }>(
-        "SELECT id, profile_id, profile_version, status, repository_index_id, repository_root, repository_url, repository_branch, repository_revision, repository_worktree_digest, actor_agent_id, actor_tool, started_at::text AS started_at, coverage::text AS coverage_json, applied_criteria, declared_outputs::text[] AS declared_outputs, finding_node_ids, completed_at::text AS completed_at, graph_digest, finding_evidence::text AS finding_evidence_json FROM scan_runs WHERE workspace_id = $1 ORDER BY ordinal",
+        "SELECT id, profile_id, profile_version, effective_profile::text AS effective_profile_json, status, repository_index_id, repository_root, repository_url, repository_branch, repository_revision, repository_worktree_digest, actor_agent_id, actor_tool, started_at::text AS started_at, coverage::text AS coverage_json, applied_criteria, declared_outputs::text[] AS declared_outputs, finding_node_ids, completed_at::text AS completed_at, graph_digest, finding_evidence::text AS finding_evidence_json, boundary_map::text AS boundary_map_json FROM scan_runs WHERE workspace_id = $1 ORDER BY ordinal",
         [workspaceId],
       )
     ).rows;
@@ -1787,6 +1799,9 @@ export class PostgresHiveMapStore implements HiveMapStore {
         id: row.id,
         profileId: row.profile_id,
         profileVersion: row.profile_version,
+        ...(row.effective_profile_json === null
+          ? {}
+          : { effectiveProfile: parseJson<NonNullable<ScanRun["effectiveProfile"]>>(row.effective_profile_json) }),
         repository: {
           root: row.repository_root,
           branch: row.repository_branch,
@@ -1819,6 +1834,11 @@ export class PostgresHiveMapStore implements HiveMapStore {
           findingEvidence: parseJson<NonNullable<Extract<ScanRun, { status: "completed" }>["findingEvidence"]>>(
             row.finding_evidence_json,
           ),
+          ...(row.boundary_map_json === null
+            ? {}
+            : {
+                boundaryMap: parseJson<NonNullable<Extract<ScanRun, { status: "completed" }>["boundaryMap"]>>(row.boundary_map_json),
+              }),
         };
       }
 
@@ -2525,7 +2545,7 @@ $$;
 
 DO $$
 BEGIN
-  CREATE TYPE scan_required_output AS ENUM ('document-inventory', 'concept-map', 'findings', 'coverage-report');
+  CREATE TYPE scan_required_output AS ENUM ('document-inventory', 'concept-map', 'findings', 'coverage-report', 'boundary-map');
 EXCEPTION
   WHEN duplicate_object THEN NULL;
 END
@@ -2738,6 +2758,7 @@ CREATE TABLE IF NOT EXISTS scan_profiles (
   ordinal INTEGER NOT NULL,
   name TEXT NOT NULL,
   description TEXT NOT NULL,
+  overlay_stem TEXT,
   instructions TEXT[] NOT NULL,
   scope_include TEXT[] NOT NULL,
   scope_exclude TEXT[] NOT NULL,
@@ -2752,6 +2773,7 @@ CREATE TABLE IF NOT EXISTS scan_profiles (
   CHECK (version > 0),
   CHECK (btrim(name) <> ''),
   CHECK (btrim(description) <> ''),
+  CHECK (overlay_stem IS NULL OR btrim(overlay_stem) <> ''),
   CHECK (cardinality(instructions) > 0),
   CHECK (cardinality(scope_include) > 0),
   CHECK (cardinality(source_types) > 0),
@@ -2811,6 +2833,7 @@ CREATE TABLE IF NOT EXISTS scan_runs (
   ordinal INTEGER NOT NULL,
   profile_id TEXT NOT NULL,
   profile_version INTEGER NOT NULL,
+  effective_profile JSONB,
   status scan_run_status NOT NULL,
   repository_index_id TEXT,
   repository_root TEXT NOT NULL,
@@ -2828,6 +2851,7 @@ CREATE TABLE IF NOT EXISTS scan_runs (
   completed_at TIMESTAMPTZ,
   graph_digest TEXT,
   finding_evidence JSONB,
+  boundary_map JSONB,
   PRIMARY KEY (workspace_id, id),
   UNIQUE (workspace_id, ordinal),
   FOREIGN KEY (workspace_id, profile_id, profile_version) REFERENCES scan_profiles(workspace_id, id, version) ON DELETE RESTRICT,
@@ -2842,8 +2866,10 @@ CREATE TABLE IF NOT EXISTS scan_runs (
   CHECK (btrim(repository_revision) <> ''),
   CHECK (btrim(actor_agent_id) <> ''),
   CHECK (btrim(actor_tool) <> ''),
+  CHECK (effective_profile IS NULL OR jsonb_typeof(effective_profile) = 'object'),
   CHECK (coverage IS NULL OR jsonb_typeof(coverage) = 'object'),
   CHECK (finding_evidence IS NULL OR jsonb_typeof(finding_evidence) = 'array'),
+  CHECK (boundary_map IS NULL OR jsonb_typeof(boundary_map) = 'object'),
   CHECK (
     (status = 'in_progress' AND completed_at IS NULL AND graph_digest IS NULL AND finding_evidence IS NULL)
     OR
@@ -3410,4 +3436,68 @@ CREATE TABLE IF NOT EXISTS repository_dependencies (
 CREATE INDEX IF NOT EXISTS repository_dependencies_workspace_index_file_idx ON repository_dependencies (workspace_id, index_id, file_path, ordinal);
 CREATE INDEX IF NOT EXISTS repository_dependencies_workspace_index_target_idx ON repository_dependencies (workspace_id, index_id, target_text);
 CREATE INDEX IF NOT EXISTS repository_dependencies_workspace_index_target_file_idx ON repository_dependencies (workspace_id, index_id, target_file_path);
+`;
+
+const POSTGRES_V12_TO_V13_SQL = `
+DO $$
+BEGIN
+  ALTER TYPE scan_required_output ADD VALUE IF NOT EXISTS 'boundary-map';
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END
+$$;
+
+ALTER TABLE scan_runs
+  ADD COLUMN IF NOT EXISTS boundary_map JSONB;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'scan_runs_boundary_map_object_chk'
+      AND conrelid = 'scan_runs'::regclass
+  ) THEN
+    ALTER TABLE scan_runs
+      ADD CONSTRAINT scan_runs_boundary_map_object_chk
+      CHECK (boundary_map IS NULL OR jsonb_typeof(boundary_map) = 'object');
+  END IF;
+END
+$$;
+
+ALTER TABLE scan_profiles
+  ADD COLUMN IF NOT EXISTS overlay_stem TEXT;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'scan_profiles_overlay_stem_non_empty_chk'
+      AND conrelid = 'scan_profiles'::regclass
+  ) THEN
+    ALTER TABLE scan_profiles
+      ADD CONSTRAINT scan_profiles_overlay_stem_non_empty_chk
+      CHECK (overlay_stem IS NULL OR btrim(overlay_stem) <> '');
+  END IF;
+END
+$$;
+
+ALTER TABLE scan_runs
+  ADD COLUMN IF NOT EXISTS effective_profile JSONB;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'scan_runs_effective_profile_object_chk'
+      AND conrelid = 'scan_runs'::regclass
+  ) THEN
+    ALTER TABLE scan_runs
+      ADD CONSTRAINT scan_runs_effective_profile_object_chk
+      CHECK (effective_profile IS NULL OR jsonb_typeof(effective_profile) = 'object');
+  END IF;
+END
+$$;
 `;

@@ -9,6 +9,8 @@ Current prioritization is driven by two near-term use cases without turning the 
 
 Those use cases set implementation order only. Repository-indexing contracts, scan flows, and stored facts remain product-agnostic and language/tooling capabilities must be modeled in reusable terms.
 
+After the current runtime/container/HiveForge base is closed, the next deliberate repository-scan feature track should turn those structural facts into a generic boundary-mapping workflow and artifact. The goal is to help agents understand how an arbitrary repository is partitioned, where public entrypoints and ownership claims live, and how contracts/tests relate to implementation without encoding product-specific maps.
+
 ## Locked Direction
 
 - [x] Repository indexing and repository scan runs are separate artifacts.
@@ -59,6 +61,8 @@ Those use cases set implementation order only. Repository-indexing contracts, sc
 - [~] Land a safe-mode Phase 4A syntax package built around `tree-sitter` parsing plus `ast-grep` structural queries before any compiler-backed adapters.
 - [~] Add product-agnostic Java structural facts for packages, types, methods, imports, and module boundaries.
 - [ ] Add product-agnostic Gherkin/Cucumber structural facts for feature files, step definitions, and step-binding relationships.
+- [~] Add a product-agnostic boundary-mapping workflow that groups repository facts into candidate boundaries, ownership evidence, and boundary-to-boundary relations.
+  Current slice: `scan_boundary_map_build` derives a candidate typed artifact from persisted repository facts plus current scan coverage; built-in profiles still require explicit agent review and `scan_complete` submission.
 - [ ] Keep structural fact extraction usable for repository understanding and rewrite planning without forcing compiler-backed deep mode.
 
 ### Phase 5: Portable Completed Index Export
@@ -304,9 +308,14 @@ Once Phase 4A facts are persisted, add them to retrieval in this order:
 
 1. extend `repository_search` so callers can search symbols, qualified names, imports, and diagnostics as first-class hits;
 2. add evidence-candidate builders that consume structural facts for code-quality and Java/Cucumber rewrite scans;
-3. add bounded structural drill-down surfaces only if the existing search/evidence contracts become too lossy.
+3. add a generic boundary-map build/review workflow that derives candidate boundaries, owned paths/symbols, contract/test links, and boundary-to-boundary relations from the persisted facts;
+4. add bounded structural drill-down surfaces only if the existing search/evidence contracts become too lossy.
 
 Avoid inventing a large new query API before proving the first scan/review workflows on top of the normalized facts.
+
+The boundary-map step should remain product-agnostic. PocketHive and HiveMap are useful proving repositories, but the workflow must generalize to arbitrary repositories without hardcoded boundary vocabularies or repo-shape assumptions frozen in code.
+
+Repository-specific boundary-map heuristics belong in the repository-local scan-profile overlay, not in runtime code. That includes boundary root rules, contract-doc markers, ignored doc tokens, test-directory markers, and entrypoint-detection path/name conventions.
 
 ### Why This Package First
 

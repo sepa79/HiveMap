@@ -3,13 +3,17 @@ import { describe, expect, it } from "vitest";
 import type { ProjectSourceRef } from "@hivemap/graph-core";
 
 import {
+  validateBoundaryMap,
   CODE_QUALITY_PROFILE,
   DOCUMENTATION_CONFLICTS_PROFILE,
   ScanValidationError,
+  applyScanProfileOverlay,
   compareCompletedScans,
+  createBoundaryMapBuildConfig,
   createFindingNode,
   toFindingEvidence,
   updateFindingNode,
+  validateScanRun,
   validateFindingNode,
   validateScanCoverage,
   validateScanProfile,
@@ -81,6 +85,157 @@ describe("repository scans", () => {
     expect(node.type).toBe("finding");
     expect(() => validateFindingNode(node)).not.toThrow();
     expect(toFindingEvidence(node).finding.fingerprint).toBe("owner-conflict");
+  });
+
+  it("validates a typed boundary-map artifact", () => {
+    expect(() =>
+      validateBoundaryMap({
+        boundaries: [
+          {
+            id: "boundary-runtime",
+            label: "Runtime",
+            kind: "module",
+            ownedPaths: ["packages/runtime/**"],
+            ownedSymbolKeys: ["runtime:HiveMapRuntime"],
+            publicEntrypoints: [
+              {
+                id: "runtime-api",
+                label: "HiveMapRuntime API",
+                kind: "export",
+                symbolKey: "runtime:HiveMapRuntime",
+              },
+            ],
+            contractSourceRefs: [{ role: "defines", source: "repo-doc", target: "docs/architecture.md", anchor: "Main Components" }],
+            testSourceRefs: [{ role: "verifies", source: "test", target: "packages/runtime/src/index.test.ts" }],
+            confidence: "high",
+            openQuestions: ["Should runtime expose a narrower public surface?"],
+          },
+        ],
+        relations: [
+          {
+            id: "runtime-depends-on-storage",
+            fromBoundaryId: "boundary-runtime",
+            toBoundaryId: "boundary-runtime",
+            kind: "depends-on",
+            sourceRefs: [{ role: "depends-on", source: "code", target: "packages/runtime/src/index.ts", anchor: "constructor" }],
+          },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
+  it("builds boundary-map config from replaceable overlay fields", () => {
+    const config = createBoundaryMapBuildConfig({
+      formatVersion: 1,
+      profileId: CODE_QUALITY_PROFILE.id,
+      boundaryMapRoots: ["services:service", "shared:library"],
+      boundaryMapContractPathMarkers: ["/contracts/"],
+      boundaryMapContractFileStems: ["Runtime-Policy"],
+      boundaryMapIgnoredTokens: ["Docs", "Generated"],
+      boundaryMapTestDirectoryNames: ["Qa", "Specs"],
+      boundaryMapRoutePathMarkers: ["/endpoints/"],
+      boundaryMapRouteNameSuffixes: ["Flow"],
+      boundaryMapApiPathMarkers: ["/rpc/"],
+      boundaryMapApiNameSuffixes: ["Policy"],
+    });
+
+    expect(config).toEqual({
+      roots: [
+        { pathPrefix: "services", kind: "service" },
+        { pathPrefix: "shared", kind: "library" },
+      ],
+      contractPathMarkers: ["/contracts/"],
+      contractFileStems: ["runtime-policy"],
+      ignoredDocTokens: ["docs", "generated"],
+      testDirectoryNames: ["qa", "specs"],
+      routePathMarkers: ["/endpoints/"],
+      routeNameSuffixes: ["flow"],
+      apiPathMarkers: ["/rpc/"],
+      apiNameSuffixes: ["policy"],
+    });
+  });
+
+  it("replaces repository-specific profile sections through the overlay", () => {
+    const profile = applyScanProfileOverlay(CODE_QUALITY_PROFILE, {
+      formatVersion: 1,
+      profileId: CODE_QUALITY_PROFILE.id,
+      name: "Services code review",
+      description: "Repository-specific service review.",
+      instructions: ["Review services first."],
+      sourceTypes: ["code", "test"],
+      criteria: [{ id: "service-contract-drift", description: "Service behavior differs from the contract." }],
+      ssotOrder: ["AGENTS.md", "services/**"],
+      requiredOutputs: ["findings", "boundary-map"],
+    });
+
+    expect(profile).toMatchObject({
+      name: "Services code review",
+      description: "Repository-specific service review.",
+      instructions: ["Review services first."],
+      sourceTypes: ["code", "test"],
+      criteria: [{ id: "service-contract-drift", description: "Service behavior differs from the contract." }],
+      ssotOrder: ["AGENTS.md", "services/**"],
+      requiredOutputs: ["findings", "boundary-map"],
+    });
+  });
+
+  it("rejects semantically invalid boundary-map evidence", () => {
+    expect(() =>
+      validateBoundaryMap({
+        boundaries: [
+          {
+            id: "boundary-runtime",
+            label: "Runtime",
+            kind: "module",
+            ownedPaths: ["packages/runtime/src/index.ts"],
+            ownedSymbolKeys: ["runtime:index"],
+            publicEntrypoints: [],
+            contractSourceRefs: [{ role: "defines", source: "repo-doc", target: "docs/architecture.md" }],
+            testSourceRefs: [{ role: "implements", source: "code", target: "packages/runtime/src/index.test.ts" }],
+            confidence: "medium",
+          },
+        ],
+        relations: [],
+      }),
+    ).toThrow("testSourceRefs");
+
+    expect(() =>
+      validateBoundaryMap({
+        boundaries: [
+          {
+            id: "boundary-runtime",
+            label: "Runtime",
+            kind: "module",
+            ownedPaths: ["packages/runtime/src/index.ts"],
+            ownedSymbolKeys: ["runtime:index"],
+            publicEntrypoints: [],
+            contractSourceRefs: [{ role: "defines", source: "repo-doc", target: "docs/architecture.md" }],
+            testSourceRefs: [{ role: "verifies", source: "test", target: "packages/runtime/src/index.test.ts" }],
+            confidence: "medium",
+          },
+          {
+            id: "boundary-shared",
+            label: "Shared",
+            kind: "module",
+            ownedPaths: ["packages/shared/src/index.ts"],
+            ownedSymbolKeys: ["shared:index"],
+            publicEntrypoints: [],
+            contractSourceRefs: [{ role: "defines", source: "repo-doc", target: "docs/shared.md" }],
+            testSourceRefs: [{ role: "verifies", source: "test", target: "packages/shared/src/index.test.ts" }],
+            confidence: "medium",
+          },
+        ],
+        relations: [
+          {
+            id: "runtime-depends-on-shared",
+            fromBoundaryId: "boundary-runtime",
+            toBoundaryId: "boundary-shared",
+            kind: "depends-on",
+            sourceRefs: [{ role: "implements", source: "code", target: "packages/runtime/src/index.ts" }],
+          },
+        ],
+      }),
+    ).toThrow("depends-on");
   });
 
   it("rejects resolved findings without evidence", () => {
@@ -167,6 +322,13 @@ describe("repository scans", () => {
 
     expect(comparison.items[0]?.status).toBe("unverifiable");
     expect(comparison.verdict).toBe("fail");
+  });
+
+  it("requires boundary-map evidence when a completed scan declares the output", () => {
+    const run = completedRun("scan-boundary", [], ["src/a.ts"]);
+    run.declaredOutputs = [...run.declaredOutputs, "boundary-map"];
+
+    expect(() => validateScanRun(run, [DOCUMENTATION_CONFLICTS_PROFILE])).toThrow("boundary-map");
   });
 });
 

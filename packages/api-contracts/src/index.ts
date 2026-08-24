@@ -19,7 +19,9 @@ import {
   type Projection,
 } from "@hivemap/projections";
 import {
+  validateBoundaryMap,
   validateScanCoverage,
+  type BoundaryMapArtifact,
   type FindingNodeInput,
   type FindingNodeUpdate,
   type InProgressScanRun,
@@ -359,6 +361,20 @@ export type ListRepositoryEvidenceCandidatesResponse = {
   candidates: RepositoryEvidenceCandidate[];
 };
 
+export type BuildScanBoundaryMapRequest = {
+  workspaceId: string;
+  scanId: string;
+};
+
+export type BuildScanBoundaryMapResponse = {
+  scanId: string;
+  profileId: string;
+  profileVersion: number;
+  repositoryIndexId: string;
+  coverageSummary: ScanCoverageSummary;
+  boundaryMap: BoundaryMapArtifact;
+};
+
 export type GetScanProfileOverlayHelpRequest = {
   workspaceId: string;
   profileId: string;
@@ -531,6 +547,7 @@ export type CompleteScanRequest = {
   completedAt: string;
   appliedCriteria: string[];
   declaredOutputs: ScanRequiredOutput[];
+  boundaryMap?: BoundaryMapArtifact;
 };
 export type CompleteScanResponse = { run: Extract<ScanRun, { status: "completed" }> };
 
@@ -559,6 +576,7 @@ export type McpToolName =
   | "repository_index_execute"
   | "repository_search"
   | "repository_evidence_candidates"
+  | "scan_boundary_map_build"
   | "scan_profile_overlay_help"
   | "concept_embedding_upsert"
   | "concept_embedding_refresh"
@@ -595,6 +613,7 @@ export type McpToolRequestMap = {
   repository_index_execute: ExecuteRepositoryIndexRequest;
   repository_search: SearchRepositoryIndexRequest;
   repository_evidence_candidates: ListRepositoryEvidenceCandidatesRequest;
+  scan_boundary_map_build: BuildScanBoundaryMapRequest;
   scan_profile_overlay_help: GetScanProfileOverlayHelpRequest;
   concept_embedding_upsert: UpsertConceptEmbeddingRequest;
   concept_embedding_refresh: RefreshConceptEmbeddingRequest;
@@ -630,6 +649,7 @@ export type RestEndpointName =
   | "repository-index.execute"
   | "repository-index.search"
   | "repository-index.evidence-candidates"
+  | "scan.boundary-map.build"
   | "scan-profile-overlay.help"
   | "concept-embedding.upsert"
   | "concept-embedding.refresh"
@@ -738,6 +758,11 @@ export function validateListRepositoryEvidenceCandidatesRequest(request: ListRep
   if (request.limit !== undefined && (!Number.isInteger(request.limit) || request.limit < 1)) {
     throw new ApiContractValidationError("limit must be a positive integer");
   }
+}
+
+export function validateBuildScanBoundaryMapRequest(request: BuildScanBoundaryMapRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("scanId", request.scanId);
 }
 
 export function validateGetScanProfileOverlayHelpRequest(request: GetScanProfileOverlayHelpRequest): void {
@@ -891,6 +916,12 @@ export function validateCompleteScanRequest(request: CompleteScanRequest): void 
   assertDate("completedAt", request.completedAt);
   if (request.appliedCriteria.length === 0) throw new ApiContractValidationError("appliedCriteria must not be empty");
   if (request.declaredOutputs.length === 0) throw new ApiContractValidationError("declaredOutputs must not be empty");
+  if (request.declaredOutputs.includes("boundary-map")) {
+    if (request.boundaryMap === undefined) throw new ApiContractValidationError("boundaryMap is required when declaredOutputs includes boundary-map");
+    validateBoundaryMap(request.boundaryMap);
+  } else if (request.boundaryMap !== undefined) {
+    throw new ApiContractValidationError("boundaryMap requires declaredOutputs to include boundary-map");
+  }
 }
 
 export function validateCompareScansRequest(request: CompareScansRequest): void {

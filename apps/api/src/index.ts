@@ -191,6 +191,17 @@ async function handleRequest(
     }
 
     if (
+      method === "GET" &&
+      segments[2] === "scans" &&
+      segments[3] !== undefined &&
+      segments[4] === "boundary-map" &&
+      segments.length === 5
+    ) {
+      writeJson(response, 200, await runtime.buildScanBoundaryMap({ workspaceId, scanId: segments[3] }));
+      return;
+    }
+
+    if (
       method === "POST" &&
       segments[2] === "concepts" &&
       segments[3] !== undefined &&

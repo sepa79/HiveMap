@@ -75,7 +75,7 @@ export type ScanRun = {
 };
 
 export type ProjectSourceRef = {
-  role: "defines" | "implements" | "verifies" | "illustrates" | "decides" | "discusses" | "tracks";
+  role: "defines" | "depends-on" | "implements" | "verifies" | "illustrates" | "decides" | "discusses" | "tracks";
   source: "repo-doc" | "code" | "test" | "asset" | "hivemind";
   target: string;
   anchor?: string;

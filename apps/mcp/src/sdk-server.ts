@@ -2,6 +2,13 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod/v4";
 
+import { PROJECT_SOURCE_ROLE_VALUES, PROJECT_SOURCE_TYPE_VALUES } from "@hivemap/graph-core";
+import {
+  BOUNDARY_ENTRYPOINT_KIND_VALUES,
+  BOUNDARY_KIND_VALUES,
+  BOUNDARY_RELATION_KIND_VALUES,
+  FINDING_CONFIDENCE_VALUES,
+} from "@hivemap/scans";
 import { HiveMapRuntime } from "@hivemap/runtime";
 
 import { handleMcpTool, type McpToolFailure, type McpToolName, type McpToolResponseMap } from "./index.js";
@@ -18,6 +25,7 @@ const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   repository_index_execute: "Execute one safe-mode repository index job and persist resolved commit, files, and chunks.",
   repository_search: "Search bounded file and chunk evidence inside one completed repository index.",
   repository_evidence_candidates: "Return bounded repository evidence packets for one scan profile criterion on one completed repository index, plus the effective scan profile, overlay status, coverage summary, and a reminder that scan_profile_overlay_help explains per-repo overlays.",
+  scan_boundary_map_build: "Build one candidate boundary-map artifact from the current scan coverage and selected completed repository index facts.",
   scan_profile_overlay_help: "Explain the optional .hivemap/scan-profiles/<profile>.yaml overlay contract, merge rules, template, defaults behavior, and fail-fast validation for one scan profile.",
   concept_embedding_upsert: "Store or refresh one explicit concept embedding for a workspace node and model.",
   concept_embedding_refresh: "Generate or refresh one concept embedding through a configured provider:model ref.",
@@ -42,6 +50,52 @@ const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   workspace_export_zip: "Export a deterministic checksummed .hivemap.zip with canonical workspace state and repeat-scan instructions.",
   workspace_import_zip: "Import a validated .hivemap.zip in explicit new or replace mode without silent merge or id rewriting.",
 };
+
+const projectSourceRefSchema = z.object({
+  role: z.enum(PROJECT_SOURCE_ROLE_VALUES),
+  source: z.enum(PROJECT_SOURCE_TYPE_VALUES),
+  target: z.string(),
+  anchor: z.string().optional(),
+  revision: z.string().optional(),
+  label: z.string().optional(),
+});
+
+const boundaryMapEntrypointSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  kind: z.enum(BOUNDARY_ENTRYPOINT_KIND_VALUES),
+  filePath: z.string().optional(),
+  symbolKey: z.string().optional(),
+  sourceRefs: z.array(projectSourceRefSchema).optional(),
+});
+
+const boundaryMapBoundarySchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  kind: z.enum(BOUNDARY_KIND_VALUES),
+  ownedPaths: z.array(z.string()),
+  ownedSymbolKeys: z.array(z.string()),
+  publicEntrypoints: z.array(boundaryMapEntrypointSchema),
+  contractSourceRefs: z.array(projectSourceRefSchema),
+  testSourceRefs: z.array(projectSourceRefSchema),
+  confidence: z.enum(FINDING_CONFIDENCE_VALUES),
+  openQuestions: z.array(z.string()).optional(),
+  notes: z.string().optional(),
+});
+
+const boundaryMapRelationSchema = z.object({
+  id: z.string(),
+  fromBoundaryId: z.string(),
+  toBoundaryId: z.string(),
+  kind: z.enum(BOUNDARY_RELATION_KIND_VALUES),
+  sourceRefs: z.array(projectSourceRefSchema),
+  notes: z.string().optional(),
+});
+
+const boundaryMapArtifactSchema = z.object({
+  boundaries: z.array(boundaryMapBoundarySchema),
+  relations: z.array(boundaryMapRelationSchema),
+});
 
 export function createHiveMapMcpServer(runtime: HiveMapRuntime): McpServer {
   const server = new McpServer({
@@ -121,6 +175,11 @@ export function createHiveMapMcpServer(runtime: HiveMapRuntime): McpServer {
     profileVersion: z.number().int().positive(),
     criterionId: z.string(),
     limit: z.number().int().positive().optional(),
+  });
+
+  registerTool(server, runtime, "scan_boundary_map_build", {
+    workspaceId: z.string(),
+    scanId: z.string(),
   });
 
   registerTool(server, runtime, "scan_profile_overlay_help", {
@@ -249,7 +308,8 @@ export function createHiveMapMcpServer(runtime: HiveMapRuntime): McpServer {
     scanId: z.string(),
     completedAt: z.string(),
     appliedCriteria: z.array(z.string()),
-    declaredOutputs: z.array(z.enum(["document-inventory", "concept-map", "findings", "coverage-report"])),
+    declaredOutputs: z.array(z.enum(["document-inventory", "concept-map", "findings", "coverage-report", "boundary-map"])),
+    boundaryMap: boundaryMapArtifactSchema.optional(),
   });
 
   registerTool(server, runtime, "scan_compare", {

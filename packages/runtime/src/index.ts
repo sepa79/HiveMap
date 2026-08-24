@@ -3,6 +3,7 @@ import { posix as pathPosix } from "node:path";
 import {
   validateBackfillConceptEmbeddingsRequest,
   validateExecuteRepositoryIndexRequest,
+  validateBuildScanBoundaryMapRequest,
   validateGetScanProfileOverlayHelpRequest,
   validateGetRepositoryIndexRequest,
   validateGetWorkspaceSummaryRequest,
@@ -44,6 +45,8 @@ import {
   type AssignCategoryResponse,
   type BackfillConceptEmbeddingsRequest,
   type BackfillConceptEmbeddingsResponse,
+  type BuildScanBoundaryMapRequest,
+  type BuildScanBoundaryMapResponse,
   type CreateProjectionRequest,
   type CreateProjectionResponse,
   type CreateProposalRequest,
@@ -129,6 +132,7 @@ import {
   INITIAL_SCAN_PROFILES,
   compareCompletedScans,
   applyScanProfileOverlay,
+  createBoundaryMapBuildConfig,
   createFindingNode,
   getScanProfileOverlayPath,
   SCAN_PROFILE_OVERLAY_FORMAT_VERSION,
@@ -160,6 +164,7 @@ import {
 } from "@hivemap/storage";
 
 import { EmbeddingProviderError, type EmbeddingProviderRegistry } from "./embeddings.js";
+import { buildBoundaryMapArtifact } from "./repository-boundary-map.js";
 import { RepositoryIndexExecutionError, executeSafeRepositoryIndex, type RepositoryIndexExecutor } from "./repository-indexing.js";
 
 export * from "./embeddings.js";
@@ -414,16 +419,6 @@ export class HiveMapRuntime {
     validateListRepositoryEvidenceCandidatesRequest(request);
     const state = await this.store.loadWorkspaceState(request.workspaceId);
     const profile = findScanProfile(state, request.profileId, request.profileVersion);
-    if (!profile.criteria.some((criterion) => criterion.id === request.criterionId)) {
-      throw new RuntimeError(`Scan criterion not found in profile: ${request.criterionId}`, {
-        code: "SCAN_CRITERION_NOT_FOUND",
-        details: {
-          profileId: request.profileId,
-          profileVersion: request.profileVersion,
-          criterionId: request.criterionId,
-        },
-      });
-    }
     const index = await this.store.getRepositoryIndex(request.workspaceId, request.indexId);
     if (index.stage !== "completed") {
       throw new RuntimeError(`Repository index must be completed before retrieving evidence candidates: ${index.id}`, {
@@ -437,6 +432,17 @@ export class HiveMapRuntime {
     const symbols = await this.store.listRepositoryIndexSymbols(request.workspaceId, request.indexId);
     const dependencies = await this.store.listRepositoryIndexDependencies(request.workspaceId, request.indexId);
     const profileContext = resolveScanProfileContext(profile, files, chunks, symbols);
+    if (!profileContext.effectiveProfile.criteria.some((criterion) => criterion.id === request.criterionId)) {
+      throw new RuntimeError(`Scan criterion not found in effective profile: ${request.criterionId}`, {
+        code: "SCAN_CRITERION_NOT_FOUND",
+        details: {
+          profileId: request.profileId,
+          profileVersion: request.profileVersion,
+          criterionId: request.criterionId,
+          overlayPath: profileContext.overlay.overlayPath,
+        },
+      });
+    }
 
     return {
       indexId: request.indexId,
@@ -457,6 +463,65 @@ export class HiveMapRuntime {
         limit: request.limit ?? 20,
       }),
     };
+  }
+
+  async buildScanBoundaryMap(request: BuildScanBoundaryMapRequest): Promise<BuildScanBoundaryMapResponse> {
+    validateBuildScanBoundaryMapRequest(request);
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
+    const run = findById(state.scanRuns, request.scanId, "Scan");
+    if (run.coverage === undefined) {
+      throw new RuntimeError(`Scan coverage is required before building a boundary map: ${run.id}`, {
+        code: "SCAN_COVERAGE_REQUIRED",
+        details: { scanId: run.id },
+      });
+    }
+    const repositoryIndexId = run.repository.repositoryIndexId;
+    if (repositoryIndexId === undefined) {
+      throw new RuntimeError(`Scan must reference a completed repository index before building a boundary map: ${run.id}`, {
+        code: "SCAN_REPOSITORY_INDEX_REQUIRED",
+        details: { scanId: run.id },
+      });
+    }
+    const repositoryIndex = await this.store.getRepositoryIndex(request.workspaceId, repositoryIndexId);
+    if (repositoryIndex.stage !== "completed" || repositoryIndex.resolvedCommit === undefined) {
+      throw new RuntimeError(`Repository index must be completed before building a boundary map: ${repositoryIndex.id}`, {
+        code: "REPOSITORY_INDEX_NOT_COMPLETED",
+        details: { indexId: repositoryIndex.id, stage: repositoryIndex.stage },
+      });
+    }
+
+    const files = await this.store.listRepositoryIndexFiles(request.workspaceId, repositoryIndexId);
+    const chunks = await this.store.listRepositoryIndexChunks(request.workspaceId, repositoryIndexId);
+    const symbols = await this.store.listRepositoryIndexSymbols(request.workspaceId, repositoryIndexId);
+    const dependencies = await this.store.listRepositoryIndexDependencies(request.workspaceId, repositoryIndexId);
+    const profile = findScanProfile(state, run.profileId, run.profileVersion);
+    const boundaryMapConfig = resolveBoundaryMapBuildConfig(profile, files, chunks);
+
+    try {
+      return {
+        scanId: run.id,
+        profileId: run.profileId,
+        profileVersion: run.profileVersion,
+        repositoryIndexId,
+        coverageSummary: summarizeRecordedCoverage(run.coverage, files, symbols),
+        boundaryMap: buildBoundaryMapArtifact({
+          coverage: run.coverage,
+          files,
+          symbols,
+          dependencies,
+          revision: repositoryIndex.resolvedCommit,
+          config: boundaryMapConfig,
+        }),
+      };
+    } catch (error) {
+      if (error instanceof Error) {
+        throw new RuntimeError(error.message, {
+          code: "BOUNDARY_MAP_BUILD_FAILED",
+          details: { scanId: run.id, repositoryIndexId },
+        });
+      }
+      throw error;
+    }
   }
 
   async getScanProfileOverlayHelp(request: GetScanProfileOverlayHelpRequest): Promise<GetScanProfileOverlayHelpResponse> {
@@ -852,6 +917,7 @@ export class HiveMapRuntime {
       id: request.scan.id,
       profileId: request.scan.profileId,
       profileVersion: request.scan.profileVersion,
+      effectiveProfile: profileContext.effectiveProfile,
       repository: createScanRepositoryFromIndex(request.scan.repositoryIndexId, repositoryIndex),
       actor: request.scan.actor,
       startedAt: request.scan.startedAt,
@@ -890,7 +956,7 @@ export class HiveMapRuntime {
       throw new RuntimeError(`scan_finding_create requires delegated capture; current mode is ${state.capturePolicy.mode}`);
     }
     const run = findInProgressScan(state, request.scanId);
-    const profile = findScanProfile(state, run.profileId, run.profileVersion);
+    const profile = run.effectiveProfile ?? findScanProfile(state, run.profileId, run.profileVersion);
     for (const criterionId of request.finding.criterionIds) {
       if (!profile.criteria.some((criterion) => criterion.id === criterionId)) {
         throw new RuntimeError(`Finding references criterion outside scan profile: ${criterionId}`);
@@ -942,6 +1008,7 @@ export class HiveMapRuntime {
       declaredOutputs: request.declaredOutputs,
       graphDigest: createHash("sha256").update(stableJson(state.graph)).digest("hex"),
       findingEvidence,
+      ...(request.boundaryMap === undefined ? {} : { boundaryMap: request.boundaryMap }),
     };
     validateScanRun(completed, state.scanProfiles, state.graph);
     await this.store.saveWorkspaceState({ ...state, scanRuns: replaceById(state.scanRuns, completed) });
@@ -1078,7 +1145,7 @@ function resolveScanProfileContext(
   chunks: readonly RepositoryChunkRecord[],
   symbols: readonly RepositorySymbolRecord[],
 ): ScanProfileContext {
-  const overlayPath = normalizeRepositoryPath(getScanProfileOverlayPath(baseProfile.id));
+  const overlayPath = normalizeRepositoryPath(getScanProfileOverlayPath(baseProfile));
   const overlayFile = files.find((file) => normalizeRepositoryPath(file.path) === overlayPath);
   if (overlayFile === undefined) {
     const overlay = createMissingScanProfileOverlayResolution(baseProfile, overlayPath);
@@ -1173,6 +1240,20 @@ function readScanProfileOverlayFromRepository(
   }
 }
 
+function resolveBoundaryMapBuildConfig(
+  profile: ScanProfile,
+  files: readonly RepositoryFileRecord[],
+  chunks: readonly RepositoryChunkRecord[],
+) {
+  const overlayPath = normalizeRepositoryPath(getScanProfileOverlayPath(profile));
+  const overlayFile = files.find((file) => normalizeRepositoryPath(file.path) === overlayPath);
+  if (overlayFile === undefined) {
+    return createBoundaryMapBuildConfig();
+  }
+  const overlay = readScanProfileOverlayFromRepository(profile, overlayPath, chunks);
+  return createBoundaryMapBuildConfig(overlay);
+}
+
 function createScanCoverageSummary(
   profile: ScanProfile,
   files: readonly RepositoryFileRecord[],
@@ -1208,6 +1289,37 @@ function createScanCoverageSummary(
   return summary;
 }
 
+function summarizeRecordedCoverage(
+  coverage: ScanCoverage,
+  files: readonly RepositoryFileRecord[],
+  symbols: readonly RepositorySymbolRecord[],
+): ScanCoverageSummary {
+  const discoveredPaths = new Set(coverage.discovered.map(normalizeRepositoryPath));
+  const includedPaths = new Set(coverage.included.map(normalizeRepositoryPath));
+  const codePaths = new Set(
+    files
+      .filter((file) => file.sourceKind === "code")
+      .map((file) => normalizeRepositoryPath(file.path))
+      .filter((path) => discoveredPaths.has(path)),
+  );
+  const topLevelCodeSymbols = symbols.filter(
+    (symbol) => symbol.parentSymbolKey === undefined && codePaths.has(normalizeRepositoryPath(symbol.filePath)),
+  );
+  const includedTopLevelCodeSymbols = topLevelCodeSymbols.filter((symbol) => includedPaths.has(normalizeRepositoryPath(symbol.filePath)));
+
+  return {
+    discoveredCount: coverage.discovered.length,
+    includedCount: coverage.included.length,
+    excludedCount: coverage.excluded.length,
+    failedCount: coverage.failed.length,
+    discoveredCodeFileCount: codePaths.size,
+    includedCodeFileCount: [...codePaths].filter((path) => includedPaths.has(path)).length,
+    discoveredTopLevelCodeSymbolCount: topLevelCodeSymbols.length,
+    includedTopLevelCodeSymbolCount: includedTopLevelCodeSymbols.length,
+    warnings: [],
+  };
+}
+
 function createScanCoverageWarnings(
   profile: ScanProfile,
   summary: ScanCoverageSummary,
@@ -1241,10 +1353,14 @@ function createScanCoverageWarnings(
 }
 
 function createScanProfileOverlayHelp(profile: ScanProfile): GetScanProfileOverlayHelpResponse {
-  const overlayPath = getScanProfileOverlayPath(profile.id);
+  const overlayPath = getScanProfileOverlayPath(profile);
   const templateLines = [
     `formatVersion: ${SCAN_PROFILE_OVERLAY_FORMAT_VERSION}`,
     `profileId: ${profile.id}`,
+    "name: Repository code review",
+    "description: Repository-specific code review profile for the current layout.",
+    "instructions:",
+    "  - Review service boundaries before local symptoms.",
     "include:",
     "  - services/**",
     "exclude:",
@@ -1255,12 +1371,49 @@ function createScanProfileOverlayHelp(profile: ScanProfile): GetScanProfileOverl
     "  - legacy/**",
     "generatedPatterns:",
     "  - generated/**",
+    "sourceTypes:",
+    "  - code",
+    "  - test",
+    "criteria:",
+    "  - contract-drift: Implementation behavior differs from the owning contract.",
+    "ssotOrder:",
+    "  - AGENTS.md",
+    "  - docs/specs/**",
+    "requiredOutputs:",
+    "  - findings",
+    "boundaryMapRoots:",
+    "  - packages:package",
+    "  - services:service",
+    "boundaryMapContractPathMarkers:",
+    "  - /specs/",
+    "boundaryMapContractFileStems:",
+    "  - contract",
+    "  - api",
+    "boundaryMapIgnoredTokens:",
+    "  - docs",
+    "  - tests",
+    "boundaryMapTestDirectoryNames:",
+    "  - tests",
+    "  - qa",
+    "boundaryMapRoutePathMarkers:",
+    "  - /routes/",
+    "boundaryMapRouteNameSuffixes:",
+    "  - route",
+    "boundaryMapApiPathMarkers:",
+    "  - /api/",
+    "boundaryMapApiNameSuffixes:",
+    "  - handler",
   ];
   const exampleLines =
     profile.id === "code-quality-review"
       ? [
           `formatVersion: ${SCAN_PROFILE_OVERLAY_FORMAT_VERSION}`,
           "profileId: code-quality-review",
+          "name: Services code quality review",
+          "description: Review service-oriented runtime and storage code in this repository.",
+          "instructions:",
+          "  - Review service boundaries before component-level findings.",
+          "  - Treat runtime contracts in docs/specs as the primary authority for this repository.",
           "include:",
           "  - services/**",
           "  - modules/**",
@@ -1272,14 +1425,61 @@ function createScanProfileOverlayHelp(profile: ScanProfile): GetScanProfileOverl
           "  - legacy-ui/**",
           "generatedPatterns:",
           "  - '**/*.generated.ts'",
+          "sourceTypes:",
+          "  - specification",
+          "  - code",
+          "  - test",
+          "criteria:",
+          "  - duplicate-responsibility: Multiple services own the same runtime policy behavior.",
+          "  - undocumented-api: A public service behavior lacks an owning contract.",
+          "ssotOrder:",
+          "  - AGENTS.md",
+          "  - docs/specs/**",
+          "  - services/**",
+          "requiredOutputs:",
+          "  - document-inventory",
+          "  - findings",
+          "  - boundary-map",
+          "boundaryMapRoots:",
+          "  - services:service",
+          "  - shared:library",
+          "boundaryMapContractPathMarkers:",
+          "  - /contracts/",
+          "  - /specs/",
+          "boundaryMapContractFileStems:",
+          "  - runtime-policy",
+          "  - api",
+          "boundaryMapIgnoredTokens:",
+          "  - docs",
+          "  - tests",
+          "boundaryMapTestDirectoryNames:",
+          "  - tests",
+          "  - qa",
+          "boundaryMapRoutePathMarkers:",
+          "  - /routes/",
+          "boundaryMapRouteNameSuffixes:",
+          "  - router",
+          "boundaryMapApiPathMarkers:",
+          "  - /rpc/",
+          "boundaryMapApiNameSuffixes:",
+          "  - policy",
         ]
       : [
           `formatVersion: ${SCAN_PROFILE_OVERLAY_FORMAT_VERSION}`,
           `profileId: ${profile.id}`,
+          "instructions:",
+          "  - Review archived docs only when they still claim current authority.",
           "exclude:",
           "  - docs/archive/**",
           "archivePatterns:",
           "  - historical/**",
+          "ssotOrder:",
+          "  - AGENTS.md",
+          "  - docs/specs/**",
+          "boundaryMapRoots:",
+          "  - src:module",
+          "boundaryMapTestDirectoryNames:",
+          "  - tests",
         ];
 
   return {
@@ -1288,25 +1488,54 @@ function createScanProfileOverlayHelp(profile: ScanProfile): GetScanProfileOverl
     overlayPath,
     format: "yaml",
     formatVersion: SCAN_PROFILE_OVERLAY_FORMAT_VERSION,
-    summary: `Optional repository-local overlay for ${profile.id}@${profile.version}. Use it when the default scan profile scope does not match the repository layout.`,
+    summary: `Optional repository-local overlay for ${profile.id}@${profile.version}. Use it when the default scan profile definition does not match the repository layout, authority order, or review recipe.`,
     defaultsBehavior: `If ${overlayPath} is missing, HiveMap uses the built-in ${profile.id}@${profile.version} scope without fallback side effects.`,
     validationBehavior: `If ${overlayPath} exists but is invalid, scan_start and repository_evidence_candidates fail with SCAN_PROFILE_OVERLAY_INVALID. HiveMap does not silently ignore a bad overlay.`,
     guidanceTool: "scan_profile_overlay_help",
     mergeRules: [
+      "name and description replace the built-in profile presentation fields for this repository.",
+      "instructions replaces the built-in ordered scan instructions for this repository.",
       "include appends repository-specific include globs to the built-in profile include list.",
       "exclude appends repository-specific exclude globs to the built-in profile exclude list.",
       "archivePatterns, legacyPatterns, and generatedPatterns append to the effective exclude list.",
+      "sourceTypes replaces the built-in source type list.",
+      "criteria replaces the built-in criterion list; use '- criterion-id: description' entries.",
+      "ssotOrder replaces the built-in SSOT precedence order.",
+      "requiredOutputs replaces the built-in required output list.",
+      "boundaryMapRoots replaces the built-in root-to-boundary-kind rules for scan_boundary_map_build.",
+      "boundaryMapContractPathMarkers replaces the built-in contract path markers for boundary-map documentation linking.",
+      "boundaryMapContractFileStems replaces the built-in documentation filename stems treated as contract-like for boundary mapping.",
+      "boundaryMapIgnoredTokens replaces the built-in generic token ignore list used when matching docs to boundaries.",
+      "boundaryMapTestDirectoryNames replaces the built-in test-directory names used when deriving test-suite boundary roots.",
+      "boundaryMapRoutePathMarkers and boundaryMapRouteNameSuffixes replace the built-in route entrypoint detection heuristics.",
+      "boundaryMapApiPathMarkers and boundaryMapApiNameSuffixes replace the built-in API entrypoint detection heuristics.",
       "profileId must exactly match the target scan profile id.",
       `formatVersion must equal ${SCAN_PROFILE_OVERLAY_FORMAT_VERSION}.`,
     ],
     supportedFields: [
       { name: "formatVersion", required: true, description: "Exact overlay schema version for fail-fast validation." },
       { name: "profileId", required: true, description: "Exact target scan profile id, for example code-quality-review." },
+      { name: "name", required: false, description: "Replacement repository-specific profile name." },
+      { name: "description", required: false, description: "Replacement repository-specific profile description." },
+      { name: "instructions", required: false, description: "Replacement ordered scan instructions for this repository." },
       { name: "include", required: false, description: "Additional repository-specific include globs to append to the base profile." },
       { name: "exclude", required: false, description: "Additional repository-specific exclude globs to append to the base profile." },
       { name: "archivePatterns", required: false, description: "Archive-only globs appended to the effective exclude list." },
       { name: "legacyPatterns", required: false, description: "Legacy-only globs appended to the effective exclude list." },
       { name: "generatedPatterns", required: false, description: "Generated-code globs appended to the effective exclude list." },
+      { name: "sourceTypes", required: false, description: "Replacement source type list for this repository." },
+      { name: "criteria", required: false, description: "Replacement criterion list using '- criterion-id: description' entries." },
+      { name: "ssotOrder", required: false, description: "Replacement SSOT precedence order for this repository." },
+      { name: "requiredOutputs", required: false, description: "Replacement required output list for this repository." },
+      { name: "boundaryMapRoots", required: false, description: "Replacement root rules for boundary-map build in path-prefix:boundary-kind format." },
+      { name: "boundaryMapContractPathMarkers", required: false, description: "Replacement path markers treated as contract-like documentation for boundary mapping." },
+      { name: "boundaryMapContractFileStems", required: false, description: "Replacement filename stems treated as contract-like documentation for boundary mapping." },
+      { name: "boundaryMapIgnoredTokens", required: false, description: "Replacement generic token ignore list used when matching docs to boundaries." },
+      { name: "boundaryMapTestDirectoryNames", required: false, description: "Replacement directory-name markers treated as test-suite roots during boundary mapping." },
+      { name: "boundaryMapRoutePathMarkers", required: false, description: "Replacement path markers used to classify route entrypoints during boundary mapping." },
+      { name: "boundaryMapRouteNameSuffixes", required: false, description: "Replacement symbol-name suffixes used to classify route entrypoints during boundary mapping." },
+      { name: "boundaryMapApiPathMarkers", required: false, description: "Replacement path markers used to classify API entrypoints during boundary mapping." },
+      { name: "boundaryMapApiNameSuffixes", required: false, description: "Replacement symbol-name suffixes used to classify API entrypoints during boundary mapping." },
     ],
     baseScope: {
       include: [...profile.scope.include],
@@ -3003,11 +3232,25 @@ function readRepositoryIndexedFileText(filePath: string, chunks: readonly Reposi
 function parseScanProfileOverlayYaml(text: string, overlayPath: string): ScanProfileOverlay {
   const overlay: Partial<ScanProfileOverlay> = {};
   let activeListField:
+    | "instructions"
     | "include"
     | "exclude"
     | "archivePatterns"
     | "legacyPatterns"
     | "generatedPatterns"
+    | "sourceTypes"
+    | "criteria"
+    | "ssotOrder"
+    | "requiredOutputs"
+    | "boundaryMapRoots"
+    | "boundaryMapContractPathMarkers"
+    | "boundaryMapContractFileStems"
+    | "boundaryMapIgnoredTokens"
+    | "boundaryMapTestDirectoryNames"
+    | "boundaryMapRoutePathMarkers"
+    | "boundaryMapRouteNameSuffixes"
+    | "boundaryMapApiPathMarkers"
+    | "boundaryMapApiNameSuffixes"
     | undefined;
 
   for (const [index, rawLine] of text.split(/\r?\n/).entries()) {
@@ -3026,6 +3269,18 @@ function parseScanProfileOverlayYaml(text: string, overlayPath: string): ScanPro
         throw new Error(`Line ${lineNumber} in ${overlayPath} must use '- value' list syntax`);
       }
       const item = parseYamlScalar(trimmed.slice(2), overlayPath, lineNumber);
+      if (activeListField === "criteria") {
+        const nextValue = overlay.criteria ?? [];
+        nextValue.push(parseScanCriterionDefinition(item, overlayPath, lineNumber));
+        overlay.criteria = nextValue;
+        continue;
+      }
+      if (activeListField === "requiredOutputs") {
+        const nextValue = overlay.requiredOutputs ?? [];
+        nextValue.push(parseScanRequiredOutput(item, overlayPath, lineNumber));
+        overlay.requiredOutputs = nextValue;
+        continue;
+      }
       const nextValue = overlay[activeListField] ?? [];
       if (!Array.isArray(nextValue)) {
         throw new Error(`Field ${activeListField} in ${overlayPath} must be a list`);
@@ -3057,17 +3312,43 @@ function parseScanProfileOverlayYaml(text: string, overlayPath: string): ScanPro
         overlay.formatVersion = parsed as ScanProfileOverlay["formatVersion"];
         break;
       }
+      case "name":
+        if (value.length === 0) {
+          throw new Error(`Field name in ${overlayPath} must be an inline scalar`);
+        }
+        overlay.name = parseYamlScalar(value, overlayPath, lineNumber);
+        break;
+      case "description":
+        if (value.length === 0) {
+          throw new Error(`Field description in ${overlayPath} must be an inline scalar`);
+        }
+        overlay.description = parseYamlScalar(value, overlayPath, lineNumber);
+        break;
       case "profileId":
         if (value.length === 0) {
           throw new Error(`Field profileId in ${overlayPath} must be an inline scalar`);
         }
         overlay.profileId = parseYamlScalar(value, overlayPath, lineNumber);
         break;
+      case "instructions":
       case "include":
       case "exclude":
       case "archivePatterns":
       case "legacyPatterns":
       case "generatedPatterns":
+      case "sourceTypes":
+      case "criteria":
+      case "ssotOrder":
+      case "requiredOutputs":
+      case "boundaryMapRoots":
+      case "boundaryMapContractPathMarkers":
+      case "boundaryMapContractFileStems":
+      case "boundaryMapIgnoredTokens":
+      case "boundaryMapTestDirectoryNames":
+      case "boundaryMapRoutePathMarkers":
+      case "boundaryMapRouteNameSuffixes":
+      case "boundaryMapApiPathMarkers":
+      case "boundaryMapApiNameSuffixes":
         if (value.length !== 0) {
           throw new Error(`Field ${key} in ${overlayPath} must use indented '- value' items`);
         }
@@ -3097,6 +3378,30 @@ function parseYamlScalar(value: string, overlayPath: string, lineNumber: number)
     return trimmed.slice(1, -1);
   }
   return trimmed;
+}
+
+function parseScanCriterionDefinition(value: string, overlayPath: string, lineNumber: number): ScanProfile["criteria"][number] {
+  const separatorIndex = value.indexOf(":");
+  if (separatorIndex < 1 || separatorIndex === value.length - 1) {
+    throw new Error(`Line ${lineNumber} in ${overlayPath} criteria entries must use 'criterion-id: description' syntax`);
+  }
+  return {
+    id: value.slice(0, separatorIndex).trim(),
+    description: value.slice(separatorIndex + 1).trim(),
+  };
+}
+
+function parseScanRequiredOutput(value: string, overlayPath: string, lineNumber: number): ScanProfile["requiredOutputs"][number] {
+  if (
+    value !== "document-inventory" &&
+    value !== "concept-map" &&
+    value !== "findings" &&
+    value !== "coverage-report" &&
+    value !== "boundary-map"
+  ) {
+    throw new Error(`Line ${lineNumber} in ${overlayPath} uses unknown required output: ${value}`);
+  }
+  return value;
 }
 
 function stripYamlInlineComment(value: string): string {

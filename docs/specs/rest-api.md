@@ -82,8 +82,10 @@ Repository indexing routes begin with persisted job records only:
 
 Scan routes now start from one explicit completed repository index:
 
-- `POST /workspaces/:workspaceId/scans` starts one scan from `scan.repositoryIndexId`, derives repository provenance and coverage from the selected completed repository index, and returns the resolved profile plus instructions.
+- `POST /workspaces/:workspaceId/scans` starts one scan from `scan.repositoryIndexId`, derives repository provenance and coverage from the selected completed repository index, snapshots the resolved effective profile onto the run, and returns the resolved profile plus instructions.
+- `GET /workspaces/:workspaceId/scans/:scanId/boundary-map` derives one candidate typed `boundaryMap` artifact from the current run coverage plus the selected completed repository index facts.
 - `POST /workspaces/:workspaceId/scans/:scanId/coverage` remains available only for explicit coverage correction or override; it is no longer required in the normal repository-index-backed start flow.
+- `POST /workspaces/:workspaceId/scans/:scanId/complete` accepts `completedAt`, `appliedCriteria`, `declaredOutputs`, and an optional typed `boundaryMap` artifact when `declaredOutputs` includes `boundary-map`. The typed artifact is semantically validated, not only shape-checked.
 
 `GET /workspaces` returns lightweight workspace records for browser selection without loading every semantic graph. Records may include optional discovery metadata such as `slug`, `archived`, and `updatedAt`.
 

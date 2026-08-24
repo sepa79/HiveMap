@@ -5,7 +5,7 @@ import {
   type SemanticGraph,
 } from "@hivemap/graph-core";
 
-export const SCAN_REQUIRED_OUTPUT_VALUES = ["document-inventory", "concept-map", "findings", "coverage-report"] as const;
+export const SCAN_REQUIRED_OUTPUT_VALUES = ["document-inventory", "concept-map", "findings", "coverage-report", "boundary-map"] as const;
 export type ScanRequiredOutput = (typeof SCAN_REQUIRED_OUTPUT_VALUES)[number];
 
 export type ScanCriterion = {
@@ -18,6 +18,7 @@ export type ScanProfile = {
   version: number;
   name: string;
   description: string;
+  overlayStem?: string;
   instructions: string[];
   scope: {
     include: string[];
@@ -35,11 +36,106 @@ export const SCAN_PROFILE_OVERLAY_DIRECTORY = ".hivemap/scan-profiles" as const;
 export type ScanProfileOverlay = {
   formatVersion: typeof SCAN_PROFILE_OVERLAY_FORMAT_VERSION;
   profileId: string;
+  name?: string;
+  description?: string;
+  instructions?: string[];
   include?: string[];
   exclude?: string[];
   archivePatterns?: string[];
   legacyPatterns?: string[];
   generatedPatterns?: string[];
+  sourceTypes?: string[];
+  criteria?: ScanCriterion[];
+  ssotOrder?: string[];
+  requiredOutputs?: ScanRequiredOutput[];
+  boundaryMapRoots?: string[];
+  boundaryMapContractPathMarkers?: string[];
+  boundaryMapContractFileStems?: string[];
+  boundaryMapIgnoredTokens?: string[];
+  boundaryMapTestDirectoryNames?: string[];
+  boundaryMapRoutePathMarkers?: string[];
+  boundaryMapRouteNameSuffixes?: string[];
+  boundaryMapApiPathMarkers?: string[];
+  boundaryMapApiNameSuffixes?: string[];
+};
+
+export type BoundaryMapRootRule = {
+  pathPrefix: string;
+  kind: BoundaryKind;
+};
+
+export type BoundaryMapBuildConfig = {
+  roots: BoundaryMapRootRule[];
+  contractPathMarkers: string[];
+  contractFileStems: string[];
+  ignoredDocTokens: string[];
+  testDirectoryNames: string[];
+  routePathMarkers: string[];
+  routeNameSuffixes: string[];
+  apiPathMarkers: string[];
+  apiNameSuffixes: string[];
+};
+
+const DEFAULT_BOUNDARY_MAP_BUILD_CONFIG: BoundaryMapBuildConfig = {
+  roots: [
+    { pathPrefix: "apps", kind: "surface" },
+    { pathPrefix: "packages", kind: "package" },
+    { pathPrefix: "services", kind: "service" },
+    { pathPrefix: "libs", kind: "library" },
+    { pathPrefix: "libraries", kind: "library" },
+    { pathPrefix: "modules", kind: "module" },
+    { pathPrefix: "components", kind: "module" },
+    { pathPrefix: "features", kind: "module" },
+    { pathPrefix: "domains", kind: "module" },
+    { pathPrefix: "src", kind: "module" },
+    { pathPrefix: "source", kind: "module" },
+    { pathPrefix: "tests", kind: "test-suite" },
+    { pathPrefix: "test", kind: "test-suite" },
+    { pathPrefix: "spec", kind: "test-suite" },
+    { pathPrefix: "specs", kind: "test-suite" },
+    { pathPrefix: "e2e", kind: "test-suite" },
+    { pathPrefix: "integration", kind: "test-suite" },
+    { pathPrefix: "tools", kind: "tool" },
+    { pathPrefix: "tooling", kind: "tool" },
+    { pathPrefix: "scripts", kind: "tool" },
+    { pathPrefix: "bin", kind: "tool" },
+    { pathPrefix: "cli", kind: "tool" },
+  ],
+  contractPathMarkers: ["/contracts/", "/spec/", "/specs/", "/schema/", "/schemas/", "/api/"],
+  contractFileStems: ["readme", "contract", "contracts", "spec", "specs", "schema", "schemas", "api", "openapi"],
+  ignoredDocTokens: [
+    "src",
+    "source",
+    "lib",
+    "libs",
+    "libraries",
+    "app",
+    "apps",
+    "service",
+    "services",
+    "package",
+    "packages",
+    "module",
+    "modules",
+    "feature",
+    "features",
+    "component",
+    "components",
+    "domain",
+    "domains",
+    "docs",
+    "doc",
+    "test",
+    "tests",
+    "spec",
+    "specs",
+    "readme",
+  ],
+  testDirectoryNames: ["test", "tests", "spec", "specs", "e2e", "integration"],
+  routePathMarkers: ["/routes/", "/route/"],
+  routeNameSuffixes: ["route", "router"],
+  apiPathMarkers: ["/api/", "/endpoint/"],
+  apiNameSuffixes: ["api", "endpoint", "controller", "handler"],
 };
 
 export type ScanRepository = {
@@ -66,6 +162,52 @@ export type ScanCoverage = {
   included: string[];
   excluded: ScanCoverageException[];
   failed: ScanCoverageException[];
+};
+
+export const BOUNDARY_KIND_VALUES = ["module", "service", "package", "surface", "library", "test-suite", "tool"] as const;
+export type BoundaryKind = (typeof BOUNDARY_KIND_VALUES)[number];
+
+export const BOUNDARY_ENTRYPOINT_KIND_VALUES = ["api", "event", "cli", "route", "export", "test-harness", "other"] as const;
+export type BoundaryEntrypointKind = (typeof BOUNDARY_ENTRYPOINT_KIND_VALUES)[number];
+
+export const BOUNDARY_RELATION_KIND_VALUES = ["depends-on", "implements", "verifies", "contains", "exposes"] as const;
+export type BoundaryRelationKind = (typeof BOUNDARY_RELATION_KIND_VALUES)[number];
+
+export type BoundaryMapEntrypoint = {
+  id: string;
+  label: string;
+  kind: BoundaryEntrypointKind;
+  filePath?: string;
+  symbolKey?: string;
+  sourceRefs?: ProjectSourceRef[];
+};
+
+export type BoundaryMapBoundary = {
+  id: string;
+  label: string;
+  kind: BoundaryKind;
+  ownedPaths: string[];
+  ownedSymbolKeys: string[];
+  publicEntrypoints: BoundaryMapEntrypoint[];
+  contractSourceRefs: ProjectSourceRef[];
+  testSourceRefs: ProjectSourceRef[];
+  confidence: FindingConfidence;
+  openQuestions?: string[];
+  notes?: string;
+};
+
+export type BoundaryMapRelation = {
+  id: string;
+  fromBoundaryId: string;
+  toBoundaryId: string;
+  kind: BoundaryRelationKind;
+  sourceRefs: ProjectSourceRef[];
+  notes?: string;
+};
+
+export type BoundaryMapArtifact = {
+  boundaries: BoundaryMapBoundary[];
+  relations: BoundaryMapRelation[];
 };
 
 export const FINDING_KIND_VALUES = [
@@ -163,6 +305,7 @@ type ScanRunBase = {
   id: string;
   profileId: string;
   profileVersion: number;
+  effectiveProfile?: ScanProfile;
   repository: ScanRepository;
   actor: ScanActor;
   startedAt: string;
@@ -182,6 +325,7 @@ export type CompletedScanRun = ScanRunBase & {
   completedAt: string;
   graphDigest: string;
   findingEvidence: FindingEvidence[];
+  boundaryMap?: BoundaryMapArtifact;
 };
 
 export type ScanRun = InProgressScanRun | CompletedScanRun;
@@ -251,6 +395,7 @@ export const CODE_QUALITY_PROFILE: ScanProfile = {
   version: 1,
   name: "Code quality review",
   description: "Map implementation boundaries and record code, contract, test, and runtime problems.",
+  overlayStem: "code-quality",
   instructions: [
     "Read repository rules, architecture, and relevant contracts before assessing implementation.",
     "Use the run coverage derived from the selected completed repository index as the bounded code and test inventory for this scan.",
@@ -279,17 +424,15 @@ export const CODE_QUALITY_PROFILE: ScanProfile = {
 
 export const INITIAL_SCAN_PROFILES: ScanProfile[] = [DOCUMENTATION_CONFLICTS_PROFILE, CODE_QUALITY_PROFILE];
 
-export function getScanProfileOverlayFileStem(profileId: string): string {
-  switch (profileId) {
-    case "code-quality-review":
-      return "code-quality";
-    default:
-      return profileId;
+export function getScanProfileOverlayFileStem(profile: Pick<ScanProfile, "id" | "overlayStem"> | string): string {
+  if (typeof profile === "string") {
+    return profile;
   }
+  return profile.overlayStem ?? profile.id;
 }
 
-export function getScanProfileOverlayPath(profileId: string): string {
-  return `${SCAN_PROFILE_OVERLAY_DIRECTORY}/${getScanProfileOverlayFileStem(profileId)}.yaml`;
+export function getScanProfileOverlayPath(profile: Pick<ScanProfile, "id" | "overlayStem"> | string): string {
+  return `${SCAN_PROFILE_OVERLAY_DIRECTORY}/${getScanProfileOverlayFileStem(profile)}.yaml`;
 }
 
 export function validateScanProfile(profile: ScanProfile): void {
@@ -299,6 +442,7 @@ export function validateScanProfile(profile: ScanProfile): void {
   }
   assertNonEmpty("profile.name", profile.name);
   assertNonEmpty("profile.description", profile.description);
+  assertOptionalNonEmpty("profile.overlayStem", profile.overlayStem);
   assertNonEmptyArray("profile.instructions", profile.instructions);
   assertNonEmptyArray("profile.scope.include", profile.scope.include);
   validateStringArray("profile.scope.exclude", profile.scope.exclude);
@@ -328,11 +472,27 @@ export function validateScanProfileOverlay(overlay: ScanProfileOverlay): void {
     throw new ScanValidationError(`scan profile overlay formatVersion must be ${SCAN_PROFILE_OVERLAY_FORMAT_VERSION}`);
   }
   assertNonEmpty("overlay.profileId", overlay.profileId);
+  assertOptionalNonEmpty("overlay.name", overlay.name);
+  assertOptionalNonEmpty("overlay.description", overlay.description);
+  validateOptionalPatternList("overlay.instructions", overlay.instructions);
   validateOptionalPatternList("overlay.include", overlay.include);
   validateOptionalPatternList("overlay.exclude", overlay.exclude);
   validateOptionalPatternList("overlay.archivePatterns", overlay.archivePatterns);
   validateOptionalPatternList("overlay.legacyPatterns", overlay.legacyPatterns);
   validateOptionalPatternList("overlay.generatedPatterns", overlay.generatedPatterns);
+  validateOptionalPatternList("overlay.sourceTypes", overlay.sourceTypes);
+  validateOptionalCriteriaList("overlay.criteria", overlay.criteria);
+  validateOptionalPatternList("overlay.ssotOrder", overlay.ssotOrder);
+  validateOptionalRequiredOutputs("overlay.requiredOutputs", overlay.requiredOutputs);
+  validateOptionalBoundaryRoots("overlay.boundaryMapRoots", overlay.boundaryMapRoots);
+  validateOptionalPatternList("overlay.boundaryMapContractPathMarkers", overlay.boundaryMapContractPathMarkers);
+  validateOptionalPatternList("overlay.boundaryMapContractFileStems", overlay.boundaryMapContractFileStems);
+  validateOptionalPatternList("overlay.boundaryMapIgnoredTokens", overlay.boundaryMapIgnoredTokens);
+  validateOptionalPatternList("overlay.boundaryMapTestDirectoryNames", overlay.boundaryMapTestDirectoryNames);
+  validateOptionalPatternList("overlay.boundaryMapRoutePathMarkers", overlay.boundaryMapRoutePathMarkers);
+  validateOptionalPatternList("overlay.boundaryMapRouteNameSuffixes", overlay.boundaryMapRouteNameSuffixes);
+  validateOptionalPatternList("overlay.boundaryMapApiPathMarkers", overlay.boundaryMapApiPathMarkers);
+  validateOptionalPatternList("overlay.boundaryMapApiNameSuffixes", overlay.boundaryMapApiNameSuffixes);
 }
 
 export function applyScanProfileOverlay(profile: ScanProfile, overlay: ScanProfileOverlay): ScanProfile {
@@ -342,6 +502,9 @@ export function applyScanProfileOverlay(profile: ScanProfile, overlay: ScanProfi
   }
   return {
     ...profile,
+    ...(overlay.name === undefined ? {} : { name: overlay.name }),
+    ...(overlay.description === undefined ? {} : { description: overlay.description }),
+    instructions: [...(overlay.instructions ?? profile.instructions)],
     scope: {
       include: uniqueStable([...profile.scope.include, ...(overlay.include ?? [])]),
       exclude: uniqueStable([
@@ -352,6 +515,28 @@ export function applyScanProfileOverlay(profile: ScanProfile, overlay: ScanProfi
         ...(overlay.generatedPatterns ?? []),
       ]),
     },
+    sourceTypes: [...(overlay.sourceTypes ?? profile.sourceTypes)],
+    criteria: structuredClone(overlay.criteria ?? profile.criteria),
+    ssotOrder: [...(overlay.ssotOrder ?? profile.ssotOrder)],
+    requiredOutputs: [...(overlay.requiredOutputs ?? profile.requiredOutputs)],
+  };
+}
+
+export function createBoundaryMapBuildConfig(overlay?: ScanProfileOverlay): BoundaryMapBuildConfig {
+  if (overlay !== undefined) {
+    validateScanProfileOverlay(overlay);
+  }
+  const rootRules = overlay?.boundaryMapRoots ?? DEFAULT_BOUNDARY_MAP_BUILD_CONFIG.roots.map(serializeBoundaryRootRule);
+  return {
+    roots: rootRules.map((value) => parseBoundaryRootRule(value)),
+    contractPathMarkers: [...(overlay?.boundaryMapContractPathMarkers ?? DEFAULT_BOUNDARY_MAP_BUILD_CONFIG.contractPathMarkers)],
+    contractFileStems: [...(overlay?.boundaryMapContractFileStems ?? DEFAULT_BOUNDARY_MAP_BUILD_CONFIG.contractFileStems)].map((value) => value.toLowerCase()),
+    ignoredDocTokens: [...(overlay?.boundaryMapIgnoredTokens ?? DEFAULT_BOUNDARY_MAP_BUILD_CONFIG.ignoredDocTokens)].map((value) => value.toLowerCase()),
+    testDirectoryNames: [...(overlay?.boundaryMapTestDirectoryNames ?? DEFAULT_BOUNDARY_MAP_BUILD_CONFIG.testDirectoryNames)].map((value) => value.toLowerCase()),
+    routePathMarkers: [...(overlay?.boundaryMapRoutePathMarkers ?? DEFAULT_BOUNDARY_MAP_BUILD_CONFIG.routePathMarkers)].map((value) => value.toLowerCase()),
+    routeNameSuffixes: [...(overlay?.boundaryMapRouteNameSuffixes ?? DEFAULT_BOUNDARY_MAP_BUILD_CONFIG.routeNameSuffixes)].map((value) => value.toLowerCase()),
+    apiPathMarkers: [...(overlay?.boundaryMapApiPathMarkers ?? DEFAULT_BOUNDARY_MAP_BUILD_CONFIG.apiPathMarkers)].map((value) => value.toLowerCase()),
+    apiNameSuffixes: [...(overlay?.boundaryMapApiNameSuffixes ?? DEFAULT_BOUNDARY_MAP_BUILD_CONFIG.apiNameSuffixes)].map((value) => value.toLowerCase()),
   };
 }
 
@@ -370,6 +555,25 @@ export function validateScanCoverage(coverage: ScanCoverage): void {
   validateCoverageExceptions("coverage.failed", coverage.failed, discovered);
   const classified = [...coverage.included, ...coverage.excluded.map((entry) => entry.target), ...coverage.failed.map((entry) => entry.target)];
   assertUnique("coverage classified targets", classified);
+}
+
+export function validateBoundaryMap(boundaryMap: BoundaryMapArtifact): void {
+  if (!Array.isArray(boundaryMap.boundaries) || boundaryMap.boundaries.length === 0) {
+    throw new ScanValidationError("boundaryMap.boundaries must contain at least one boundary");
+  }
+  if (!Array.isArray(boundaryMap.relations)) {
+    throw new ScanValidationError("boundaryMap.relations must be an array");
+  }
+  assertUnique("boundaryMap.boundary ids", boundaryMap.boundaries.map((boundary) => boundary.id));
+  assertUnique("boundaryMap.relation ids", boundaryMap.relations.map((relation) => relation.id));
+
+  const boundaryIds = new Set(boundaryMap.boundaries.map((boundary) => boundary.id));
+  for (const boundary of boundaryMap.boundaries) {
+    validateBoundary(boundary);
+  }
+  for (const relation of boundaryMap.relations) {
+    validateBoundaryRelation(relation, boundaryIds);
+  }
 }
 
 export function createFindingNode(scanId: string, input: FindingNodeInput): GraphNode {
@@ -482,6 +686,11 @@ export function validateScanRun(run: ScanRun, profiles: readonly ScanProfile[], 
   if (!Number.isInteger(run.profileVersion) || run.profileVersion < 1) throw new ScanValidationError("scan.profileVersion must be positive");
   const profile = profiles.find((candidate) => candidate.id === run.profileId && candidate.version === run.profileVersion);
   if (profile === undefined) throw new ScanValidationError(`Scan profile not found: ${run.profileId}@${run.profileVersion}`);
+  const effectiveProfile = run.effectiveProfile ?? profile;
+  validateScanProfile(effectiveProfile);
+  if (effectiveProfile.id !== run.profileId || effectiveProfile.version !== run.profileVersion) {
+    throw new ScanValidationError(`Scan effectiveProfile must match scan profile identity: ${run.profileId}@${run.profileVersion}`);
+  }
   validateRepository(run.repository);
   assertNonEmpty("scan.actor.agentId", run.actor.agentId);
   assertNonEmpty("scan.actor.tool", run.actor.tool);
@@ -493,11 +702,17 @@ export function validateScanRun(run: ScanRun, profiles: readonly ScanProfile[], 
   if (run.status === "in_progress") return;
   assertDate("scan.completedAt", run.completedAt);
   assertNonEmpty("scan.graphDigest", run.graphDigest);
-  for (const criterion of profile.criteria) {
+  for (const criterion of effectiveProfile.criteria) {
     if (!run.appliedCriteria.includes(criterion.id)) throw new ScanValidationError(`Scan did not apply required criterion: ${criterion.id}`);
   }
-  for (const output of profile.requiredOutputs) {
+  for (const output of effectiveProfile.requiredOutputs) {
     if (!run.declaredOutputs.includes(output)) throw new ScanValidationError(`Scan did not declare required output: ${output}`);
+  }
+  if (run.declaredOutputs.includes("boundary-map")) {
+    if (run.boundaryMap === undefined) throw new ScanValidationError("Completed scan declared boundary-map without boundaryMap evidence");
+    validateBoundaryMap(run.boundaryMap);
+  } else if (run.boundaryMap !== undefined) {
+    throw new ScanValidationError("Completed scan boundaryMap requires declared output boundary-map");
   }
   if (run.findingEvidence.length !== run.findingNodeIds.length) throw new ScanValidationError("Completed scan finding evidence count mismatch");
   const evidenceIds = run.findingEvidence.map((evidence) => evidence.nodeId);
@@ -643,6 +858,110 @@ function validateCoverageExceptions(label: string, entries: readonly ScanCoverag
   }
 }
 
+function validateBoundary(boundary: BoundaryMapBoundary): void {
+  assertNonEmpty("boundary.id", boundary.id);
+  assertNonEmpty("boundary.label", boundary.label);
+  if (!BOUNDARY_KIND_VALUES.includes(boundary.kind)) throw new ScanValidationError(`Unknown boundary kind: ${boundary.kind}`);
+  validateStringArray("boundary.ownedPaths", boundary.ownedPaths);
+  validateStringArray("boundary.ownedSymbolKeys", boundary.ownedSymbolKeys);
+  if (boundary.ownedPaths.length === 0 && boundary.ownedSymbolKeys.length === 0 && boundary.publicEntrypoints.length === 0) {
+    throw new ScanValidationError(`Boundary ${boundary.id} must declare owned paths, owned symbols, or public entrypoints`);
+  }
+  for (const entrypoint of boundary.publicEntrypoints) {
+    validateBoundaryEntrypoint(entrypoint);
+  }
+  assertUnique(
+    "boundary.publicEntrypoint ids",
+    boundary.publicEntrypoints.map((entrypoint) => entrypoint.id),
+  );
+  boundary.contractSourceRefs.forEach((sourceRef) => validateBoundaryContractSourceRef(boundary.id, sourceRef));
+  boundary.testSourceRefs.forEach((sourceRef) => validateBoundaryTestSourceRef(boundary.id, sourceRef));
+  if (!FINDING_CONFIDENCE_VALUES.includes(boundary.confidence)) {
+    throw new ScanValidationError(`Unknown boundary confidence: ${boundary.confidence}`);
+  }
+  if (boundary.openQuestions !== undefined) {
+    validateStringArray("boundary.openQuestions", boundary.openQuestions);
+  }
+  assertOptionalNonEmpty("boundary.notes", boundary.notes);
+}
+
+function validateBoundaryEntrypoint(entrypoint: BoundaryMapEntrypoint): void {
+  assertNonEmpty("boundaryEntrypoint.id", entrypoint.id);
+  assertNonEmpty("boundaryEntrypoint.label", entrypoint.label);
+  if (!BOUNDARY_ENTRYPOINT_KIND_VALUES.includes(entrypoint.kind)) {
+    throw new ScanValidationError(`Unknown boundary entrypoint kind: ${entrypoint.kind}`);
+  }
+  assertOptionalNonEmpty("boundaryEntrypoint.filePath", entrypoint.filePath);
+  assertOptionalNonEmpty("boundaryEntrypoint.symbolKey", entrypoint.symbolKey);
+  if (entrypoint.sourceRefs !== undefined) {
+    entrypoint.sourceRefs.forEach(validateProjectSourceRef);
+  }
+  if (entrypoint.filePath === undefined && entrypoint.symbolKey === undefined && (entrypoint.sourceRefs?.length ?? 0) === 0) {
+    throw new ScanValidationError(`Boundary entrypoint ${entrypoint.id} must declare filePath, symbolKey, or sourceRefs`);
+  }
+}
+
+function validateBoundaryRelation(relation: BoundaryMapRelation, boundaryIds: ReadonlySet<string>): void {
+  assertNonEmpty("boundaryRelation.id", relation.id);
+  assertNonEmpty("boundaryRelation.fromBoundaryId", relation.fromBoundaryId);
+  assertNonEmpty("boundaryRelation.toBoundaryId", relation.toBoundaryId);
+  if (!BOUNDARY_RELATION_KIND_VALUES.includes(relation.kind)) {
+    throw new ScanValidationError(`Unknown boundary relation kind: ${relation.kind}`);
+  }
+  if (!boundaryIds.has(relation.fromBoundaryId)) {
+    throw new ScanValidationError(`Boundary relation references missing source boundary: ${relation.fromBoundaryId}`);
+  }
+  if (!boundaryIds.has(relation.toBoundaryId)) {
+    throw new ScanValidationError(`Boundary relation references missing target boundary: ${relation.toBoundaryId}`);
+  }
+  if (relation.sourceRefs.length === 0) {
+    throw new ScanValidationError(`Boundary relation ${relation.id} must contain at least one source reference`);
+  }
+  relation.sourceRefs.forEach((sourceRef) => validateBoundaryRelationSourceRef(relation, sourceRef));
+  assertOptionalNonEmpty("boundaryRelation.notes", relation.notes);
+}
+
+function validateBoundaryContractSourceRef(boundaryId: string, sourceRef: ProjectSourceRef): void {
+  validateProjectSourceRef(sourceRef);
+  if (sourceRef.source !== "repo-doc") {
+    throw new ScanValidationError(`Boundary ${boundaryId} contractSourceRefs must use repo-doc sources`);
+  }
+  if (sourceRef.role !== "defines" && sourceRef.role !== "discusses") {
+    throw new ScanValidationError(`Boundary ${boundaryId} contractSourceRefs must use defines or discusses roles`);
+  }
+}
+
+function validateBoundaryTestSourceRef(boundaryId: string, sourceRef: ProjectSourceRef): void {
+  validateProjectSourceRef(sourceRef);
+  if (sourceRef.source !== "test" || sourceRef.role !== "verifies") {
+    throw new ScanValidationError(`Boundary ${boundaryId} testSourceRefs must use verifies role from test sources`);
+  }
+}
+
+function validateBoundaryRelationSourceRef(relation: BoundaryMapRelation, sourceRef: ProjectSourceRef): void {
+  validateProjectSourceRef(sourceRef);
+  switch (relation.kind) {
+    case "depends-on":
+      if (sourceRef.role !== "depends-on" || sourceRef.source !== "code") {
+        throw new ScanValidationError(`Boundary relation ${relation.id} of kind depends-on requires depends-on role from code sources`);
+      }
+      return;
+    case "implements":
+      if (sourceRef.role !== "implements" || sourceRef.source !== "code") {
+        throw new ScanValidationError(`Boundary relation ${relation.id} of kind implements requires implements role from code sources`);
+      }
+      return;
+    case "verifies":
+      if (sourceRef.role !== "verifies" || sourceRef.source !== "test") {
+        throw new ScanValidationError(`Boundary relation ${relation.id} of kind verifies requires verifies role from test sources`);
+      }
+      return;
+    case "contains":
+    case "exposes":
+      return;
+  }
+}
+
 function assertNonEmptyArray(label: string, values: readonly string[]): void {
   if (values.length === 0) throw new ScanValidationError(`${label} must contain at least one value`);
   validateStringArray(label, values);
@@ -654,9 +973,67 @@ function validateOptionalPatternList(label: string, values: readonly string[] | 
   }
 }
 
+function validateOptionalBoundaryRoots(label: string, values: readonly string[] | undefined): void {
+  if (values === undefined) {
+    return;
+  }
+  validateStringArray(label, values);
+  values.map((value) => parseBoundaryRootRule(value, label));
+}
+
+function validateOptionalCriteriaList(label: string, values: readonly ScanCriterion[] | undefined): void {
+  if (values === undefined) {
+    return;
+  }
+  if (values.length === 0) {
+    throw new ScanValidationError(`${label} must contain at least one value`);
+  }
+  assertUnique(
+    `${label} ids`,
+    values.map((criterion) => criterion.id),
+  );
+  for (const criterion of values) {
+    assertNonEmpty(`${label}.id`, criterion.id);
+    assertNonEmpty(`${label}.description`, criterion.description);
+  }
+}
+
+function validateOptionalRequiredOutputs(label: string, values: readonly ScanRequiredOutput[] | undefined): void {
+  if (values === undefined) {
+    return;
+  }
+  if (values.length === 0) {
+    throw new ScanValidationError(`${label} must contain at least one value`);
+  }
+  assertUnique(label, values);
+  for (const value of values) {
+    if (!SCAN_REQUIRED_OUTPUT_VALUES.includes(value)) {
+      throw new ScanValidationError(`Unknown required output in ${label}: ${value}`);
+    }
+  }
+}
+
 function validateStringArray(label: string, values: readonly string[]): void {
   for (const value of values) assertNonEmpty(label, value);
   assertUnique(label, values);
+}
+
+function parseBoundaryRootRule(value: string, label = "boundaryMapRoot"): BoundaryMapRootRule {
+  const separatorIndex = value.lastIndexOf(":");
+  if (separatorIndex < 1 || separatorIndex === value.length - 1) {
+    throw new ScanValidationError(`${label} must use path-prefix:kind format`);
+  }
+  const pathPrefix = value.slice(0, separatorIndex).trim().replace(/\\/g, "/");
+  const kind = value.slice(separatorIndex + 1).trim();
+  assertNonEmpty(`${label}.pathPrefix`, pathPrefix);
+  if (!BOUNDARY_KIND_VALUES.includes(kind as BoundaryKind)) {
+    throw new ScanValidationError(`Unknown boundary kind in ${label}: ${kind}`);
+  }
+  return { pathPrefix, kind: kind as BoundaryKind };
+}
+
+function serializeBoundaryRootRule(rule: BoundaryMapRootRule): string {
+  return `${rule.pathPrefix}:${rule.kind}`;
 }
 
 function uniqueStable(values: readonly string[]): string[] {

@@ -199,6 +199,60 @@ describe("api server", () => {
     });
   });
 
+  it("builds a candidate boundary map for an in-progress code scan through REST", async () => {
+    await createWorkspace();
+    expect(
+      (
+        await postJson("/workspaces/workspace-a/repository-indexes", {
+          index: {
+            id: "repo-index-boundary",
+            repositoryUrl: "/fixtures/repo",
+            requestedRef: "main",
+            mode: "safe",
+            requestedAt: "2026-08-20T12:00:00.000Z",
+            actor: {
+              agentId: "codex",
+              tool: "mcp",
+            },
+          },
+        })
+      ).status,
+    ).toBe(201);
+    expect((await postJson("/workspaces/workspace-a/repository-indexes/repo-index-boundary/execute", {})).status).toBe(200);
+
+    const scanStartResponse = await postJson("/workspaces/workspace-a/scans", {
+      scan: {
+        id: "scan-boundary",
+        profileId: "code-quality-review",
+        profileVersion: 1,
+        repositoryIndexId: "repo-index-boundary",
+        actor: { agentId: "agent-a", tool: "codex" },
+        startedAt: "2026-08-20T12:10:00.000Z",
+      },
+    });
+    expect(scanStartResponse.status).toBe(201);
+
+    const boundaryMapResponse = await request(handleRequest, "/workspaces/workspace-a/scans/scan-boundary/boundary-map");
+    expect(boundaryMapResponse.status).toBe(200);
+    expect(parseJson(boundaryMapResponse)).toEqual({
+      scanId: "scan-boundary",
+      profileId: "code-quality-review",
+      profileVersion: 1,
+      repositoryIndexId: "repo-index-boundary",
+      coverageSummary: expect.objectContaining({
+        includedCodeFileCount: 1,
+      }),
+      boundaryMap: expect.objectContaining({
+        boundaries: [
+          expect.objectContaining({
+            id: "module:src",
+            ownedPaths: ["src/index.ts"],
+          }),
+        ],
+      }),
+    });
+  });
+
   it("rejects action routes with unexpected extra path segments", async () => {
     await createWorkspace();
     const startResponse = await postJson("/workspaces/workspace-a/repository-indexes", {
