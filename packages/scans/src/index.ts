@@ -500,7 +500,7 @@ export function applyScanProfileOverlay(profile: ScanProfile, overlay: ScanProfi
   if (overlay.profileId !== profile.id) {
     throw new ScanValidationError(`scan profile overlay targets ${overlay.profileId}, expected ${profile.id}`);
   }
-  return {
+  const applied: ScanProfile = {
     ...profile,
     ...(overlay.name === undefined ? {} : { name: overlay.name }),
     ...(overlay.description === undefined ? {} : { description: overlay.description }),
@@ -520,6 +520,8 @@ export function applyScanProfileOverlay(profile: ScanProfile, overlay: ScanProfi
     ssotOrder: [...(overlay.ssotOrder ?? profile.ssotOrder)],
     requiredOutputs: [...(overlay.requiredOutputs ?? profile.requiredOutputs)],
   };
+  validateScanProfile(applied);
+  return applied;
 }
 
 export function createBoundaryMapBuildConfig(overlay?: ScanProfileOverlay): BoundaryMapBuildConfig {

@@ -179,6 +179,32 @@ describe("repository scans", () => {
     });
   });
 
+  it("rejects overlays that produce an invalid effective profile", () => {
+    expect(() =>
+      applyScanProfileOverlay(CODE_QUALITY_PROFILE, {
+        formatVersion: 1,
+        profileId: CODE_QUALITY_PROFILE.id,
+        instructions: [],
+      }),
+    ).toThrow("profile.instructions");
+
+    expect(() =>
+      applyScanProfileOverlay(CODE_QUALITY_PROFILE, {
+        formatVersion: 1,
+        profileId: CODE_QUALITY_PROFILE.id,
+        sourceTypes: [],
+      }),
+    ).toThrow("profile.sourceTypes");
+
+    expect(() =>
+      applyScanProfileOverlay(CODE_QUALITY_PROFILE, {
+        formatVersion: 1,
+        profileId: CODE_QUALITY_PROFILE.id,
+        ssotOrder: [],
+      }),
+    ).toThrow("profile.ssotOrder");
+  });
+
   it("rejects semantically invalid boundary-map evidence", () => {
     expect(() =>
       validateBoundaryMap({
