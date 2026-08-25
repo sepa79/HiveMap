@@ -563,6 +563,7 @@ export type CompleteScanRequest = {
   appliedCriteria: string[];
   declaredOutputs: ScanRequiredOutput[];
   boundaryMap?: BoundaryMapArtifact;
+  calibrationOverrideReason?: string;
 };
 export type CompleteScanResponse = { run: Extract<ScanRun, { status: "completed" }> };
 
@@ -931,6 +932,9 @@ export function validateCompleteScanRequest(request: CompleteScanRequest): void 
   assertDate("completedAt", request.completedAt);
   if (request.appliedCriteria.length === 0) throw new ApiContractValidationError("appliedCriteria must not be empty");
   if (request.declaredOutputs.length === 0) throw new ApiContractValidationError("declaredOutputs must not be empty");
+  if (request.calibrationOverrideReason !== undefined) {
+    assertNonEmpty("calibrationOverrideReason", request.calibrationOverrideReason);
+  }
   if (request.declaredOutputs.includes("boundary-map")) {
     if (request.boundaryMap === undefined) throw new ApiContractValidationError("boundaryMap is required when declaredOutputs includes boundary-map");
     validateBoundaryMap(request.boundaryMap);

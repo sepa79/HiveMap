@@ -48,7 +48,8 @@ const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   scan_record_coverage: "Replace the derived coverage for an in-progress scan only when one explicit full correction is needed.",
   scan_finding_create: "Create a validated finding node with stable fingerprint, source claims, severity, and origin scan evidence.",
   finding_update: "Update an active finding status or severity; resolved status requires explicit resolution evidence.",
-  scan_complete: "Complete a scan only after coverage, every profile criterion, required output, and finding evidence validate.",
+  scan_complete:
+    "Complete a scan only after coverage, every profile criterion, required output, and finding evidence validate. Findings-bearing completion from a non-ready calibration state requires an explicit calibrationOverrideReason.",
   scan_compare: "Compare two completed runs of the same profile and return resolved, open, changed, new, regressed, or unverifiable evidence.",
   workspace_export_zip: "Export a deterministic checksummed .hivemap.zip with canonical workspace state and repeat-scan instructions.",
   workspace_import_zip: "Import a validated .hivemap.zip in explicit new or replace mode without silent merge or id rewriting.",
@@ -313,6 +314,7 @@ export function createHiveMapMcpServer(runtime: HiveMapRuntime): McpServer {
     appliedCriteria: z.array(z.string()),
     declaredOutputs: z.array(z.enum(["document-inventory", "concept-map", "findings", "coverage-report", "boundary-map"])),
     boundaryMap: boundaryMapArtifactSchema.optional(),
+    calibrationOverrideReason: z.string().optional(),
   });
 
   registerTool(server, runtime, "scan_compare", {

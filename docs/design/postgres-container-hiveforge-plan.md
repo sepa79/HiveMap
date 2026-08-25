@@ -1,6 +1,6 @@
 # Postgres, Container, HiveForge Plan
 
-Last updated: 2026-08-24
+Last updated: 2026-08-25
 
 ## Goal
 
@@ -126,14 +126,14 @@ Help an agent reach a correct working model of an unfamiliar repository before i
 
 ### Phase A — Calibration Contract
 
-- [ ] Treat `scan_start` as an explicit calibration-stage response, not only as run creation.
-- [ ] Return clear workflow state for the provisional pass, including calibration checklist, overlay status, coverage summary, and next recommended actions.
+- [x] Treat `scan_start` as an explicit calibration-stage response, not only as run creation.
+- [x] Return clear workflow state for the provisional pass, including calibration checklist, overlay status, coverage summary, and next recommended actions.
 - [ ] Require one explicit decision after the provisional pass: continue, refine overlay, correct coverage, build boundary map, or restart the scan.
-- [ ] Make MCP/API responses distinguish between findings-ready and calibration-not-yet-complete states.
+- [x] Make MCP/API responses distinguish between findings-ready and calibration-not-yet-complete states.
 
 ### Phase B — Repository Understanding Artifacts
 
-- [ ] Treat boundary maps as working understanding artifacts before they become completed-scan evidence.
+- [x] Treat boundary maps as working understanding artifacts before they become completed-scan evidence.
 - [ ] Keep the first artifact set focused on repository topology, candidate boundaries, owned paths/symbols, public entrypoints, contract links, test links, inter-boundary relations, and open questions.
 - [ ] Support code, test, and tool surfaces equally, including file-based CLI/tool entrypoints that are not symbol-exported.
 - [ ] Keep artifact generation fail-fast and repo-overridable when roots, test families, or contract markers do not match the active repository.

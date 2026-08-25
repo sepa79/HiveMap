@@ -372,6 +372,7 @@ CREATE TABLE scan_runs (
   graph_digest TEXT,
   finding_evidence JSONB,
   boundary_map JSONB,
+  calibration_override_reason TEXT,
   PRIMARY KEY (workspace_id, id),
   UNIQUE (workspace_id, ordinal),
   FOREIGN KEY (workspace_id, profile_id, profile_version) REFERENCES scan_profiles(workspace_id, id, version) ON DELETE RESTRICT,
@@ -390,6 +391,7 @@ CREATE TABLE scan_runs (
   CHECK (coverage IS NULL OR jsonb_typeof(coverage) = 'object'),
   CHECK (finding_evidence IS NULL OR jsonb_typeof(finding_evidence) = 'array'),
   CHECK (boundary_map IS NULL OR jsonb_typeof(boundary_map) = 'object'),
+  CHECK (calibration_override_reason IS NULL OR btrim(calibration_override_reason) <> ''),
   CHECK (
     (status = 'in_progress' AND completed_at IS NULL AND graph_digest IS NULL AND finding_evidence IS NULL)
     OR

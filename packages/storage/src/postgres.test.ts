@@ -156,6 +156,7 @@ describeIfPostgres("PostgresHiveMapStore", () => {
         completedAt: "2026-08-24T14:05:00.000Z",
         graphDigest: `${workspaceId}-digest-a`,
         findingEvidence: [],
+        calibrationOverrideReason: "Boundary map is still provisional, but we need a frozen baseline for comparison.",
         boundaryMap: {
           boundaries: [
             {

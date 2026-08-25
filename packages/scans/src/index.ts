@@ -326,6 +326,7 @@ export type CompletedScanRun = ScanRunBase & {
   graphDigest: string;
   findingEvidence: FindingEvidence[];
   boundaryMap?: BoundaryMapArtifact;
+  calibrationOverrideReason?: string;
 };
 
 export type ScanRun = InProgressScanRun | CompletedScanRun;
@@ -715,6 +716,9 @@ export function validateScanRun(run: ScanRun, profiles: readonly ScanProfile[], 
     validateBoundaryMap(run.boundaryMap);
   } else if (run.boundaryMap !== undefined) {
     throw new ScanValidationError("Completed scan boundaryMap requires declared output boundary-map");
+  }
+  if (run.calibrationOverrideReason !== undefined && run.calibrationOverrideReason.trim().length === 0) {
+    throw new ScanValidationError("Completed scan calibrationOverrideReason must be non-empty when present");
   }
   if (run.findingEvidence.length !== run.findingNodeIds.length) throw new ScanValidationError("Completed scan finding evidence count mismatch");
   const evidenceIds = run.findingEvidence.map((evidence) => evidence.nodeId);

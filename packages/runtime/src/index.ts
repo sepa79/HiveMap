@@ -1021,6 +1021,41 @@ export class HiveMapRuntime {
     const state = await this.store.loadWorkspaceState(request.workspaceId);
     const run = findInProgressScan(state, request.scanId);
     if (run.coverage === undefined) throw new RuntimeError(`Scan coverage has not been recorded: ${run.id}`);
+    const repositoryIndexId = run.repository.repositoryIndexId;
+    if (repositoryIndexId === undefined) {
+      throw new RuntimeError(`Scan must reference a completed repository index before completion: ${run.id}`, {
+        code: "SCAN_REPOSITORY_INDEX_REQUIRED",
+        details: { scanId: run.id },
+      });
+    }
+    const repositoryFiles = await this.store.listRepositoryIndexFiles(request.workspaceId, repositoryIndexId);
+    const repositoryChunks = await this.store.listRepositoryIndexChunks(request.workspaceId, repositoryIndexId);
+    const repositorySymbols = await this.store.listRepositoryIndexSymbols(request.workspaceId, repositoryIndexId);
+    const baseProfile = findScanProfile(state, run.profileId, run.profileVersion);
+    const profile = run.effectiveProfile ?? baseProfile;
+    const profileContext = resolveScanProfileContext(baseProfile, repositoryFiles, repositoryChunks, repositorySymbols);
+    const coverageSummary = summarizeRecordedCoverage(run.coverage, repositoryFiles, repositorySymbols);
+    coverageSummary.warnings = createScanCoverageWarnings(profile, coverageSummary, profileContext.overlay);
+    const completionCalibrationAssessment =
+      request.boundaryMap === undefined
+        ? createStartScanCalibrationAssessment(profile, profileContext.overlay, coverageSummary)
+        : createBoundaryMapCalibrationAssessment(coverageSummary, request.boundaryMap);
+    const runCarriesFindings = request.declaredOutputs.includes("findings") || run.findingNodeIds.length > 0;
+    if (runCarriesFindings && completionCalibrationAssessment.classification !== "findings-ready" && request.calibrationOverrideReason === undefined) {
+      throw new RuntimeError(
+        `Scan ${run.id} is not ready for findings-bearing completion under current calibration: ${completionCalibrationAssessment.classification}`,
+        {
+          code: "SCAN_CALIBRATION_NOT_READY",
+          details: {
+            scanId: run.id,
+            classification: completionCalibrationAssessment.classification,
+            summary: completionCalibrationAssessment.summary,
+            reasons: completionCalibrationAssessment.reasons,
+            recommendedActions: completionCalibrationAssessment.recommendedActions,
+          },
+        },
+      );
+    }
     const findingEvidence = run.findingNodeIds.map((nodeId) => toFindingEvidence(findById(state.graph.nodes, nodeId, "Finding node")));
     const completed: CompletedScanRun = {
       ...run,
@@ -1032,6 +1067,7 @@ export class HiveMapRuntime {
       graphDigest: createHash("sha256").update(stableJson(state.graph)).digest("hex"),
       findingEvidence,
       ...(request.boundaryMap === undefined ? {} : { boundaryMap: request.boundaryMap }),
+      ...(request.calibrationOverrideReason === undefined ? {} : { calibrationOverrideReason: request.calibrationOverrideReason }),
     };
     validateScanRun(completed, state.scanProfiles, state.graph);
     await this.store.saveWorkspaceState({ ...state, scanRuns: replaceById(state.scanRuns, completed) });

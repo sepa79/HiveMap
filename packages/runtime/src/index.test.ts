@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { InMemoryHiveMapStore } from "@hivemap/storage";
-import { DOCUMENTATION_CONFLICTS_PROFILE } from "@hivemap/scans";
+import { CODE_QUALITY_PROFILE, DOCUMENTATION_CONFLICTS_PROFILE } from "@hivemap/scans";
 
 import { type EmbeddingProvider, type RepositoryIndexExecutor, HiveMapRuntime, RepositoryIndexExecutionError } from "./index.js";
 
@@ -774,6 +774,72 @@ describe("HiveMapRuntime", () => {
         instructions: expect.arrayContaining([expect.stringContaining("Calibration checkpoint: before creating findings")]),
       }),
     );
+  });
+
+  it("rejects findings-bearing completion while calibration is still ambiguous", async () => {
+    await seedWorkspaceFixture();
+    await ensureCompletedRepositoryIndex("repo-index-calibration-blocked");
+
+    await runtime.startScan({
+      workspaceId: "workspace-a",
+      scan: {
+        id: "scan-calibration-blocked",
+        profileId: "code-quality-review",
+        profileVersion: 1,
+        repositoryIndexId: "repo-index-calibration-blocked",
+        actor: { agentId: "agent-a", tool: "codex" },
+        startedAt: "2026-08-20T18:47:00.000Z",
+      },
+    });
+
+    await expect(
+      runtime.completeScan({
+        workspaceId: "workspace-a",
+        scanId: "scan-calibration-blocked",
+        completedAt: "2026-08-20T18:50:00.000Z",
+        appliedCriteria: CODE_QUALITY_PROFILE.criteria.map((criterion) => criterion.id),
+        declaredOutputs: [...CODE_QUALITY_PROFILE.requiredOutputs],
+      }),
+    ).rejects.toMatchObject({
+      code: "SCAN_CALIBRATION_NOT_READY",
+      details: expect.objectContaining({
+        classification: "ambiguous-shape",
+      }),
+    });
+  });
+
+  it("allows explicit calibration override on findings-bearing completion and persists the reason", async () => {
+    await seedWorkspaceFixture();
+    await ensureCompletedRepositoryIndex("repo-index-calibration-override");
+
+    await runtime.startScan({
+      workspaceId: "workspace-a",
+      scan: {
+        id: "scan-calibration-override",
+        profileId: "code-quality-review",
+        profileVersion: 1,
+        repositoryIndexId: "repo-index-calibration-override",
+        actor: { agentId: "agent-a", tool: "codex" },
+        startedAt: "2026-08-20T18:48:00.000Z",
+      },
+    });
+
+    await expect(
+      runtime.completeScan({
+        workspaceId: "workspace-a",
+        scanId: "scan-calibration-override",
+        completedAt: "2026-08-20T18:51:00.000Z",
+        appliedCriteria: CODE_QUALITY_PROFILE.criteria.map((criterion) => criterion.id),
+        declaredOutputs: [...CODE_QUALITY_PROFILE.requiredOutputs],
+        calibrationOverrideReason: "Freeze a provisional baseline before overlay tuning so the rerun can be compared explicitly.",
+      }),
+    ).resolves.toEqual({
+      run: expect.objectContaining({
+        id: "scan-calibration-override",
+        status: "completed",
+        calibrationOverrideReason: "Freeze a provisional baseline before overlay tuning so the rerun can be compared explicitly.",
+      }),
+    });
   });
 
   it("builds a boundary map with repository-local boundary heuristics from the overlay", async () => {

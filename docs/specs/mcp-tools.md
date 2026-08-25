@@ -86,7 +86,8 @@ Scan flow in the current repository-index-backed phase:
 6. `scan_boundary_map_build({ workspaceId, scanId })` derives one candidate typed `boundaryMap` artifact from the current scan coverage plus the selected completed repository index facts, plus a calibration assessment that classifies whether the structural result now looks findings-ready, profile-misaligned, evidence-poor, or still ambiguous.
 7. If calibration shows that the repository shape is wrong, the caller should refine the repository-local overlay or record one explicit coverage correction, then restart with a new scan id from the same completed repository index rather than forcing findings through the provisional run.
 8. `scan_record_coverage({ workspaceId, scanId, coverage })` remains available only when the caller needs an explicit coverage override or correction.
-9. `scan_complete({ workspaceId, scanId, completedAt, appliedCriteria, declaredOutputs, boundaryMap? })` may carry an optional typed `boundaryMap` artifact, but only when `declaredOutputs` includes `boundary-map`.
+9. `scan_complete({ workspaceId, scanId, completedAt, appliedCriteria, declaredOutputs, boundaryMap?, calibrationOverrideReason? })` may carry an optional typed `boundaryMap` artifact, but only when `declaredOutputs` includes `boundary-map`.
+10. Findings-bearing completion from a non-ready calibration state must fail unless `calibrationOverrideReason` is supplied explicitly.
 
 Overlay discovery rules in the current phase:
 

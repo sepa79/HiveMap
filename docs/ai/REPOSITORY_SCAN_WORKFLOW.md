@@ -66,8 +66,9 @@ Do not create a finding merely because a file changed. Record a bounded semantic
 
 1. Confirm every profile criterion was applied, including criteria that produced zero findings.
 2. Confirm every required output exists.
-3. Call `scan_complete` with the exact criterion and output ids.
-4. Fix incomplete coverage or evidence if HiveMap rejects completion. Do not bypass validation.
+3. If calibration is still not `findings-ready`, either restart after tuning or provide an explicit `calibrationOverrideReason` that explains why freezing the run is still intentional.
+4. Call `scan_complete` with the exact criterion and output ids.
+5. Fix incomplete coverage or evidence if HiveMap rejects completion. Do not bypass validation.
 
 Completion freezes finding evidence and the graph digest for the run. Active finding nodes may later gain acknowledgement or resolution evidence without rewriting the completed baseline.
 

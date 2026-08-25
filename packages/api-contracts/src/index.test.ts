@@ -180,6 +180,19 @@ describe("api contracts", () => {
     ).toThrow("depends-on");
   });
 
+  it("rejects an empty calibration override reason on scan completion", () => {
+    expect(() =>
+      validateCompleteScanRequest({
+        workspaceId: "workspace-a",
+        scanId: "scan-a",
+        completedAt: "2026-08-24T12:00:00.000Z",
+        appliedCriteria: ["contract-drift"],
+        declaredOutputs: ["findings"],
+        calibrationOverrideReason: "  ",
+      }),
+    ).toThrow("calibrationOverrideReason");
+  });
+
   it("rejects empty graph command batches", () => {
     expect(() => validateApplyGraphCommandsRequest({ workspaceId: "workspace-a", commands: [] })).toThrow(
       ApiContractValidationError,

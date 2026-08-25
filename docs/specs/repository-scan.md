@@ -70,6 +70,7 @@ Completion requires:
 - all required outputs to be declared;
 - every declared typed artifact output to carry its matching validated artifact payload;
 - every referenced finding to exist as a valid finding node originating in the run.
+- when a findings-bearing completion still has non-ready calibration, an explicit override reason recorded on the completed run.
 
 Completed runs cannot be modified.
 
@@ -92,6 +93,8 @@ This gate exists to catch profile mismatches early, for example:
 - contract, tool, and test boundaries that are not being linked coherently.
 
 If the preliminary pass shows that the repository shape is wrong, the agent must stop before filing final findings, refine the repository-local overlay or recorded coverage explicitly, and restart the scan from the same completed repository index with a new scan id. Do not silently continue from a mis-scoped preliminary pass into `scan_complete`.
+
+If a findings-bearing run is completed anyway while calibration remains `profile-gap`, `missing-evidence`, or `ambiguous-shape`, the completion must carry one explicit calibration override reason. The override is historical evidence that the run was frozen deliberately despite incomplete calibration; it is not a substitute for repository tuning.
 
 MCP/API integrations should surface this as an explicit confirmation checkpoint between `scan_start` and final findings rather than assuming that derived coverage is automatically good enough on the first attempt.
 

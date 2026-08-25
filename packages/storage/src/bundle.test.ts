@@ -119,6 +119,7 @@ describe("HiveMap ZIP bundle", () => {
           completedAt: "2026-07-17T10:05:00.000Z",
           graphDigest: "deadbeef",
           findingEvidence: [],
+          calibrationOverrideReason: "Freeze the baseline despite incomplete structural calibration.",
         },
       ],
     };
