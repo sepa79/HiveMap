@@ -231,25 +231,97 @@ describe("api server", () => {
       },
     });
     expect(scanStartResponse.status).toBe(201);
+    expect(
+      (
+        await postJson("/workspaces/workspace-a/scans/scan-boundary/calibration-decision", {
+          decision: "build-boundary-map",
+          rationale: "The code scan needs a structural pass before findings.",
+          recordedAt: "2026-08-20T12:10:30.000Z",
+        })
+      ).status,
+    ).toBe(200);
 
     const boundaryMapResponse = await request(handleRequest, "/workspaces/workspace-a/scans/scan-boundary/boundary-map");
     expect(boundaryMapResponse.status).toBe(200);
+    expect(parseJson(boundaryMapResponse)).toEqual(
+      expect.objectContaining({
+        scanId: "scan-boundary",
+        profileId: "code-quality-review",
+        profileVersion: 1,
+        repositoryIndexId: "repo-index-boundary",
+        coverageSummary: expect.objectContaining({
+          includedCodeFileCount: 1,
+        }),
+        boundaryMap: expect.objectContaining({
+          boundaries: [
+            expect.objectContaining({
+              id: "module:src",
+              ownedPaths: ["src/index.ts"],
+            }),
+          ],
+        }),
+        calibrationAssessment: expect.objectContaining({
+          classification: "ambiguous-shape",
+          confidence: "high",
+        }),
+        decisionGuidance: expect.objectContaining({
+          decisionRequired: true,
+          recommendedDecisions: ["build-boundary-map", "refine-overlay", "restart-scan"],
+        }),
+      }),
+    );
+  });
+
+  it("returns 409 when boundary map build skips the explicit calibration decision", async () => {
+    await createWorkspace();
+    expect(
+      (
+        await postJson("/workspaces/workspace-a/repository-indexes", {
+          index: {
+            id: "repo-index-boundary-missing-decision",
+            repositoryUrl: "/fixtures/repo",
+            requestedRef: "main",
+            mode: "safe",
+            requestedAt: "2026-08-20T12:00:00.000Z",
+            actor: {
+              agentId: "codex",
+              tool: "mcp",
+            },
+          },
+        })
+      ).status,
+    ).toBe(201);
+    expect(
+      (await postJson("/workspaces/workspace-a/repository-indexes/repo-index-boundary-missing-decision/execute", {})).status,
+    ).toBe(200);
+
+    const scanStartResponse = await postJson("/workspaces/workspace-a/scans", {
+      scan: {
+        id: "scan-boundary-missing-decision",
+        profileId: "code-quality-review",
+        profileVersion: 1,
+        repositoryIndexId: "repo-index-boundary-missing-decision",
+        actor: { agentId: "agent-a", tool: "codex" },
+        startedAt: "2026-08-20T12:10:00.000Z",
+      },
+    });
+    expect(scanStartResponse.status).toBe(201);
+
+    const boundaryMapResponse = await request(
+      handleRequest,
+      "/workspaces/workspace-a/scans/scan-boundary-missing-decision/boundary-map",
+    );
+    expect(boundaryMapResponse.status).toBe(409);
     expect(parseJson(boundaryMapResponse)).toEqual({
-      scanId: "scan-boundary",
-      profileId: "code-quality-review",
-      profileVersion: 1,
-      repositoryIndexId: "repo-index-boundary",
-      coverageSummary: expect.objectContaining({
-        includedCodeFileCount: 1,
-      }),
-      boundaryMap: expect.objectContaining({
-        boundaries: [
-          expect.objectContaining({
-            id: "module:src",
-            ownedPaths: ["src/index.ts"],
-          }),
-        ],
-      }),
+      error: {
+        code: "SCAN_CALIBRATION_DECISION_REQUIRED",
+        message:
+          "Building a boundary map requires explicit calibration decision build-boundary-map for scan scan-boundary-missing-decision",
+        details: {
+          scanId: "scan-boundary-missing-decision",
+          requiredDecision: "build-boundary-map",
+        },
+      },
     });
   });
 

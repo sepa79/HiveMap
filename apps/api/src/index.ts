@@ -18,6 +18,7 @@ import {
   type ExportWorkspaceRequest,
   type ImportWorkspaceRequest,
   type ListRepositoryIndexesRequest,
+  type RecordScanCalibrationDecisionRequest,
   type RecordScanCoverageRequest,
   type SearchRepositoryIndexRequest,
   type StartScanRequest,
@@ -354,6 +355,18 @@ async function handleRequest(
       method === "POST" &&
       segments[2] === "scans" &&
       segments[3] !== undefined &&
+      segments[4] === "calibration-decision" &&
+      segments.length === 5
+    ) {
+      const body = await readJson<Omit<RecordScanCalibrationDecisionRequest, "workspaceId" | "scanId">>(request);
+      writeJson(response, 200, await runtime.recordScanCalibrationDecision({ workspaceId, scanId: segments[3], ...body }));
+      return;
+    }
+
+    if (
+      method === "POST" &&
+      segments[2] === "scans" &&
+      segments[3] !== undefined &&
       segments[4] === "coverage" &&
       segments.length === 5
     ) {
@@ -624,7 +637,7 @@ function writeError(response: ServerResponse, error: unknown): void {
   }
 
   if (error instanceof RuntimeError) {
-    writeJson(response, 404, { error: { code: error.code, message: error.message, details: error.details } });
+    writeJson(response, mapRuntimeErrorStatus(error), { error: { code: error.code, message: error.message, details: error.details } });
     return;
   }
 
@@ -634,6 +647,37 @@ function writeError(response: ServerResponse, error: unknown): void {
   }
 
   writeJson(response, 500, { error: { code: "UNKNOWN_ERROR", message: "Unknown API error" } });
+}
+
+function mapRuntimeErrorStatus(error: RuntimeError): number {
+  switch (error.code) {
+    case "NODE_NOT_FOUND":
+    case "SIMILARITY_NODE_NOT_FOUND":
+    case "EMBEDDING_CONCEPT_NODE_NOT_FOUND":
+    case "SCAN_CRITERION_NOT_FOUND":
+    case "CONCEPT_EMBEDDING_MISSING":
+      return 404;
+    case "REPOSITORY_INDEX_EXISTS":
+    case "REPOSITORY_INDEX_ALREADY_RUNNING":
+    case "REPOSITORY_INDEX_NOT_COMPLETED":
+    case "SCAN_CALIBRATION_DECISION_REQUIRED":
+    case "SCAN_CALIBRATION_NOT_READY":
+    case "SCAN_COVERAGE_REQUIRED":
+    case "SCAN_REPOSITORY_INDEX_REQUIRED":
+    case "CONCEPT_EMBEDDING_STALE":
+      return 409;
+    case "REPOSITORY_INDEX_MODE_UNAVAILABLE":
+    case "EMBEDDING_MODEL_REF_INVALID":
+    case "OLLAMA_BASE_URL_INVALID":
+    case "OLLAMA_MODEL_INVALID":
+    case "OLLAMA_INPUTS_EMPTY":
+    case "SCAN_PROFILE_OVERLAY_INVALID":
+    case "UNSUPPORTED_EMBEDDING_NODE_TYPE":
+    case "UNSUPPORTED_SIMILARITY_NODE_TYPE":
+      return 400;
+    default:
+      return 500;
+  }
 }
 
 class ApiHttpError extends Error {

@@ -19,12 +19,15 @@ import {
   type Projection,
 } from "@hivemap/projections";
 import {
+  SCAN_CALIBRATION_DECISION_VALUES,
   validateBoundaryMap,
   validateScanCoverage,
   type BoundaryMapArtifact,
   type FindingNodeInput,
   type FindingNodeUpdate,
   type InProgressScanRun,
+  type ScanCalibrationDecision,
+  type ScanCalibrationDecisionRecord,
   type ScanComparison,
   type ScanCoverage,
   type ScanProfile,
@@ -350,6 +353,12 @@ export type ScanCalibrationAssessment = {
   recommendedActions: string[];
 };
 
+export type ScanCalibrationDecisionGuidance = {
+  decisionRequired: true;
+  availableDecisions: ScanCalibrationDecision[];
+  recommendedDecisions: ScanCalibrationDecision[];
+};
+
 export type ListRepositoryEvidenceCandidatesRequest = {
   workspaceId: string;
   indexId: string;
@@ -369,6 +378,7 @@ export type ListRepositoryEvidenceCandidatesResponse = {
   overlay: ScanProfileOverlayResolution;
   coverageSummary: ScanCoverageSummary;
   calibrationAssessment: ScanCalibrationAssessment;
+  decisionGuidance: ScanCalibrationDecisionGuidance;
   candidates: RepositoryEvidenceCandidate[];
 };
 
@@ -384,6 +394,7 @@ export type BuildScanBoundaryMapResponse = {
   repositoryIndexId: string;
   coverageSummary: ScanCoverageSummary;
   calibrationAssessment: ScanCalibrationAssessment;
+  decisionGuidance: ScanCalibrationDecisionGuidance;
   boundaryMap: BoundaryMapArtifact;
 };
 
@@ -544,11 +555,24 @@ export type StartScanResponse = {
   workflowPhase: "calibration";
   calibrationChecklist: string[];
   calibrationAssessment: ScanCalibrationAssessment;
+  decisionGuidance: ScanCalibrationDecisionGuidance;
   instructions: string[];
 };
 
 export type RecordScanCoverageRequest = { workspaceId: string; scanId: string; coverage: ScanCoverage };
 export type RecordScanCoverageResponse = { run: InProgressScanRun };
+
+export type RecordScanCalibrationDecisionRequest = {
+  workspaceId: string;
+  scanId: string;
+  decision: ScanCalibrationDecision;
+  rationale: string;
+  recordedAt: string;
+};
+export type RecordScanCalibrationDecisionResponse = {
+  run: InProgressScanRun;
+  recordedDecision: ScanCalibrationDecisionRecord;
+};
 
 export type CreateScanFindingRequest = { workspaceId: string; scanId: string; finding: FindingNodeInput };
 export type CreateScanFindingResponse = { node: import("@hivemap/graph-core").GraphNode; run: InProgressScanRun };
@@ -610,6 +634,7 @@ export type McpToolName =
   | "scan_list"
   | "scan_start"
   | "scan_record_coverage"
+  | "scan_calibration_decide"
   | "scan_finding_create"
   | "finding_update"
   | "scan_complete"
@@ -647,6 +672,7 @@ export type McpToolRequestMap = {
   scan_list: ListScanRunsRequest;
   scan_start: StartScanRequest;
   scan_record_coverage: RecordScanCoverageRequest;
+  scan_calibration_decide: RecordScanCalibrationDecisionRequest;
   scan_finding_create: CreateScanFindingRequest;
   finding_update: UpdateFindingRequest;
   scan_complete: CompleteScanRequest;
@@ -912,6 +938,17 @@ export function validateRecordScanCoverageRequest(request: RecordScanCoverageReq
   assertNonEmpty("workspaceId", request.workspaceId);
   assertNonEmpty("scanId", request.scanId);
   validateScanCoverage(request.coverage);
+}
+
+export function validateRecordScanCalibrationDecisionRequest(request: RecordScanCalibrationDecisionRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("scanId", request.scanId);
+  assertNonEmpty("decision", request.decision);
+  if (!SCAN_CALIBRATION_DECISION_VALUES.includes(request.decision)) {
+    throw new ApiContractValidationError(`Unknown scan calibration decision: ${request.decision}`);
+  }
+  assertNonEmpty("rationale", request.rationale);
+  assertDate("recordedAt", request.recordedAt);
 }
 
 export function validateCreateScanFindingRequest(request: CreateScanFindingRequest): void {

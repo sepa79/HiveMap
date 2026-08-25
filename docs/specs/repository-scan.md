@@ -82,6 +82,7 @@ Before creating or completing findings, the agent should review:
 
 - effective profile identity, criteria, required outputs, and overlay status from `scan_start`;
 - coverage summary, included inventory shape, and calibration assessment from `scan_start`;
+- decision guidance from `scan_start`, `repository_evidence_candidates`, or `scan_boundary_map_build`;
 - bounded evidence candidates and their calibration assessment for representative criteria when they are available;
 - candidate boundary-map output and its calibration assessment when the scan touches code/test/tool structure or when repository shape is unfamiliar.
 
@@ -97,6 +98,13 @@ If the preliminary pass shows that the repository shape is wrong, the agent must
 If a findings-bearing run is completed anyway while calibration remains `profile-gap`, `missing-evidence`, or `ambiguous-shape`, the completion must carry one explicit calibration override reason. The override is historical evidence that the run was frozen deliberately despite incomplete calibration; it is not a substitute for repository tuning.
 
 MCP/API integrations should surface this as an explicit confirmation checkpoint between `scan_start` and final findings rather than assuming that derived coverage is automatically good enough on the first attempt.
+
+The checkpoint is explicit:
+
+- the caller records one calibration decision on the in-progress run: `continue`, `refine-overlay`, `correct-coverage`, `build-boundary-map`, or `restart-scan`;
+- coverage correction should follow `correct-coverage`;
+- boundary-map build should follow `build-boundary-map`;
+- findings and findings-bearing completion should follow `continue`, unless completion uses an explicit calibration override reason.
 
 The returned calibration assessment should classify the current state as one of:
 

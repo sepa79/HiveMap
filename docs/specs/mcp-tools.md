@@ -29,6 +29,7 @@ Draft MCP surface for agents. MCP is the primary HiveMap agent interface for alp
 - `scan_list`
 - `scan_start`
 - `scan_record_coverage`
+- `scan_calibration_decide`
 - `scan_finding_create`
 - `finding_update`
 - `scan_complete`
@@ -80,14 +81,15 @@ Scan flow in the current repository-index-backed phase:
 
 1. `repository_index_start({ workspaceId, index })` persists one explicit repository-index request.
 2. `repository_index_execute({ workspaceId, indexId })` completes the safe-mode file/chunk index for one exact revision.
-3. `scan_start({ workspaceId, scan: { id, profileId, profileVersion, repositoryIndexId, actor, startedAt } })` starts one scan from that completed index, derives coverage from the effective profile include/exclude rules, snapshots that effective profile onto the run, and returns the base profile, effective profile, overlay status, coverage summary, calibration checklist, calibration assessment, and instructions.
-4. The caller should treat `scan_start` as a calibration checkpoint and review the returned effective profile, overlay status, coverage summary, and calibration assessment before creating findings.
-5. `repository_evidence_candidates(...)` should be called per criterion when the selected profile/rule can use bounded evidence packets instead of raw repository discovery; it also returns a calibration assessment for the current evidence state.
-6. `scan_boundary_map_build({ workspaceId, scanId })` derives one candidate typed `boundaryMap` artifact from the current scan coverage plus the selected completed repository index facts, plus a calibration assessment that classifies whether the structural result now looks findings-ready, profile-misaligned, evidence-poor, or still ambiguous.
-7. If calibration shows that the repository shape is wrong, the caller should refine the repository-local overlay or record one explicit coverage correction, then restart with a new scan id from the same completed repository index rather than forcing findings through the provisional run.
-8. `scan_record_coverage({ workspaceId, scanId, coverage })` remains available only when the caller needs an explicit coverage override or correction.
-9. `scan_complete({ workspaceId, scanId, completedAt, appliedCriteria, declaredOutputs, boundaryMap?, calibrationOverrideReason? })` may carry an optional typed `boundaryMap` artifact, but only when `declaredOutputs` includes `boundary-map`.
-10. Findings-bearing completion from a non-ready calibration state must fail unless `calibrationOverrideReason` is supplied explicitly.
+3. `scan_start({ workspaceId, scan: { id, profileId, profileVersion, repositoryIndexId, actor, startedAt } })` starts one scan from that completed index, derives coverage from the effective profile include/exclude rules, snapshots that effective profile onto the run, and returns the base profile, effective profile, overlay status, coverage summary, calibration checklist, calibration assessment, decision guidance, and instructions.
+4. The caller should treat `scan_start` as a calibration checkpoint and review the returned effective profile, overlay status, coverage summary, calibration assessment, and decision guidance before creating findings.
+5. `repository_evidence_candidates(...)` should be called per criterion when the selected profile/rule can use bounded evidence packets instead of raw repository discovery; it also returns a calibration assessment and decision guidance for the current evidence state.
+6. `scan_calibration_decide({ workspaceId, scanId, decision, rationale, recordedAt })` records one explicit next step for the run: `continue`, `refine-overlay`, `correct-coverage`, `build-boundary-map`, or `restart-scan`.
+7. `scan_boundary_map_build({ workspaceId, scanId })` derives one candidate typed `boundaryMap` artifact from the current scan coverage plus the selected completed repository index facts, plus a calibration assessment and decision guidance for the structural result. The caller should record `build-boundary-map` explicitly before this step.
+8. If calibration shows that the repository shape is wrong, the caller should refine the repository-local overlay or record one explicit coverage correction, then restart with a new scan id from the same completed repository index rather than forcing findings through the provisional run.
+9. `scan_record_coverage({ workspaceId, scanId, coverage })` remains available only when the caller needs an explicit coverage override or correction, and should follow an explicit `correct-coverage` decision.
+10. `scan_complete({ workspaceId, scanId, completedAt, appliedCriteria, declaredOutputs, boundaryMap?, calibrationOverrideReason? })` may carry an optional typed `boundaryMap` artifact, but only when `declaredOutputs` includes `boundary-map`.
+11. Findings-bearing completion requires an explicit prior `continue` decision and still fails from a non-ready calibration state unless `calibrationOverrideReason` is supplied explicitly.
 
 Overlay discovery rules in the current phase:
 

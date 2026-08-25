@@ -371,6 +371,7 @@ function completedRun(id: string, findingEvidence: CompletedScanRun["findingEvid
     appliedCriteria: DOCUMENTATION_CONFLICTS_PROFILE.criteria.map((criterion) => criterion.id),
     declaredOutputs: [...DOCUMENTATION_CONFLICTS_PROFILE.requiredOutputs],
     findingNodeIds: findingEvidence.map((evidence) => evidence.nodeId),
+    calibrationDecisions: [],
     completedAt: "2026-07-17T10:01:00.000Z",
     graphDigest: id,
     findingEvidence,

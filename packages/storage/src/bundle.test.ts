@@ -116,6 +116,7 @@ describe("HiveMap ZIP bundle", () => {
           appliedCriteria: INITIAL_SCAN_PROFILES[0]?.criteria.map((criterion) => criterion.id) ?? [],
           declaredOutputs: [...(INITIAL_SCAN_PROFILES[0]?.requiredOutputs ?? [])],
           findingNodeIds: [],
+          calibrationDecisions: [],
           completedAt: "2026-07-17T10:05:00.000Z",
           graphDigest: "deadbeef",
           findingEvidence: [],

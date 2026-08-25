@@ -46,6 +46,8 @@ const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   scan_start:
     "Start an agent-executed scan from one completed repository index and return a calibration-phase response with derived coverage, effective scan profile, overlay status, coverage warnings, calibration checklist, calibration assessment, and exact completion instructions.",
   scan_record_coverage: "Replace the derived coverage for an in-progress scan only when one explicit full correction is needed.",
+  scan_calibration_decide:
+    "Record one explicit post-calibration decision for an in-progress scan before correcting coverage, building a boundary map, or proceeding into findings.",
   scan_finding_create: "Create a validated finding node with stable fingerprint, source claims, severity, and origin scan evidence.",
   finding_update: "Update an active finding status or severity; resolved status requires explicit resolution evidence.",
   scan_complete:
@@ -293,6 +295,14 @@ export function createHiveMapMcpServer(runtime: HiveMapRuntime): McpServer {
       excluded: z.array(z.object({ target: z.string(), reason: z.string() })),
       failed: z.array(z.object({ target: z.string(), reason: z.string() })),
     }),
+  });
+
+  registerTool(server, runtime, "scan_calibration_decide", {
+    workspaceId: z.string(),
+    scanId: z.string(),
+    decision: z.enum(["continue", "refine-overlay", "correct-coverage", "build-boundary-map", "restart-scan"]),
+    rationale: z.string(),
+    recordedAt: z.string(),
   });
 
   registerTool(server, runtime, "scan_finding_create", {

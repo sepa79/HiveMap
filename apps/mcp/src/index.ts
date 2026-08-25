@@ -29,6 +29,7 @@ import type {
   ImportWorkspaceResponse,
   ListScanProfilesResponse,
   ListScanRunsResponse,
+  RecordScanCalibrationDecisionResponse,
   RecordScanCoverageResponse,
   RefreshConceptEmbeddingResponse,
   StartScanResponse,
@@ -70,6 +71,7 @@ export const HIVEMAP_MCP_TOOL_NAMES: readonly McpToolName[] = [
   "scan_list",
   "scan_start",
   "scan_record_coverage",
+  "scan_calibration_decide",
   "scan_finding_create",
   "finding_update",
   "scan_complete",
@@ -108,6 +110,7 @@ export type McpToolResponseMap = {
   scan_list: ListScanRunsResponse;
   scan_start: StartScanResponse;
   scan_record_coverage: RecordScanCoverageResponse;
+  scan_calibration_decide: RecordScanCalibrationDecisionResponse;
   scan_finding_create: CreateScanFindingResponse;
   finding_update: UpdateFindingResponse;
   scan_complete: CompleteScanResponse;
@@ -232,6 +235,10 @@ async function dispatchMcpTool<T extends McpToolName>(
       return (await runtime.startScan(request as McpToolRequestMap["scan_start"])) as McpToolResponseMap[T];
     case "scan_record_coverage":
       return (await runtime.recordScanCoverage(request as McpToolRequestMap["scan_record_coverage"])) as McpToolResponseMap[T];
+    case "scan_calibration_decide":
+      return (await runtime.recordScanCalibrationDecision(
+        request as McpToolRequestMap["scan_calibration_decide"],
+      )) as McpToolResponseMap[T];
     case "scan_finding_create":
       return (await runtime.createScanFinding(request as McpToolRequestMap["scan_finding_create"])) as McpToolResponseMap[T];
     case "finding_update":

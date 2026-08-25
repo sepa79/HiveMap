@@ -28,6 +28,7 @@ import {
   validateCompareScansRequest,
   validateCompleteScanRequest,
   validateCreateScanFindingRequest,
+  validateRecordScanCalibrationDecisionRequest,
   validateExportWorkspaceRequest,
   validateExportWorkspaceBundleRequest,
   validateImportWorkspaceRequest,
@@ -73,6 +74,7 @@ import {
   type RepositoryEvidenceCandidate,
   type RepositoryEvidenceSource,
   type ScanCalibrationAssessment,
+  type ScanCalibrationDecisionGuidance,
   type ScanCoverageSummary,
   type ScanProfileOverlayResolution,
   type GetWorkspaceResponse,
@@ -107,6 +109,8 @@ import {
   type ListScanProfilesResponse,
   type ListScanRunsRequest,
   type ListScanRunsResponse,
+  type RecordScanCalibrationDecisionRequest,
+  type RecordScanCalibrationDecisionResponse,
   type RecordScanCoverageRequest,
   type RecordScanCoverageResponse,
   type RefreshConceptEmbeddingRequest,
@@ -136,10 +140,13 @@ import {
   createBoundaryMapBuildConfig,
   createFindingNode,
   getScanProfileOverlayPath,
+  SCAN_CALIBRATION_DECISION_VALUES,
   SCAN_PROFILE_OVERLAY_FORMAT_VERSION,
   toFindingEvidence,
   updateFindingNode,
   validateScanRun,
+  type ScanCalibrationDecision,
+  type ScanCalibrationDecisionRecord,
   type ScanCoverage,
   type ScanProfile,
   type ScanProfileOverlay,
@@ -470,6 +477,14 @@ export class HiveMapRuntime {
         profileContext.overlay,
         candidates,
       ),
+      decisionGuidance: createCalibrationDecisionGuidance(
+        createEvidenceCandidatesCalibrationAssessment(
+          request.criterionId,
+          profileContext.coverageSummary,
+          profileContext.overlay,
+          candidates,
+        ),
+      ),
       candidates,
     };
   }
@@ -477,7 +492,8 @@ export class HiveMapRuntime {
   async buildScanBoundaryMap(request: BuildScanBoundaryMapRequest): Promise<BuildScanBoundaryMapResponse> {
     validateBuildScanBoundaryMapRequest(request);
     const state = await this.store.loadWorkspaceState(request.workspaceId);
-    const run = findById(state.scanRuns, request.scanId, "Scan");
+    const run = findInProgressScan(state, request.scanId);
+    requireCalibrationDecision(run, "build-boundary-map", "Building a boundary map");
     if (run.coverage === undefined) {
       throw new RuntimeError(`Scan coverage is required before building a boundary map: ${run.id}`, {
         code: "SCAN_COVERAGE_REQUIRED",
@@ -523,6 +539,7 @@ export class HiveMapRuntime {
         repositoryIndexId,
         coverageSummary,
         calibrationAssessment: createBoundaryMapCalibrationAssessment(coverageSummary, boundaryMap),
+        decisionGuidance: createCalibrationDecisionGuidance(createBoundaryMapCalibrationAssessment(coverageSummary, boundaryMap)),
         boundaryMap,
       };
     } catch (error) {
@@ -938,6 +955,7 @@ export class HiveMapRuntime {
       appliedCriteria: [],
       declaredOutputs: [],
       findingNodeIds: [],
+      calibrationDecisions: [],
     };
     validateScanRun(run, state.scanProfiles, state.graph);
     await this.store.saveWorkspaceState({ ...state, scanRuns: [...state.scanRuns, run] });
@@ -958,14 +976,42 @@ export class HiveMapRuntime {
         profileContext.overlay,
         profileContext.coverageSummary,
       ),
+      decisionGuidance: createCalibrationDecisionGuidance(
+        createStartScanCalibrationAssessment(
+          profileContext.effectiveProfile,
+          profileContext.overlay,
+          profileContext.coverageSummary,
+        ),
+      ),
       instructions: createScanInstructions(profileContext.effectiveProfile, run, profileContext.overlay, profileContext.coverageSummary),
     };
+  }
+
+  async recordScanCalibrationDecision(
+    request: RecordScanCalibrationDecisionRequest,
+  ): Promise<RecordScanCalibrationDecisionResponse> {
+    validateRecordScanCalibrationDecisionRequest(request);
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
+    const run = findInProgressScan(state, request.scanId);
+    const recordedDecision: ScanCalibrationDecisionRecord = {
+      decision: request.decision,
+      rationale: request.rationale,
+      recordedAt: request.recordedAt,
+    };
+    const updated: InProgressScanRun = {
+      ...run,
+      calibrationDecisions: [...run.calibrationDecisions, recordedDecision],
+    };
+    validateScanRun(updated, state.scanProfiles, state.graph);
+    await this.store.saveWorkspaceState({ ...state, scanRuns: replaceById(state.scanRuns, updated) });
+    return { run: updated, recordedDecision };
   }
 
   async recordScanCoverage(request: RecordScanCoverageRequest): Promise<RecordScanCoverageResponse> {
     validateRecordScanCoverageRequest(request);
     const state = await this.store.loadWorkspaceState(request.workspaceId);
     const run = findInProgressScan(state, request.scanId);
+    requireCalibrationDecision(run, "correct-coverage", "Recording corrected scan coverage");
     const updated: InProgressScanRun = { ...run, coverage: request.coverage };
     validateScanRun(updated, state.scanProfiles, state.graph);
     await this.store.saveWorkspaceState({ ...state, scanRuns: replaceById(state.scanRuns, updated) });
@@ -979,6 +1025,7 @@ export class HiveMapRuntime {
       throw new RuntimeError(`scan_finding_create requires delegated capture; current mode is ${state.capturePolicy.mode}`);
     }
     const run = findInProgressScan(state, request.scanId);
+    requireCalibrationDecision(run, "continue", "Creating scan findings");
     const profile = run.effectiveProfile ?? findScanProfile(state, run.profileId, run.profileVersion);
     for (const criterionId of request.finding.criterionIds) {
       if (!profile.criteria.some((criterion) => criterion.id === criterionId)) {
@@ -1041,6 +1088,9 @@ export class HiveMapRuntime {
         ? createStartScanCalibrationAssessment(profile, profileContext.overlay, coverageSummary)
         : createBoundaryMapCalibrationAssessment(coverageSummary, request.boundaryMap);
     const runCarriesFindings = request.declaredOutputs.includes("findings") || run.findingNodeIds.length > 0;
+    if (runCarriesFindings && request.calibrationOverrideReason === undefined) {
+      requireCalibrationDecision(run, "continue", "Completing a findings-bearing scan");
+    }
     if (runCarriesFindings && completionCalibrationAssessment.classification !== "findings-ready" && request.calibrationOverrideReason === undefined) {
       throw new RuntimeError(
         `Scan ${run.id} is not ready for findings-bearing completion under current calibration: ${completionCalibrationAssessment.classification}`,
@@ -3120,6 +3170,30 @@ function findInProgressScan(state: WorkspaceState, scanId: string): InProgressSc
   return run;
 }
 
+function requireCalibrationDecision(
+  run: InProgressScanRun,
+  expectedDecision: ScanCalibrationDecision,
+  actionLabel: string,
+): void {
+  const latestDecision = run.calibrationDecisions[run.calibrationDecisions.length - 1];
+  if (latestDecision?.decision === expectedDecision) {
+    return;
+  }
+  throw new RuntimeError(`${actionLabel} requires explicit calibration decision ${expectedDecision} for scan ${run.id}`, {
+    code: "SCAN_CALIBRATION_DECISION_REQUIRED",
+    details: {
+      scanId: run.id,
+      requiredDecision: expectedDecision,
+      ...(latestDecision === undefined
+        ? {}
+        : {
+            latestDecision: latestDecision.decision,
+            latestDecisionRecordedAt: latestDecision.recordedAt,
+          }),
+    },
+  });
+}
+
 function findCompletedScan(state: WorkspaceState, scanId: string): CompletedScanRun {
   const run = findById(state.scanRuns, scanId, "Scan");
   if (run.status !== "completed") throw new RuntimeError(`Scan is not completed: ${scanId}`);
@@ -3268,6 +3342,7 @@ function createScanInstructions(
     `Coverage was derived from include patterns: ${profile.scope.include.join(", ")}.`,
     `Coverage excludes sources matching: ${profile.scope.exclude.join(", ")}.`,
     ...coverageSummary.warnings.map((warning: string) => `Coverage warning: ${warning}`),
+    `Record one explicit calibration decision before advancing the run: continue, refine-overlay, correct-coverage, build-boundary-map, or restart-scan.`,
     `Apply every criterion: ${profile.criteria.map((criterion) => criterion.id).join(", ")}.`,
     `Declare outputs: ${profile.requiredOutputs.join(", ")}.`,
   ];
@@ -3284,9 +3359,39 @@ function createScanCalibrationChecklist(
       ? `Confirm the repository-local overlay at ${overlay.overlayPath} is intended for this repository shape.`
       : `Confirm that built-in defaults are acceptable because no repository-local overlay exists at ${overlay.overlayPath}.`,
     `Confirm included inventory shape before findings: ${coverageSummary.includedCount} included out of ${coverageSummary.discoveredCount} discovered sources.`,
+    `Record one explicit calibration decision before coverage correction, boundary mapping, or findings.`,
     `If code/test/tool boundaries are unclear, build a boundary map before creating findings.`,
     `If calibration is wrong, refine the repository-local overlay or record one explicit coverage correction and restart the scan instead of forcing findings.`,
   ];
+}
+
+function createCalibrationDecisionGuidance(assessment: ScanCalibrationAssessment): ScanCalibrationDecisionGuidance {
+  switch (assessment.classification) {
+    case "findings-ready":
+      return {
+        decisionRequired: true,
+        availableDecisions: [...SCAN_CALIBRATION_DECISION_VALUES],
+        recommendedDecisions: ["continue"],
+      };
+    case "profile-gap":
+      return {
+        decisionRequired: true,
+        availableDecisions: [...SCAN_CALIBRATION_DECISION_VALUES],
+        recommendedDecisions: ["refine-overlay", "correct-coverage", "restart-scan"],
+      };
+    case "missing-evidence":
+      return {
+        decisionRequired: true,
+        availableDecisions: [...SCAN_CALIBRATION_DECISION_VALUES],
+        recommendedDecisions: ["continue", "build-boundary-map", "restart-scan"],
+      };
+    case "ambiguous-shape":
+      return {
+        decisionRequired: true,
+        availableDecisions: [...SCAN_CALIBRATION_DECISION_VALUES],
+        recommendedDecisions: ["build-boundary-map", "refine-overlay", "restart-scan"],
+      };
+  }
 }
 
 const MISSING_CONTRACT_DOC_QUESTION = "No contract-local documentation matched this boundary under current scan coverage.";

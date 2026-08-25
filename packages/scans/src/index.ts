@@ -301,6 +301,21 @@ export type FindingEvidence = {
   finding: FindingMetadata;
 };
 
+export const SCAN_CALIBRATION_DECISION_VALUES = [
+  "continue",
+  "refine-overlay",
+  "correct-coverage",
+  "build-boundary-map",
+  "restart-scan",
+] as const;
+export type ScanCalibrationDecision = (typeof SCAN_CALIBRATION_DECISION_VALUES)[number];
+
+export type ScanCalibrationDecisionRecord = {
+  decision: ScanCalibrationDecision;
+  rationale: string;
+  recordedAt: string;
+};
+
 type ScanRunBase = {
   id: string;
   profileId: string;
@@ -313,6 +328,7 @@ type ScanRunBase = {
   appliedCriteria: string[];
   declaredOutputs: ScanRequiredOutput[];
   findingNodeIds: string[];
+  calibrationDecisions: ScanCalibrationDecisionRecord[];
 };
 
 export type InProgressScanRun = ScanRunBase & {
@@ -701,6 +717,9 @@ export function validateScanRun(run: ScanRun, profiles: readonly ScanProfile[], 
   assertUnique("scan.appliedCriteria", run.appliedCriteria);
   assertUnique("scan.declaredOutputs", run.declaredOutputs);
   assertUnique("scan.findingNodeIds", run.findingNodeIds);
+  for (const decision of run.calibrationDecisions) {
+    validateScanCalibrationDecisionRecord(decision);
+  }
   if (run.coverage !== undefined) validateScanCoverage(run.coverage);
   if (run.status === "in_progress") return;
   assertDate("scan.completedAt", run.completedAt);
@@ -840,6 +859,14 @@ function stableFindingContent(evidence: FindingEvidence): string {
     expectedOwner: evidence.finding.expectedOwner,
     recommendedAction: evidence.finding.recommendedAction,
   });
+}
+
+function validateScanCalibrationDecisionRecord(decision: ScanCalibrationDecisionRecord): void {
+  if (!SCAN_CALIBRATION_DECISION_VALUES.includes(decision.decision)) {
+    throw new ScanValidationError(`Unknown scan calibration decision: ${decision.decision}`);
+  }
+  assertNonEmpty("scanCalibrationDecision.rationale", decision.rationale);
+  assertDate("scanCalibrationDecision.recordedAt", decision.recordedAt);
 }
 
 function severityRank(severity: FindingSeverity): number {

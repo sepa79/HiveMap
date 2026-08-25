@@ -664,6 +664,13 @@ describe("HiveMapRuntime", () => {
         startedAt: "2026-08-20T18:46:00.000Z",
       },
     });
+    await structuralRuntime.recordScanCalibrationDecision({
+      workspaceId: "workspace-a",
+      scanId: "scan-boundary-map",
+      decision: "build-boundary-map",
+      rationale: "The provisional pass needs an explicit structural read before findings.",
+      recordedAt: "2026-08-20T18:46:30.000Z",
+    });
 
     await expect(structuralRuntime.buildScanBoundaryMap({ workspaceId: "workspace-a", scanId: "scan-boundary-map" })).resolves.toEqual(
       expect.objectContaining({
@@ -771,6 +778,10 @@ describe("HiveMapRuntime", () => {
           classification: "findings-ready",
           confidence: "medium",
         }),
+        decisionGuidance: expect.objectContaining({
+          decisionRequired: true,
+          recommendedDecisions: ["continue"],
+        }),
         instructions: expect.arrayContaining([expect.stringContaining("Calibration checkpoint: before creating findings")]),
       }),
     );
@@ -790,6 +801,13 @@ describe("HiveMapRuntime", () => {
         actor: { agentId: "agent-a", tool: "codex" },
         startedAt: "2026-08-20T18:47:00.000Z",
       },
+    });
+    await runtime.recordScanCalibrationDecision({
+      workspaceId: "workspace-a",
+      scanId: "scan-calibration-blocked",
+      decision: "continue",
+      rationale: "Proceeding to completion check to verify the calibration guard.",
+      recordedAt: "2026-08-20T18:48:00.000Z",
     });
 
     await expect(
@@ -878,6 +896,13 @@ describe("HiveMapRuntime", () => {
         startedAt: "2026-08-20T19:06:00.000Z",
       },
     });
+    await overlayRuntime.recordScanCalibrationDecision({
+      workspaceId: "workspace-a",
+      scanId: "scan-overlay-boundary-map",
+      decision: "build-boundary-map",
+      rationale: "Overlay-backed code scan still needs a structural pass.",
+      recordedAt: "2026-08-20T19:06:30.000Z",
+    });
 
     const response = await overlayRuntime.buildScanBoundaryMap({ workspaceId: "workspace-a", scanId: "scan-overlay-boundary-map" });
 
@@ -939,6 +964,13 @@ describe("HiveMapRuntime", () => {
         actor: { agentId: "agent-a", tool: "codex" },
         startedAt: "2026-08-20T19:11:00.000Z",
       },
+    });
+    await overlayRuntime.recordScanCalibrationDecision({
+      workspaceId: "workspace-a",
+      scanId: "scan-unmapped-boundary-map",
+      decision: "build-boundary-map",
+      rationale: "The scan needs a boundary pass to surface the unmapped roots cleanly.",
+      recordedAt: "2026-08-20T19:11:30.000Z",
     });
 
     await expect(
@@ -1747,10 +1779,24 @@ describe("HiveMapRuntime", () => {
       commands: [{ id: "concept-a", type: "node.create", payload: { node: { id: "concept-a", label: "Ownership", type: "concept" } } }],
     });
     await startDocumentationScan("scan-before", "repo-index-scan");
+    await runtime.recordScanCalibrationDecision({
+      workspaceId: "workspace-a",
+      scanId: "scan-before",
+      decision: "correct-coverage",
+      rationale: "This regression test uses explicit coverage fixtures instead of derived coverage.",
+      recordedAt: "2026-07-17T10:01:00.000Z",
+    });
     await runtime.recordScanCoverage({
       workspaceId: "workspace-a",
       scanId: "scan-before",
       coverage: { discovered: ["docs/a.md", "docs/b.md"], included: ["docs/a.md", "docs/b.md"], excluded: [], failed: [] },
+    });
+    await runtime.recordScanCalibrationDecision({
+      workspaceId: "workspace-a",
+      scanId: "scan-before",
+      decision: "continue",
+      rationale: "Coverage is now explicit and the scan can proceed into findings.",
+      recordedAt: "2026-07-17T10:02:00.000Z",
     });
     await runtime.createScanFinding({
       workspaceId: "workspace-a",
@@ -1775,6 +1821,13 @@ describe("HiveMapRuntime", () => {
     await completeDocumentationScan("scan-before");
 
     await startDocumentationScan("scan-after", "repo-index-scan");
+    await runtime.recordScanCalibrationDecision({
+      workspaceId: "workspace-a",
+      scanId: "scan-after",
+      decision: "correct-coverage",
+      rationale: "This regression test uses explicit coverage fixtures instead of derived coverage.",
+      recordedAt: "2026-07-17T10:06:00.000Z",
+    });
     await runtime.recordScanCoverage({
       workspaceId: "workspace-a",
       scanId: "scan-after",
@@ -1923,6 +1976,13 @@ async function ensureCompletedRepositoryIndex(indexId: string): Promise<void> {
 }
 
 async function completeDocumentationScan(id: string): Promise<void> {
+  await runtime.recordScanCalibrationDecision({
+    workspaceId: "workspace-a",
+    scanId: id,
+    decision: "continue",
+    rationale: "Documentation scan is calibrated enough to freeze bounded findings evidence.",
+    recordedAt: "2026-07-17T10:04:00.000Z",
+  });
   await runtime.completeScan({
     workspaceId: "workspace-a",
     scanId: id,

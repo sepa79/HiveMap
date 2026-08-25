@@ -128,7 +128,7 @@ Help an agent reach a correct working model of an unfamiliar repository before i
 
 - [x] Treat `scan_start` as an explicit calibration-stage response, not only as run creation.
 - [x] Return clear workflow state for the provisional pass, including calibration checklist, overlay status, coverage summary, and next recommended actions.
-- [ ] Require one explicit decision after the provisional pass: continue, refine overlay, correct coverage, build boundary map, or restart the scan.
+- [x] Require one explicit decision after the provisional pass: continue, refine overlay, correct coverage, build boundary map, or restart the scan.
 - [x] Make MCP/API responses distinguish between findings-ready and calibration-not-yet-complete states.
 
 ### Phase B — Repository Understanding Artifacts

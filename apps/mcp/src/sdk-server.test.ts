@@ -66,6 +66,7 @@ describe("HiveMap MCP SDK server", () => {
       "scan_list",
       "scan_start",
       "scan_record_coverage",
+      "scan_calibration_decide",
       "scan_finding_create",
       "finding_update",
       "scan_complete",
@@ -289,6 +290,32 @@ describe("HiveMap MCP SDK server", () => {
         calibrationAssessment: expect.objectContaining({
           classification: "ambiguous-shape",
         }),
+        decisionGuidance: expect.objectContaining({
+          decisionRequired: true,
+          recommendedDecisions: ["build-boundary-map", "refine-overlay", "restart-scan"],
+        }),
+      }),
+    });
+
+    const calibrationDecisionResult = await client.callTool({
+      name: "scan_calibration_decide",
+      arguments: {
+        workspaceId: "workspace-a",
+        scanId: "scan-boundary",
+        decision: "build-boundary-map",
+        rationale: "The code scan needs a structural pass before findings.",
+        recordedAt: "2026-08-20T12:10:30.000Z",
+      },
+    });
+    expect(calibrationDecisionResult.structuredContent).toEqual({
+      ok: true,
+      tool: "scan_calibration_decide",
+      value: expect.objectContaining({
+        recordedDecision: {
+          decision: "build-boundary-map",
+          rationale: "The code scan needs a structural pass before findings.",
+          recordedAt: "2026-08-20T12:10:30.000Z",
+        },
       }),
     });
 

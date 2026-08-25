@@ -49,6 +49,7 @@ describe("MCP tool adapter", () => {
       "scan_list",
       "scan_start",
       "scan_record_coverage",
+      "scan_calibration_decide",
       "scan_finding_create",
       "finding_update",
       "scan_complete",
@@ -586,6 +587,12 @@ describe("MCP tool adapter", () => {
           confidence: "medium",
         }),
       );
+      expect(result.value.decisionGuidance).toEqual(
+        expect.objectContaining({
+          decisionRequired: true,
+          recommendedDecisions: ["continue"],
+        }),
+      );
       expect(result.value.run.repository).toMatchObject({
         repositoryIndexId: "repo-index-scan",
         root: "index:repo-index-scan",
@@ -616,6 +623,13 @@ describe("MCP tool adapter", () => {
         actor: { agentId: "agent-a", tool: "codex" },
         startedAt: "2026-08-20T12:10:00.000Z",
       },
+    });
+    await handleMcpTool(runtime, "scan_calibration_decide", {
+      workspaceId: "workspace-a",
+      scanId: "scan-boundary",
+      decision: "build-boundary-map",
+      rationale: "The code scan needs a structural pass before findings.",
+      recordedAt: "2026-08-20T12:10:30.000Z",
     });
 
     await expect(handleMcpTool(runtime, "scan_boundary_map_build", { workspaceId: "workspace-a", scanId: "scan-boundary" })).resolves.toEqual({

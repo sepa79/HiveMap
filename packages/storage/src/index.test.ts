@@ -134,6 +134,7 @@ describe("InMemoryHiveMapStore", () => {
         appliedCriteria: ["duplicate-responsibility"],
         declaredOutputs: ["findings", "boundary-map"],
         findingNodeIds: [],
+        calibrationDecisions: [],
         completedAt: "2026-08-24T14:05:00.000Z",
         graphDigest: "digest-a",
         findingEvidence: [],

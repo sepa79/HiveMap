@@ -778,6 +778,11 @@ export class PostgresHiveMapStore implements HiveMapStore {
         schemaVersion = "14";
       }
 
+      if (schemaVersion === "14") {
+        await client.query(POSTGRES_V14_TO_V15_SQL);
+        schemaVersion = "15";
+      }
+
       if (schemaVersion !== POSTGRES_STORAGE_SCHEMA_VERSION) {
         throw new StorageError(`Unsupported Postgres storage schema version: ${schemaVersion}`);
       }
@@ -1737,7 +1742,7 @@ export class PostgresHiveMapStore implements HiveMapStore {
   private async replaceScanRuns(client: PoolClient, workspaceId: string, runs: readonly ScanRun[]): Promise<void> {
     for (const [ordinal, run] of runs.entries()) {
       await client.query(
-        "INSERT INTO scan_runs (workspace_id, id, ordinal, profile_id, profile_version, effective_profile, status, repository_index_id, repository_root, repository_url, repository_branch, repository_revision, repository_worktree_digest, actor_agent_id, actor_tool, started_at, coverage, applied_criteria, declared_outputs, finding_node_ids, completed_at, graph_digest, finding_evidence, boundary_map, calibration_override_reason) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)",
+        "INSERT INTO scan_runs (workspace_id, id, ordinal, profile_id, profile_version, effective_profile, status, repository_index_id, repository_root, repository_url, repository_branch, repository_revision, repository_worktree_digest, actor_agent_id, actor_tool, started_at, coverage, applied_criteria, declared_outputs, finding_node_ids, calibration_decisions, completed_at, graph_digest, finding_evidence, boundary_map, calibration_override_reason) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)",
         [
           workspaceId,
           run.id,
@@ -1759,6 +1764,7 @@ export class PostgresHiveMapStore implements HiveMapStore {
           run.appliedCriteria,
           run.declaredOutputs,
           run.findingNodeIds,
+          JSON.stringify(run.calibrationDecisions),
           run.status === "completed" ? run.completedAt : null,
           run.status === "completed" ? run.graphDigest : null,
           run.status === "completed" ? JSON.stringify(run.findingEvidence) : null,
@@ -1790,13 +1796,14 @@ export class PostgresHiveMapStore implements HiveMapStore {
         applied_criteria: string[];
         declared_outputs: ScanProfile["requiredOutputs"];
         finding_node_ids: string[];
+        calibration_decisions_json: string;
         completed_at: NullableString;
         graph_digest: NullableString;
         finding_evidence_json: NullableString;
         boundary_map_json: NullableString;
         calibration_override_reason: NullableString;
       }>(
-        "SELECT id, profile_id, profile_version, effective_profile::text AS effective_profile_json, status, repository_index_id, repository_root, repository_url, repository_branch, repository_revision, repository_worktree_digest, actor_agent_id, actor_tool, started_at::text AS started_at, coverage::text AS coverage_json, applied_criteria, declared_outputs::text[] AS declared_outputs, finding_node_ids, completed_at::text AS completed_at, graph_digest, finding_evidence::text AS finding_evidence_json, boundary_map::text AS boundary_map_json, calibration_override_reason FROM scan_runs WHERE workspace_id = $1 ORDER BY ordinal",
+        "SELECT id, profile_id, profile_version, effective_profile::text AS effective_profile_json, status, repository_index_id, repository_root, repository_url, repository_branch, repository_revision, repository_worktree_digest, actor_agent_id, actor_tool, started_at::text AS started_at, coverage::text AS coverage_json, applied_criteria, declared_outputs::text[] AS declared_outputs, finding_node_ids, calibration_decisions::text AS calibration_decisions_json, completed_at::text AS completed_at, graph_digest, finding_evidence::text AS finding_evidence_json, boundary_map::text AS boundary_map_json, calibration_override_reason FROM scan_runs WHERE workspace_id = $1 ORDER BY ordinal",
         [workspaceId],
       )
     ).rows;
@@ -1825,6 +1832,7 @@ export class PostgresHiveMapStore implements HiveMapStore {
         appliedCriteria: row.applied_criteria,
         declaredOutputs: row.declared_outputs,
         findingNodeIds: row.finding_node_ids,
+        calibrationDecisions: parseJson<ScanRun["calibrationDecisions"]>(row.calibration_decisions_json),
         ...(row.coverage_json === null ? {} : { coverage: parseJson<NonNullable<ScanRun["coverage"]>>(row.coverage_json) }),
       };
 
@@ -2856,6 +2864,7 @@ CREATE TABLE IF NOT EXISTS scan_runs (
   applied_criteria TEXT[] NOT NULL,
   declared_outputs scan_required_output[] NOT NULL,
   finding_node_ids TEXT[] NOT NULL,
+  calibration_decisions JSONB NOT NULL DEFAULT '[]'::jsonb,
   completed_at TIMESTAMPTZ,
   graph_digest TEXT,
   finding_evidence JSONB,
@@ -2877,6 +2886,7 @@ CREATE TABLE IF NOT EXISTS scan_runs (
   CHECK (btrim(actor_tool) <> ''),
   CHECK (effective_profile IS NULL OR jsonb_typeof(effective_profile) = 'object'),
   CHECK (coverage IS NULL OR jsonb_typeof(coverage) = 'object'),
+  CHECK (jsonb_typeof(calibration_decisions) = 'array'),
   CHECK (finding_evidence IS NULL OR jsonb_typeof(finding_evidence) = 'array'),
   CHECK (boundary_map IS NULL OR jsonb_typeof(boundary_map) = 'object'),
   CHECK (calibration_override_reason IS NULL OR btrim(calibration_override_reason) <> ''),
@@ -3527,6 +3537,26 @@ BEGIN
     ALTER TABLE scan_runs
       ADD CONSTRAINT scan_runs_calibration_override_reason_non_empty_chk
       CHECK (calibration_override_reason IS NULL OR btrim(calibration_override_reason) <> '');
+  END IF;
+END
+$$;
+`;
+
+const POSTGRES_V14_TO_V15_SQL = `
+ALTER TABLE scan_runs
+  ADD COLUMN IF NOT EXISTS calibration_decisions JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'scan_runs_calibration_decisions_array_chk'
+      AND conrelid = 'scan_runs'::regclass
+  ) THEN
+    ALTER TABLE scan_runs
+      ADD CONSTRAINT scan_runs_calibration_decisions_array_chk
+      CHECK (jsonb_typeof(calibration_decisions) = 'array');
   END IF;
 END
 $$;

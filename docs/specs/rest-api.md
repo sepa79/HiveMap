@@ -51,6 +51,8 @@ POST /workspaces/:workspaceId/proposals/:proposalId/reject
 GET  /workspaces/:workspaceId/scan-profiles
 GET  /workspaces/:workspaceId/scans
 POST /workspaces/:workspaceId/scans
+POST /workspaces/:workspaceId/scans/:scanId/calibration-decision
+GET  /workspaces/:workspaceId/scans/:scanId/boundary-map
 POST /workspaces/:workspaceId/scans/:scanId/coverage
 POST /workspaces/:workspaceId/scans/:scanId/findings
 POST /workspaces/:workspaceId/scans/:scanId/complete
@@ -83,9 +85,10 @@ Repository indexing routes begin with persisted job records only:
 Scan routes now start from one explicit completed repository index:
 
 - `POST /workspaces/:workspaceId/scans` starts one scan from `scan.repositoryIndexId`, derives repository provenance and coverage from the selected completed repository index, snapshots the resolved effective profile onto the run, and returns a calibration-stage response with the resolved profile, coverage summary, checklist, assessment, and instructions.
-- `GET /workspaces/:workspaceId/scans/:scanId/boundary-map` derives one candidate typed `boundaryMap` artifact from the current run coverage plus the selected completed repository index facts.
-- `POST /workspaces/:workspaceId/scans/:scanId/coverage` remains available only for explicit coverage correction or override; it is no longer required in the normal repository-index-backed start flow.
-- `POST /workspaces/:workspaceId/scans/:scanId/complete` accepts `completedAt`, `appliedCriteria`, `declaredOutputs`, an optional typed `boundaryMap` artifact when `declaredOutputs` includes `boundary-map`, and optional `calibrationOverrideReason`. Findings-bearing completion from a non-ready calibration state fails unless that override reason is supplied explicitly. The typed artifact is semantically validated, not only shape-checked.
+- `POST /workspaces/:workspaceId/scans/:scanId/calibration-decision` records one explicit post-calibration decision for the in-progress run: `continue`, `refine-overlay`, `correct-coverage`, `build-boundary-map`, or `restart-scan`.
+- `GET /workspaces/:workspaceId/scans/:scanId/boundary-map` derives one candidate typed `boundaryMap` artifact from the current run coverage plus the selected completed repository index facts, and returns `409` when the caller skipped the required `build-boundary-map` calibration decision.
+- `POST /workspaces/:workspaceId/scans/:scanId/coverage` remains available only for explicit coverage correction or override; it is no longer required in the normal repository-index-backed start flow and should follow an explicit `correct-coverage` calibration decision.
+- `POST /workspaces/:workspaceId/scans/:scanId/complete` accepts `completedAt`, `appliedCriteria`, `declaredOutputs`, an optional typed `boundaryMap` artifact when `declaredOutputs` includes `boundary-map`, and optional `calibrationOverrideReason`. Findings-bearing completion requires an explicit prior `continue` calibration decision, and still fails on a non-ready calibration state unless that override reason is supplied explicitly. The typed artifact is semantically validated, not only shape-checked.
 
 `GET /workspaces` returns lightweight workspace records for browser selection without loading every semantic graph. Records may include optional discovery metadata such as `slug`, `archived`, and `updatedAt`.
 

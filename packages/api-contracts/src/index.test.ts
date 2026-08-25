@@ -24,6 +24,7 @@ import {
   validateListRepositoryIndexesRequest,
   validateListWorkspaceSummariesRequest,
   validateRecordFeedbackRequest,
+  validateRecordScanCalibrationDecisionRequest,
   validateRefreshConceptEmbeddingRequest,
   validateResolveWorkspaceRequest,
   validateSearchRepositoryIndexRequest,
@@ -191,6 +192,27 @@ describe("api contracts", () => {
         calibrationOverrideReason: "  ",
       }),
     ).toThrow("calibrationOverrideReason");
+  });
+
+  it("validates explicit calibration decisions for in-progress scans", () => {
+    expect(() =>
+      validateRecordScanCalibrationDecisionRequest({
+        workspaceId: "workspace-a",
+        scanId: "scan-a",
+        decision: "build-boundary-map",
+        rationale: "The provisional pass needs a structural check before findings.",
+        recordedAt: "2026-08-25T10:00:00.000Z",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateRecordScanCalibrationDecisionRequest({
+        workspaceId: "workspace-a",
+        scanId: "scan-a",
+        decision: "bad-decision" as "continue",
+        rationale: "nope",
+        recordedAt: "2026-08-25T10:00:00.000Z",
+      }),
+    ).toThrow("Unknown scan calibration decision");
   });
 
   it("rejects empty graph command batches", () => {
