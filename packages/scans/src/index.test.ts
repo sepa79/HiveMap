@@ -164,6 +164,8 @@ describe("repository scans", () => {
       instructions: ["Review services first."],
       sourceTypes: ["code", "test"],
       criteria: [{ id: "service-contract-drift", description: "Service behavior differs from the contract." }],
+      duplicateResponsibilityTopLevelSymbolKinds: ["class", "type-alias"],
+      duplicateResponsibilityIgnorePathGlobs: ["**/fixtures/**"],
       ssotOrder: ["AGENTS.md", "services/**"],
       requiredOutputs: ["findings", "boundary-map"],
     });
@@ -174,9 +176,93 @@ describe("repository scans", () => {
       instructions: ["Review services first."],
       sourceTypes: ["code", "test"],
       criteria: [{ id: "service-contract-drift", description: "Service behavior differs from the contract." }],
+      duplicateResponsibilityTopLevelSymbolKinds: ["class", "type-alias"],
+      duplicateResponsibilityIgnorePathGlobs: ["**/fixtures/**"],
       ssotOrder: ["AGENTS.md", "services/**"],
       requiredOutputs: ["findings", "boundary-map"],
     });
+  });
+
+  it("replaces documentation evidence recipes through the overlay", () => {
+    const profile = applyScanProfileOverlay(DOCUMENTATION_CONFLICTS_PROFILE, {
+      formatVersion: 1,
+      profileId: DOCUMENTATION_CONFLICTS_PROFILE.id,
+      duplicateAuthorityClaimPatterns: ["source of truth"],
+      duplicateAuthorityIgnoredTopicTokens: ["source", "truth"],
+      duplicateAuthorityGenericTopicTokens: ["runtime"],
+      missingOwnerMaterialPaths: ["docs/index.md"],
+      missingOwnerMaterialFileNames: ["readme.md"],
+      missingOwnerIgnoredPathMarkers: ["docs/history/"],
+      missingOwnerPathKeywords: ["design"],
+      missingOwnerTextKeywords: ["incident"],
+      staleDocumentationMaterialFileNames: ["readme.md"],
+      staleDocumentationIgnoredPathMarkers: ["archive"],
+      staleDocumentationPathKeywords: ["guide"],
+      staleDocumentationTextKeywords: ["supported"],
+      staleDocumentationNonCurrentPathMarkers: ["legacy"],
+      staleDocumentationNonCurrentTextMarkers: ["superseded by"],
+    });
+
+    expect(profile).toMatchObject({
+      duplicateAuthorityClaimPatterns: ["source of truth"],
+      duplicateAuthorityIgnoredTopicTokens: ["source", "truth"],
+      duplicateAuthorityGenericTopicTokens: ["runtime"],
+      missingOwnerMaterialPaths: ["docs/index.md"],
+      missingOwnerMaterialFileNames: ["readme.md"],
+      missingOwnerIgnoredPathMarkers: ["docs/history/"],
+      missingOwnerPathKeywords: ["design"],
+      missingOwnerTextKeywords: ["incident"],
+      staleDocumentationMaterialFileNames: ["readme.md"],
+      staleDocumentationIgnoredPathMarkers: ["archive"],
+      staleDocumentationPathKeywords: ["guide"],
+      staleDocumentationTextKeywords: ["supported"],
+      staleDocumentationNonCurrentPathMarkers: ["legacy"],
+      staleDocumentationNonCurrentTextMarkers: ["superseded by"],
+    });
+  });
+
+  it("requires explicit documentation evidence recipes when the related criteria are active", () => {
+    const {
+      duplicateAuthorityClaimPatterns: _omittedDuplicateAuthorityClaimPatterns,
+      ...profileWithoutDuplicateAuthorityClaimPatterns
+    } = DOCUMENTATION_CONFLICTS_PROFILE;
+    expect(() =>
+      validateScanProfile(profileWithoutDuplicateAuthorityClaimPatterns),
+    ).toThrow("duplicateAuthorityClaimPatterns");
+
+    const {
+      missingOwnerMaterialPaths: _omittedMissingOwnerMaterialPaths,
+      ...profileWithoutMissingOwnerMaterialPaths
+    } = DOCUMENTATION_CONFLICTS_PROFILE;
+    expect(() =>
+      validateScanProfile(profileWithoutMissingOwnerMaterialPaths),
+    ).toThrow("missingOwnerMaterialPaths");
+
+    const {
+      staleDocumentationNonCurrentTextMarkers: _omittedStaleDocumentationNonCurrentTextMarkers,
+      ...profileWithoutStaleDocumentationNonCurrentTextMarkers
+    } = DOCUMENTATION_CONFLICTS_PROFILE;
+    expect(() =>
+      validateScanProfile(profileWithoutStaleDocumentationNonCurrentTextMarkers),
+    ).toThrow("staleDocumentationNonCurrentTextMarkers");
+  });
+
+  it("requires an explicit duplicate-responsibility recipe when that criterion is active", () => {
+    const {
+      duplicateResponsibilityTopLevelSymbolKinds: _omittedTopLevelKinds,
+      ...profileWithoutTopLevelKinds
+    } = CODE_QUALITY_PROFILE;
+    expect(() =>
+      validateScanProfile(profileWithoutTopLevelKinds),
+    ).toThrow("duplicateResponsibilityTopLevelSymbolKinds");
+
+    const {
+      duplicateResponsibilityIgnorePathGlobs: _omittedIgnoreGlobs,
+      ...profileWithoutIgnoreGlobs
+    } = CODE_QUALITY_PROFILE;
+    expect(() =>
+      validateScanProfile(profileWithoutIgnoreGlobs),
+    ).toThrow("duplicateResponsibilityIgnorePathGlobs");
   });
 
   it("rejects overlays that produce an invalid effective profile", () => {

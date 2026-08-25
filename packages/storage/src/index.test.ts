@@ -123,6 +123,8 @@ describe("InMemoryHiveMapStore", () => {
           scope: { include: ["services/**"], exclude: ["node_modules/**"] },
           sourceTypes: ["code", "test"],
           criteria: [{ id: "duplicate-responsibility", description: "Multiple services own the same runtime policy behavior." }],
+          duplicateResponsibilityTopLevelSymbolKinds: ["class", "interface", "enum", "record", "function"],
+          duplicateResponsibilityIgnorePathGlobs: ["**/generated/**", "**/fixtures/**", "**/*.mock.*"],
           ssotOrder: ["AGENTS.md", "docs/specs/**", "services/**"],
           requiredOutputs: ["findings", "boundary-map"],
         },

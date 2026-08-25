@@ -26,6 +26,22 @@ export type ScanProfile = {
   };
   sourceTypes: string[];
   criteria: ScanCriterion[];
+  duplicateAuthorityClaimPatterns?: string[];
+  duplicateAuthorityIgnoredTopicTokens?: string[];
+  duplicateAuthorityGenericTopicTokens?: string[];
+  missingOwnerMaterialPaths?: string[];
+  missingOwnerMaterialFileNames?: string[];
+  missingOwnerIgnoredPathMarkers?: string[];
+  missingOwnerPathKeywords?: string[];
+  missingOwnerTextKeywords?: string[];
+  staleDocumentationMaterialFileNames?: string[];
+  staleDocumentationIgnoredPathMarkers?: string[];
+  staleDocumentationPathKeywords?: string[];
+  staleDocumentationTextKeywords?: string[];
+  staleDocumentationNonCurrentPathMarkers?: string[];
+  staleDocumentationNonCurrentTextMarkers?: string[];
+  duplicateResponsibilityTopLevelSymbolKinds?: string[];
+  duplicateResponsibilityIgnorePathGlobs?: string[];
   ssotOrder: string[];
   requiredOutputs: ScanRequiredOutput[];
 };
@@ -46,6 +62,22 @@ export type ScanProfileOverlay = {
   generatedPatterns?: string[];
   sourceTypes?: string[];
   criteria?: ScanCriterion[];
+  duplicateAuthorityClaimPatterns?: string[];
+  duplicateAuthorityIgnoredTopicTokens?: string[];
+  duplicateAuthorityGenericTopicTokens?: string[];
+  missingOwnerMaterialPaths?: string[];
+  missingOwnerMaterialFileNames?: string[];
+  missingOwnerIgnoredPathMarkers?: string[];
+  missingOwnerPathKeywords?: string[];
+  missingOwnerTextKeywords?: string[];
+  staleDocumentationMaterialFileNames?: string[];
+  staleDocumentationIgnoredPathMarkers?: string[];
+  staleDocumentationPathKeywords?: string[];
+  staleDocumentationTextKeywords?: string[];
+  staleDocumentationNonCurrentPathMarkers?: string[];
+  staleDocumentationNonCurrentTextMarkers?: string[];
+  duplicateResponsibilityTopLevelSymbolKinds?: string[];
+  duplicateResponsibilityIgnorePathGlobs?: string[];
   ssotOrder?: string[];
   requiredOutputs?: ScanRequiredOutput[];
   boundaryMapRoots?: string[];
@@ -403,6 +435,108 @@ export const DOCUMENTATION_CONFLICTS_PROFILE: ScanProfile = {
     { id: "ambiguous-status", description: "Direction, implementation, history, or deprecation status is unclear." },
     { id: "direction-as-implementation", description: "Future direction is presented as implemented behavior." },
   ],
+  duplicateAuthorityClaimPatterns: [
+    "\\b(single source of truth|source of truth|canonical|authoritative)\\b.*\\b(?:lives here|belongs here|defined here|recorded here|maintained here)\\b",
+    "\\bthis\\s+(?:document|doc|page|file|guide|spec|readme|runbook|playbook|section)\\b.*\\b(single source of truth|source of truth|canonical|authoritative)\\b",
+    "\\b(?:document|doc|page|file|guide|spec|readme|runbook|playbook|section)\\b.*\\b(?:is|are|remains)\\s+(?:the\\s+)?(single source of truth|source of truth|canonical|authoritative)\\b",
+    "\\b(?:document|doc|guide|spec|readme|runbook|playbook|page|file)\\b.*\\bowned by\\b",
+  ],
+  duplicateAuthorityIgnoredTopicTokens: [
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "authoritative",
+    "be",
+    "by",
+    "canonical",
+    "doc",
+    "file",
+    "for",
+    "here",
+    "is",
+    "it",
+    "lives",
+    "of",
+    "on",
+    "page",
+    "source",
+    "the",
+    "this",
+    "truth",
+  ],
+  duplicateAuthorityGenericTopicTokens: [
+    "agent",
+    "agents",
+    "architecture",
+    "design",
+    "doc",
+    "guide",
+    "module",
+    "owner",
+    "ownership",
+    "policy",
+    "project",
+    "projection",
+    "repo",
+    "repository",
+    "rule",
+    "runtime",
+    "scan",
+    "spec",
+    "system",
+    "tool",
+    "workflow",
+    "workspace",
+  ],
+  missingOwnerMaterialPaths: ["readme.md"],
+  missingOwnerMaterialFileNames: ["agents.md"],
+  missingOwnerIgnoredPathMarkers: [
+    "glossary",
+    "changelog",
+    "release-notes",
+    "terms",
+    "archive",
+    "history",
+    "docs/ai/",
+    "docs/adr/",
+    "docs/design/",
+    "docs/product/",
+  ],
+  missingOwnerPathKeywords: ["contract", "policy", "runbook", "playbook", "operations", "ownership", "responsibility", "schema", "api", "mcp"],
+  missingOwnerTextKeywords: ["rollback", "incident", "operator", "on-call", "oncall"],
+  staleDocumentationMaterialFileNames: ["agents.md", "readme.md"],
+  staleDocumentationIgnoredPathMarkers: ["glossary", "changelog", "release-notes", "terms", "archive", "history"],
+  staleDocumentationPathKeywords: [
+    "architecture",
+    "design",
+    "spec",
+    "contract",
+    "policy",
+    "workflow",
+    "runbook",
+    "playbook",
+    "guide",
+    "deploy",
+    "operations",
+    "runtime",
+    "storage",
+    "transport",
+  ],
+  staleDocumentationTextKeywords: ["primary", "default", "supported", "deprecated", "removed", "deferred", "runtime", "backend", "interface", "target"],
+  staleDocumentationNonCurrentPathMarkers: ["legacy", "deprecated", "archive", "histor", "changelog", "release-notes"],
+  staleDocumentationNonCurrentTextMarkers: [
+    "legacy documentation",
+    "legacy doc",
+    "historical reference",
+    "for historical reference",
+    "archived document",
+    "archived for reference",
+    "superseded by",
+    "this document is obsolete",
+    "this document is deprecated",
+  ],
   ssotOrder: ["AGENTS.md", "docs/specs/**", "docs/architecture*", "docs/product/**", "implementation"],
   requiredOutputs: ["document-inventory", "concept-map", "findings", "coverage-report"],
 };
@@ -435,6 +569,30 @@ export const CODE_QUALITY_PROFILE: ScanProfile = {
     { id: "concurrency-risk", description: "Async or concurrent behavior has an unbounded or unverified race." },
     { id: "undocumented-api", description: "A public API or tool behavior lacks an owning contract." },
   ],
+  duplicateResponsibilityTopLevelSymbolKinds: ["class", "interface", "enum", "record", "function"],
+  duplicateResponsibilityIgnorePathGlobs: [
+    "**/archive/**",
+    "**/archives/**",
+    "**/archived/**",
+    "**/legacy/**",
+    "**/deprecated/**",
+    "**/generated/**",
+    "**/__generated__/**",
+    "**/*.generated.*",
+    "**/fixtures/**",
+    "**/__fixtures__/**",
+    "**/examples/**",
+    "**/example/**",
+    "**/samples/**",
+    "**/sample/**",
+    "**/demo/**",
+    "**/demos/**",
+    "**/mocks/**",
+    "**/__mocks__/**",
+    "**/*.mock.*",
+    "**/*.stories.*",
+    "**/storybook/**",
+  ],
   ssotOrder: ["AGENTS.md", "docs/specs/**", "docs/architecture*", "implementation", "tests"],
   requiredOutputs: ["document-inventory", "concept-map", "findings", "coverage-report"],
 };
@@ -464,6 +622,22 @@ export function validateScanProfile(profile: ScanProfile): void {
   assertNonEmptyArray("profile.scope.include", profile.scope.include);
   validateStringArray("profile.scope.exclude", profile.scope.exclude);
   assertNonEmptyArray("profile.sourceTypes", profile.sourceTypes);
+  validateOptionalPatternList("profile.duplicateAuthorityClaimPatterns", profile.duplicateAuthorityClaimPatterns);
+  validateOptionalPatternList("profile.duplicateAuthorityIgnoredTopicTokens", profile.duplicateAuthorityIgnoredTopicTokens);
+  validateOptionalPatternList("profile.duplicateAuthorityGenericTopicTokens", profile.duplicateAuthorityGenericTopicTokens);
+  validateOptionalPatternList("profile.missingOwnerMaterialPaths", profile.missingOwnerMaterialPaths);
+  validateOptionalPatternList("profile.missingOwnerMaterialFileNames", profile.missingOwnerMaterialFileNames);
+  validateOptionalPatternList("profile.missingOwnerIgnoredPathMarkers", profile.missingOwnerIgnoredPathMarkers);
+  validateOptionalPatternList("profile.missingOwnerPathKeywords", profile.missingOwnerPathKeywords);
+  validateOptionalPatternList("profile.missingOwnerTextKeywords", profile.missingOwnerTextKeywords);
+  validateOptionalPatternList("profile.staleDocumentationMaterialFileNames", profile.staleDocumentationMaterialFileNames);
+  validateOptionalPatternList("profile.staleDocumentationIgnoredPathMarkers", profile.staleDocumentationIgnoredPathMarkers);
+  validateOptionalPatternList("profile.staleDocumentationPathKeywords", profile.staleDocumentationPathKeywords);
+  validateOptionalPatternList("profile.staleDocumentationTextKeywords", profile.staleDocumentationTextKeywords);
+  validateOptionalPatternList("profile.staleDocumentationNonCurrentPathMarkers", profile.staleDocumentationNonCurrentPathMarkers);
+  validateOptionalPatternList("profile.staleDocumentationNonCurrentTextMarkers", profile.staleDocumentationNonCurrentTextMarkers);
+  validateOptionalPatternList("profile.duplicateResponsibilityTopLevelSymbolKinds", profile.duplicateResponsibilityTopLevelSymbolKinds);
+  validateOptionalPatternList("profile.duplicateResponsibilityIgnorePathGlobs", profile.duplicateResponsibilityIgnorePathGlobs);
   assertNonEmptyArray("profile.ssotOrder", profile.ssotOrder);
   assertUnique("profile.requiredOutputs", profile.requiredOutputs);
   if (profile.requiredOutputs.length === 0) {
@@ -482,6 +656,41 @@ export function validateScanProfile(profile: ScanProfile): void {
     assertNonEmpty("criterion.id", criterion.id);
     assertNonEmpty("criterion.description", criterion.description);
   }
+  if (profile.criteria.some((criterion) => criterion.id === "duplicate-authority")) {
+    requireDefinedProfileRecipeField(profile, "duplicateAuthorityClaimPatterns");
+    requireDefinedProfileRecipeField(profile, "duplicateAuthorityIgnoredTopicTokens");
+    requireDefinedProfileRecipeField(profile, "duplicateAuthorityGenericTopicTokens");
+  }
+  if (profile.criteria.some((criterion) => criterion.id === "missing-owner")) {
+    requireDefinedProfileRecipeField(profile, "missingOwnerMaterialPaths");
+    requireDefinedProfileRecipeField(profile, "missingOwnerMaterialFileNames");
+    requireDefinedProfileRecipeField(profile, "missingOwnerIgnoredPathMarkers");
+    requireDefinedProfileRecipeField(profile, "missingOwnerPathKeywords");
+    requireDefinedProfileRecipeField(profile, "missingOwnerTextKeywords");
+  }
+  if (profile.criteria.some((criterion) => criterion.id === "stale-documentation")) {
+    requireDefinedProfileRecipeField(profile, "staleDocumentationMaterialFileNames");
+    requireDefinedProfileRecipeField(profile, "staleDocumentationIgnoredPathMarkers");
+    requireDefinedProfileRecipeField(profile, "staleDocumentationPathKeywords");
+    requireDefinedProfileRecipeField(profile, "staleDocumentationTextKeywords");
+    requireDefinedProfileRecipeField(profile, "staleDocumentationNonCurrentPathMarkers");
+    requireDefinedProfileRecipeField(profile, "staleDocumentationNonCurrentTextMarkers");
+  }
+  if (profile.criteria.some((criterion) => criterion.id === "duplicate-responsibility")) {
+    if (
+      profile.duplicateResponsibilityTopLevelSymbolKinds === undefined ||
+      profile.duplicateResponsibilityTopLevelSymbolKinds.length === 0
+    ) {
+      throw new ScanValidationError(
+        "profile.duplicateResponsibilityTopLevelSymbolKinds must contain at least one value when duplicate-responsibility is active",
+      );
+    }
+    if (profile.duplicateResponsibilityIgnorePathGlobs === undefined) {
+      throw new ScanValidationError(
+        "profile.duplicateResponsibilityIgnorePathGlobs must be defined when duplicate-responsibility is active",
+      );
+    }
+  }
 }
 
 export function validateScanProfileOverlay(overlay: ScanProfileOverlay): void {
@@ -499,6 +708,22 @@ export function validateScanProfileOverlay(overlay: ScanProfileOverlay): void {
   validateOptionalPatternList("overlay.generatedPatterns", overlay.generatedPatterns);
   validateOptionalPatternList("overlay.sourceTypes", overlay.sourceTypes);
   validateOptionalCriteriaList("overlay.criteria", overlay.criteria);
+  validateOptionalPatternList("overlay.duplicateAuthorityClaimPatterns", overlay.duplicateAuthorityClaimPatterns);
+  validateOptionalPatternList("overlay.duplicateAuthorityIgnoredTopicTokens", overlay.duplicateAuthorityIgnoredTopicTokens);
+  validateOptionalPatternList("overlay.duplicateAuthorityGenericTopicTokens", overlay.duplicateAuthorityGenericTopicTokens);
+  validateOptionalPatternList("overlay.missingOwnerMaterialPaths", overlay.missingOwnerMaterialPaths);
+  validateOptionalPatternList("overlay.missingOwnerMaterialFileNames", overlay.missingOwnerMaterialFileNames);
+  validateOptionalPatternList("overlay.missingOwnerIgnoredPathMarkers", overlay.missingOwnerIgnoredPathMarkers);
+  validateOptionalPatternList("overlay.missingOwnerPathKeywords", overlay.missingOwnerPathKeywords);
+  validateOptionalPatternList("overlay.missingOwnerTextKeywords", overlay.missingOwnerTextKeywords);
+  validateOptionalPatternList("overlay.staleDocumentationMaterialFileNames", overlay.staleDocumentationMaterialFileNames);
+  validateOptionalPatternList("overlay.staleDocumentationIgnoredPathMarkers", overlay.staleDocumentationIgnoredPathMarkers);
+  validateOptionalPatternList("overlay.staleDocumentationPathKeywords", overlay.staleDocumentationPathKeywords);
+  validateOptionalPatternList("overlay.staleDocumentationTextKeywords", overlay.staleDocumentationTextKeywords);
+  validateOptionalPatternList("overlay.staleDocumentationNonCurrentPathMarkers", overlay.staleDocumentationNonCurrentPathMarkers);
+  validateOptionalPatternList("overlay.staleDocumentationNonCurrentTextMarkers", overlay.staleDocumentationNonCurrentTextMarkers);
+  validateOptionalPatternList("overlay.duplicateResponsibilityTopLevelSymbolKinds", overlay.duplicateResponsibilityTopLevelSymbolKinds);
+  validateOptionalPatternList("overlay.duplicateResponsibilityIgnorePathGlobs", overlay.duplicateResponsibilityIgnorePathGlobs);
   validateOptionalPatternList("overlay.ssotOrder", overlay.ssotOrder);
   validateOptionalRequiredOutputs("overlay.requiredOutputs", overlay.requiredOutputs);
   validateOptionalBoundaryRoots("overlay.boundaryMapRoots", overlay.boundaryMapRoots);
@@ -534,11 +759,114 @@ export function applyScanProfileOverlay(profile: ScanProfile, overlay: ScanProfi
     },
     sourceTypes: [...(overlay.sourceTypes ?? profile.sourceTypes)],
     criteria: structuredClone(overlay.criteria ?? profile.criteria),
+    ...(overlay.duplicateAuthorityClaimPatterns !== undefined || profile.duplicateAuthorityClaimPatterns !== undefined
+      ? {
+          duplicateAuthorityClaimPatterns: [...(overlay.duplicateAuthorityClaimPatterns ?? profile.duplicateAuthorityClaimPatterns ?? [])],
+        }
+      : {}),
+    ...(overlay.duplicateAuthorityIgnoredTopicTokens !== undefined || profile.duplicateAuthorityIgnoredTopicTokens !== undefined
+      ? {
+          duplicateAuthorityIgnoredTopicTokens: [
+            ...(overlay.duplicateAuthorityIgnoredTopicTokens ?? profile.duplicateAuthorityIgnoredTopicTokens ?? []),
+          ],
+        }
+      : {}),
+    ...(overlay.duplicateAuthorityGenericTopicTokens !== undefined || profile.duplicateAuthorityGenericTopicTokens !== undefined
+      ? {
+          duplicateAuthorityGenericTopicTokens: [
+            ...(overlay.duplicateAuthorityGenericTopicTokens ?? profile.duplicateAuthorityGenericTopicTokens ?? []),
+          ],
+        }
+      : {}),
+    ...(overlay.missingOwnerMaterialPaths !== undefined || profile.missingOwnerMaterialPaths !== undefined
+      ? {
+          missingOwnerMaterialPaths: [...(overlay.missingOwnerMaterialPaths ?? profile.missingOwnerMaterialPaths ?? [])],
+        }
+      : {}),
+    ...(overlay.missingOwnerMaterialFileNames !== undefined || profile.missingOwnerMaterialFileNames !== undefined
+      ? {
+          missingOwnerMaterialFileNames: [...(overlay.missingOwnerMaterialFileNames ?? profile.missingOwnerMaterialFileNames ?? [])],
+        }
+      : {}),
+    ...(overlay.missingOwnerIgnoredPathMarkers !== undefined || profile.missingOwnerIgnoredPathMarkers !== undefined
+      ? {
+          missingOwnerIgnoredPathMarkers: [...(overlay.missingOwnerIgnoredPathMarkers ?? profile.missingOwnerIgnoredPathMarkers ?? [])],
+        }
+      : {}),
+    ...(overlay.missingOwnerPathKeywords !== undefined || profile.missingOwnerPathKeywords !== undefined
+      ? {
+          missingOwnerPathKeywords: [...(overlay.missingOwnerPathKeywords ?? profile.missingOwnerPathKeywords ?? [])],
+        }
+      : {}),
+    ...(overlay.missingOwnerTextKeywords !== undefined || profile.missingOwnerTextKeywords !== undefined
+      ? {
+          missingOwnerTextKeywords: [...(overlay.missingOwnerTextKeywords ?? profile.missingOwnerTextKeywords ?? [])],
+        }
+      : {}),
+    ...(overlay.staleDocumentationMaterialFileNames !== undefined || profile.staleDocumentationMaterialFileNames !== undefined
+      ? {
+          staleDocumentationMaterialFileNames: [
+            ...(overlay.staleDocumentationMaterialFileNames ?? profile.staleDocumentationMaterialFileNames ?? []),
+          ],
+        }
+      : {}),
+    ...(overlay.staleDocumentationIgnoredPathMarkers !== undefined || profile.staleDocumentationIgnoredPathMarkers !== undefined
+      ? {
+          staleDocumentationIgnoredPathMarkers: [
+            ...(overlay.staleDocumentationIgnoredPathMarkers ?? profile.staleDocumentationIgnoredPathMarkers ?? []),
+          ],
+        }
+      : {}),
+    ...(overlay.staleDocumentationPathKeywords !== undefined || profile.staleDocumentationPathKeywords !== undefined
+      ? {
+          staleDocumentationPathKeywords: [...(overlay.staleDocumentationPathKeywords ?? profile.staleDocumentationPathKeywords ?? [])],
+        }
+      : {}),
+    ...(overlay.staleDocumentationTextKeywords !== undefined || profile.staleDocumentationTextKeywords !== undefined
+      ? {
+          staleDocumentationTextKeywords: [...(overlay.staleDocumentationTextKeywords ?? profile.staleDocumentationTextKeywords ?? [])],
+        }
+      : {}),
+    ...(overlay.staleDocumentationNonCurrentPathMarkers !== undefined || profile.staleDocumentationNonCurrentPathMarkers !== undefined
+      ? {
+          staleDocumentationNonCurrentPathMarkers: [
+            ...(overlay.staleDocumentationNonCurrentPathMarkers ?? profile.staleDocumentationNonCurrentPathMarkers ?? []),
+          ],
+        }
+      : {}),
+    ...(overlay.staleDocumentationNonCurrentTextMarkers !== undefined || profile.staleDocumentationNonCurrentTextMarkers !== undefined
+      ? {
+          staleDocumentationNonCurrentTextMarkers: [
+            ...(overlay.staleDocumentationNonCurrentTextMarkers ?? profile.staleDocumentationNonCurrentTextMarkers ?? []),
+          ],
+        }
+      : {}),
+    ...(overlay.duplicateResponsibilityTopLevelSymbolKinds !== undefined ||
+    profile.duplicateResponsibilityTopLevelSymbolKinds !== undefined
+      ? {
+          duplicateResponsibilityTopLevelSymbolKinds: [
+            ...(overlay.duplicateResponsibilityTopLevelSymbolKinds ?? profile.duplicateResponsibilityTopLevelSymbolKinds ?? []),
+          ],
+        }
+      : {}),
+    ...(overlay.duplicateResponsibilityIgnorePathGlobs !== undefined || profile.duplicateResponsibilityIgnorePathGlobs !== undefined
+      ? {
+          duplicateResponsibilityIgnorePathGlobs: [
+            ...(overlay.duplicateResponsibilityIgnorePathGlobs ?? profile.duplicateResponsibilityIgnorePathGlobs ?? []),
+          ],
+        }
+      : {}),
     ssotOrder: [...(overlay.ssotOrder ?? profile.ssotOrder)],
     requiredOutputs: [...(overlay.requiredOutputs ?? profile.requiredOutputs)],
   };
   validateScanProfile(applied);
   return applied;
+}
+
+function requireDefinedProfileRecipeField(profile: ScanProfile, field: keyof ScanProfile): void {
+  if (profile[field] === undefined) {
+    throw new ScanValidationError(`profile.${field} must be defined when the related criterion is active`);
+  }
 }
 
 export function createBoundaryMapBuildConfig(overlay?: ScanProfileOverlay): BoundaryMapBuildConfig {

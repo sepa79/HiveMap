@@ -123,14 +123,14 @@ export function buildBoundaryMapArtifact(options: {
     }
 
     const relationKind: BoundaryRelationKind =
-      sourceFile?.sourceKind === "test" ? "verifies" : dependency.kind === "implements" ? "implements" : "depends-on";
+      isBoundaryTestFile(sourceFile, options.config) ? "verifies" : dependency.kind === "implements" ? "implements" : "depends-on";
     const relationId = `${sourceBoundary.id}:${relationKind}:${targetBoundary.id}`;
     const relation = getOrCreateRelation(relationMap, relationId, sourceBoundary.id, targetBoundary.id, relationKind);
     relation.sourceRefs.set(
       createSourceRefKey(sourcePath, dependency.startLine, relationKind),
       createSourceRef({
         role: relationKind === "verifies" ? "verifies" : relationKind === "implements" ? "implements" : "depends-on",
-        source: sourceFile?.sourceKind === "test" ? "test" : "code",
+        source: isBoundaryTestFile(sourceFile, options.config) ? "test" : "code",
         target: sourcePath,
         line: dependency.startLine,
         revision: options.revision,
@@ -138,7 +138,7 @@ export function buildBoundaryMapArtifact(options: {
       }),
     );
 
-    if (sourceFile?.sourceKind === "test") {
+    if (isBoundaryTestFile(sourceFile, options.config)) {
       const existing = targetBoundaryIdsByTestFile.get(sourcePath);
       if (existing === undefined) {
         targetBoundaryIdsByTestFile.set(sourcePath, new Set([targetBoundary.id]));
@@ -149,7 +149,7 @@ export function buildBoundaryMapArtifact(options: {
   }
 
   attachDocumentationRefs(boundaries, includedFiles, options.revision, options.config);
-  attachTestRefs(boundaries, includedFiles, targetBoundaryIdsByTestFile, options.revision);
+  attachTestRefs(boundaries, includedFiles, targetBoundaryIdsByTestFile, options.revision, options.config);
   finalizeBoundaryNotes(boundaries, relationMap);
 
   return {
@@ -176,7 +176,7 @@ function createBoundarySeed(path: string, sourceKind: string, config: BoundaryMa
     throw new Error(`Cannot derive boundary from empty path: ${path}`);
   }
 
-  if (sourceKind === "test") {
+  if (isBoundaryTestPath(normalizedPath, sourceKind, config)) {
     return createTestBoundarySeed(segments, config);
   }
 
@@ -227,6 +227,28 @@ function findScopedBoundaryRule(path: string, config: BoundaryMapBuildConfig): B
 
 function isTestDirectoryName(value: string, config: BoundaryMapBuildConfig): boolean {
   return new Set(config.testDirectoryNames).has(value.toLowerCase());
+}
+
+function isBoundaryTestPath(path: string, sourceKind: string, config: BoundaryMapBuildConfig): boolean {
+  if (sourceKind === "test") {
+    return true;
+  }
+
+  const segments = normalizeRepositoryPath(path)
+    .toLowerCase()
+    .split("/")
+    .filter((segment) => segment.length > 0);
+  return segments.some((segment) => isTestDirectoryName(segment, config));
+}
+
+function isBoundaryTestFile(
+  file: Pick<RepositoryFileRecord, "path" | "sourceKind"> | undefined,
+  config: BoundaryMapBuildConfig,
+): boolean {
+  if (file === undefined) {
+    return false;
+  }
+  return isBoundaryTestPath(file.path, file.sourceKind, config);
 }
 
 function findBoundaryForPath(boundaries: ReadonlyMap<string, MutableBoundary>, filePath: string): MutableBoundary | undefined {
@@ -434,7 +456,11 @@ function attachDocumentationRefs(
   for (const file of documentationFiles) {
     const normalizedPath = normalizeRepositoryPath(file.path);
     const directBoundary = findBoundaryForPath(boundaries, normalizedPath);
-    if (directBoundary !== undefined) {
+    if (
+      directBoundary !== undefined &&
+      (hasContractPathMarker(normalizedPath, config) ||
+        documentationLikelyMatchesBoundary(normalizedPath, directBoundary, config))
+    ) {
       directBoundary.contractSourceRefs.set(
         createSourceRefKey(normalizedPath, undefined, "contract"),
         createContractSourceRef(normalizedPath, revision, config),
@@ -489,8 +515,9 @@ function attachTestRefs(
   files: readonly RepositoryFileRecord[],
   targetBoundaryIdsByTestFile: ReadonlyMap<string, Set<string>>,
   revision: string,
+  config: BoundaryMapBuildConfig,
 ): void {
-  const testFiles = files.filter((file) => file.sourceKind === "test");
+  const testFiles = files.filter((file) => isBoundaryTestFile(file, config));
   for (const file of testFiles) {
     const normalizedPath = normalizeRepositoryPath(file.path);
     const directBoundary = findBoundaryForPath(boundaries, normalizedPath);
@@ -671,6 +698,11 @@ function isContractLikeDocumentationPath(path: string, config: BoundaryMapBuildC
   if (new Set(config.contractFileStems).has(stem)) {
     return true;
   }
+  return hasContractPathMarker(normalized, config);
+}
+
+function hasContractPathMarker(path: string, config: BoundaryMapBuildConfig): boolean {
+  const normalized = normalizeRepositoryPath(path).toLowerCase();
   return config.contractPathMarkers.some((marker) => normalized.includes(marker));
 }
 
