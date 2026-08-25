@@ -17,6 +17,7 @@ Draft MCP surface for agents. MCP is the primary HiveMap agent interface for alp
 - `repository_evidence_candidates`
 - `scan_boundary_map_build`
 - `scan_profile_overlay_help`
+- `scan_profile_overlay_suggest`
 - `graph_command`
 - `category_assign`
 - `projection_get`
@@ -30,6 +31,7 @@ Draft MCP surface for agents. MCP is the primary HiveMap agent interface for alp
 - `scan_start`
 - `scan_record_coverage`
 - `scan_calibration_decide`
+- `scan_finding_validate`
 - `scan_finding_create`
 - `finding_update`
 - `scan_complete`
@@ -75,7 +77,8 @@ Repository index flow in the current phase:
 4. `repository_index_get({ workspaceId, indexId })` reads one job record and its current lifecycle stage.
 5. `repository_search({ workspaceId, indexId, query, limit })` searches bounded file/chunk evidence inside one completed repository index.
 6. `repository_evidence_candidates({ workspaceId, indexId, profileId, profileVersion, criterionId, limit })` returns bounded criterion-scoped evidence packets plus the effective profile, overlay status, and coverage summary when HiveMap can pre-select deterministic or interpretation-ready sources.
-7. `scan_profile_overlay_help({ workspaceId, profileId, profileVersion })` explains the optional repository-local overlay contract at `.hivemap/scan-profiles/<profile>.yaml`, including template, merge rules, defaults behavior, fail-fast validation, and which profile fields are append-vs-replace.
+7. `scan_profile_overlay_help({ workspaceId, profileId, profileVersion })` explains the optional repository-local overlay contract at `.hivemap/scan-profiles/<profile>.yaml`, including template, merge rules, defaults behavior, fail-fast validation, which profile fields are append-vs-replace, a repeatable overlay-build workflow, and symptom-to-field tuning hints.
+8. `scan_profile_overlay_suggest({ workspaceId, scanId, symptomId })` returns the smallest repo-aware YAML scaffold for one explicit calibration symptom, seeded from the current in-progress scan's effective profile and active boundary-map config.
 
 Scan flow in the current repository-index-backed phase:
 
@@ -86,17 +89,23 @@ Scan flow in the current repository-index-backed phase:
 5. `repository_evidence_candidates(...)` should be called per criterion when the selected profile/rule can use bounded evidence packets instead of raw repository discovery; it also returns a calibration assessment and decision guidance for the current evidence state.
 6. `scan_calibration_decide({ workspaceId, scanId, decision, rationale, recordedAt })` records one explicit next step for the run: `continue`, `refine-overlay`, `correct-coverage`, `build-boundary-map`, or `restart-scan`.
 7. `scan_boundary_map_build({ workspaceId, scanId })` derives one candidate typed `boundaryMap` artifact from the current scan coverage plus the selected completed repository index facts, plus a calibration assessment and decision guidance for the structural result. The caller should record `build-boundary-map` explicitly before this step.
-8. If calibration shows that the repository shape is wrong, the caller should refine the repository-local overlay or record one explicit coverage correction, then restart with a new scan id from the same completed repository index rather than forcing findings through the provisional run.
-9. `scan_record_coverage({ workspaceId, scanId, coverage })` remains available only when the caller needs an explicit coverage override or correction, and should follow an explicit `correct-coverage` decision.
-10. `scan_complete({ workspaceId, scanId, completedAt, appliedCriteria, declaredOutputs, boundaryMap?, calibrationOverrideReason? })` may carry an optional typed `boundaryMap` artifact, but only when `declaredOutputs` includes `boundary-map`.
-11. Findings-bearing completion requires an explicit prior `continue` decision and still fails from a non-ready calibration state unless `calibrationOverrideReason` is supplied explicitly.
+8. `scan_profile_overlay_suggest({ workspaceId, scanId, symptomId })` should follow `refine-overlay` when the caller wants the smallest repo-aware patch scaffold for one concrete calibration symptom instead of editing YAML ad hoc.
+9. `scan_finding_validate({ workspaceId, scanId, criterionId, boundaryMap? })` classifies one criterion-level suspected issue as `likely-real-finding`, `profile-gap`, `missing-evidence`, or `ambiguous-shape` before the caller creates a durable finding node.
+10. If calibration shows that the repository shape is wrong, the caller should refine the repository-local overlay or record one explicit coverage correction, then restart with a new scan id from the same completed repository index rather than forcing findings through the provisional run.
+11. `scan_record_coverage({ workspaceId, scanId, coverage })` remains available only when the caller needs an explicit coverage override or correction, and should follow an explicit `correct-coverage` decision.
+12. `scan_complete({ workspaceId, scanId, completedAt, appliedCriteria, declaredOutputs, boundaryMap?, calibrationOverrideReason? })` may carry an optional typed `boundaryMap` artifact, but only when `declaredOutputs` includes `boundary-map`.
+13. Findings-bearing completion requires an explicit prior `continue` decision and still fails from a non-ready calibration state unless `calibrationOverrideReason` is supplied explicitly.
 
 Overlay discovery rules in the current phase:
 
 - Scan-profile overlays are optional repository-local YAML files under `.hivemap/scan-profiles/<profile>.yaml`.
 - Missing overlay files keep the built-in profile defaults active.
 - Invalid overlay files fail `scan_start` and `repository_evidence_candidates` clearly; there is no silent fallback.
-- Overlay may replace repository-specific profile recipe fields such as name, description, instructions, source types, criteria, SSOT order, required outputs, and boundary-map heuristics.
+- Overlay may replace repository-specific profile recipe fields such as name, description, instructions, source types, criteria, criterion-oriented evidence hints, SSOT order, required outputs, and boundary-map heuristics.
+  Criterion-oriented recipe examples include duplicate-authority claim/topic selection, duplicate-responsibility symbol/path selection, missing-owner materiality markers, and stale-documentation currentness markers.
+- Agents should treat `scan_profile_overlay_help.overlayBuildWorkflow` as the default step order for repository tuning after the first calibration pass, instead of editing overlay fields ad hoc.
+- Agents should use `scan_profile_overlay_help.symptomToFieldHints` to choose the smallest field change that matches the observed calibration symptom before restarting the scan.
+- Agents should use `scan_profile_overlay_suggest` to obtain a repo-aware starter patch for that symptom instead of manually copying active values from unrelated tool output.
 - Agents should call `scan_profile_overlay_help` instead of guessing overlay fields or merge behavior.
 
 `workspace_resolve` error codes:

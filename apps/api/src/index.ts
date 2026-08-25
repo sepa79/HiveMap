@@ -21,10 +21,12 @@ import {
   type RecordScanCalibrationDecisionRequest,
   type RecordScanCoverageRequest,
   type SearchRepositoryIndexRequest,
+  type SuggestScanProfileOverlayRequest,
   type StartScanRequest,
   type StartRepositoryIndexRequest,
   type UpsertConceptEmbeddingRequest,
   type UpdateFindingRequest,
+  type ValidateScanFindingRequest,
 } from "@hivemap/api-contracts";
 import { HiveMapRuntime, RuntimeError, type EmbeddingProviderRegistry, type RepositoryIndexExecutor } from "@hivemap/runtime";
 import { StorageError, type HiveMapStore } from "@hivemap/storage";
@@ -367,11 +369,52 @@ async function handleRequest(
       method === "POST" &&
       segments[2] === "scans" &&
       segments[3] !== undefined &&
+      segments[4] === "overlay-suggestion" &&
+      segments.length === 5
+    ) {
+      const body = await readJson<Pick<SuggestScanProfileOverlayRequest, "symptomId">>(request);
+      writeJson(
+        response,
+        200,
+        await runtime.suggestScanProfileOverlay({
+          workspaceId,
+          scanId: segments[3],
+          symptomId: body.symptomId,
+        }),
+      );
+      return;
+    }
+
+    if (
+      method === "POST" &&
+      segments[2] === "scans" &&
+      segments[3] !== undefined &&
       segments[4] === "coverage" &&
       segments.length === 5
     ) {
       const body = await readJson<Pick<RecordScanCoverageRequest, "coverage">>(request);
       writeJson(response, 200, await runtime.recordScanCoverage({ workspaceId, scanId: segments[3], coverage: body.coverage }));
+      return;
+    }
+
+    if (
+      method === "POST" &&
+      segments[2] === "scans" &&
+      segments[3] !== undefined &&
+      segments[4] === "finding-validation" &&
+      segments.length === 5
+    ) {
+      const body = await readJson<Pick<ValidateScanFindingRequest, "criterionId" | "boundaryMap">>(request);
+      writeJson(
+        response,
+        200,
+        await runtime.validateScanFinding({
+          workspaceId,
+          scanId: segments[3],
+          criterionId: body.criterionId,
+          ...(body.boundaryMap === undefined ? {} : { boundaryMap: body.boundaryMap }),
+        }),
+      );
       return;
     }
 

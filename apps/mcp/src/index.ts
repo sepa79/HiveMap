@@ -5,6 +5,7 @@ import type {
   BuildScanBoundaryMapResponse,
   ExecuteRepositoryIndexResponse,
   GetScanProfileOverlayHelpResponse,
+  SuggestScanProfileOverlayResponse,
   GetWorkspaceSummaryResponse,
   ListWorkspaceSummariesResponse,
   ResolveWorkspaceResponse,
@@ -35,6 +36,7 @@ import type {
   StartScanResponse,
   UpdateFindingResponse,
   UpsertConceptEmbeddingResponse,
+  ValidateScanFindingResponse,
 } from "@hivemap/api-contracts";
 import { HiveMapRuntime, RuntimeError } from "@hivemap/runtime";
 import { StorageError } from "@hivemap/storage";
@@ -55,6 +57,7 @@ export const HIVEMAP_MCP_TOOL_NAMES: readonly McpToolName[] = [
   "repository_evidence_candidates",
   "scan_boundary_map_build",
   "scan_profile_overlay_help",
+  "scan_profile_overlay_suggest",
   "concept_embedding_upsert",
   "concept_embedding_refresh",
   "concept_embedding_backfill",
@@ -72,6 +75,7 @@ export const HIVEMAP_MCP_TOOL_NAMES: readonly McpToolName[] = [
   "scan_start",
   "scan_record_coverage",
   "scan_calibration_decide",
+  "scan_finding_validate",
   "scan_finding_create",
   "finding_update",
   "scan_complete",
@@ -94,6 +98,7 @@ export type McpToolResponseMap = {
   repository_evidence_candidates: ListRepositoryEvidenceCandidatesResponse;
   scan_boundary_map_build: BuildScanBoundaryMapResponse;
   scan_profile_overlay_help: GetScanProfileOverlayHelpResponse;
+  scan_profile_overlay_suggest: SuggestScanProfileOverlayResponse;
   concept_embedding_upsert: UpsertConceptEmbeddingResponse;
   concept_embedding_refresh: RefreshConceptEmbeddingResponse;
   concept_embedding_backfill: BackfillConceptEmbeddingsResponse;
@@ -111,6 +116,7 @@ export type McpToolResponseMap = {
   scan_start: StartScanResponse;
   scan_record_coverage: RecordScanCoverageResponse;
   scan_calibration_decide: RecordScanCalibrationDecisionResponse;
+  scan_finding_validate: ValidateScanFindingResponse;
   scan_finding_create: CreateScanFindingResponse;
   finding_update: UpdateFindingResponse;
   scan_complete: CompleteScanResponse;
@@ -203,6 +209,10 @@ async function dispatchMcpTool<T extends McpToolName>(
       return (await runtime.getScanProfileOverlayHelp(
         request as McpToolRequestMap["scan_profile_overlay_help"],
       )) as McpToolResponseMap[T];
+    case "scan_profile_overlay_suggest":
+      return (await runtime.suggestScanProfileOverlay(
+        request as McpToolRequestMap["scan_profile_overlay_suggest"],
+      )) as McpToolResponseMap[T];
     case "concept_embedding_upsert":
       return (await runtime.upsertConceptEmbedding(request as McpToolRequestMap["concept_embedding_upsert"])) as McpToolResponseMap[T];
     case "concept_embedding_refresh":
@@ -239,6 +249,8 @@ async function dispatchMcpTool<T extends McpToolName>(
       return (await runtime.recordScanCalibrationDecision(
         request as McpToolRequestMap["scan_calibration_decide"],
       )) as McpToolResponseMap[T];
+    case "scan_finding_validate":
+      return (await runtime.validateScanFinding(request as McpToolRequestMap["scan_finding_validate"])) as McpToolResponseMap[T];
     case "scan_finding_create":
       return (await runtime.createScanFinding(request as McpToolRequestMap["scan_finding_create"])) as McpToolResponseMap[T];
     case "finding_update":

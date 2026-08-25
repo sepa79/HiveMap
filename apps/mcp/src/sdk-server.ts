@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod/v4";
 
+import { SCAN_PROFILE_OVERLAY_SYMPTOM_VALUES } from "@hivemap/api-contracts";
 import { PROJECT_SOURCE_ROLE_VALUES, PROJECT_SOURCE_TYPE_VALUES } from "@hivemap/graph-core";
 import {
   BOUNDARY_ENTRYPOINT_KIND_VALUES,
@@ -29,6 +30,8 @@ const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   scan_boundary_map_build:
     "Build one candidate boundary-map artifact from the current scan coverage and selected completed repository index facts, and classify whether the result now looks findings-ready, profile-misaligned, evidence-poor, or still structurally ambiguous.",
   scan_profile_overlay_help: "Explain the optional .hivemap/scan-profiles/<profile>.yaml overlay contract, merge rules, template, defaults behavior, and fail-fast validation for one scan profile.",
+  scan_profile_overlay_suggest:
+    "Return the smallest repo-aware overlay YAML scaffold for one explicit calibration symptom, using the active effective profile and boundary-map config from the current in-progress scan.",
   concept_embedding_upsert: "Store or refresh one explicit concept embedding for a workspace node and model.",
   concept_embedding_refresh: "Generate or refresh one concept embedding through a configured provider:model ref.",
   concept_embedding_backfill: "Backfill explicit concept embeddings for selected or all concept nodes through a configured provider:model ref.",
@@ -48,6 +51,8 @@ const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   scan_record_coverage: "Replace the derived coverage for an in-progress scan only when one explicit full correction is needed.",
   scan_calibration_decide:
     "Record one explicit post-calibration decision for an in-progress scan before correcting coverage, building a boundary map, or proceeding into findings.",
+  scan_finding_validate:
+    "Classify one criterion-level suspected issue as likely-real-finding, profile-gap, missing-evidence, or ambiguous-shape before creating a durable finding node.",
   scan_finding_create: "Create a validated finding node with stable fingerprint, source claims, severity, and origin scan evidence.",
   finding_update: "Update an active finding status or severity; resolved status requires explicit resolution evidence.",
   scan_complete:
@@ -194,6 +199,12 @@ export function createHiveMapMcpServer(runtime: HiveMapRuntime): McpServer {
     profileVersion: z.number().int().positive(),
   });
 
+  registerTool(server, runtime, "scan_profile_overlay_suggest", {
+    workspaceId: z.string(),
+    scanId: z.string(),
+    symptomId: z.enum(SCAN_PROFILE_OVERLAY_SYMPTOM_VALUES),
+  });
+
   registerTool(server, runtime, "concept_embedding_upsert", {
     workspaceId: z.string(),
     nodeId: z.string(),
@@ -303,6 +314,13 @@ export function createHiveMapMcpServer(runtime: HiveMapRuntime): McpServer {
     decision: z.enum(["continue", "refine-overlay", "correct-coverage", "build-boundary-map", "restart-scan"]),
     rationale: z.string(),
     recordedAt: z.string(),
+  });
+
+  registerTool(server, runtime, "scan_finding_validate", {
+    workspaceId: z.string(),
+    scanId: z.string(),
+    criterionId: z.string(),
+    boundaryMap: boundaryMapArtifactSchema.optional(),
   });
 
   registerTool(server, runtime, "scan_finding_create", {

@@ -50,6 +50,7 @@ describe("HiveMap MCP SDK server", () => {
       "repository_evidence_candidates",
       "scan_boundary_map_build",
       "scan_profile_overlay_help",
+      "scan_profile_overlay_suggest",
       "concept_embedding_upsert",
       "concept_embedding_refresh",
       "concept_embedding_backfill",
@@ -67,6 +68,7 @@ describe("HiveMap MCP SDK server", () => {
       "scan_start",
       "scan_record_coverage",
       "scan_calibration_decide",
+      "scan_finding_validate",
       "scan_finding_create",
       "finding_update",
       "scan_complete",
@@ -297,6 +299,26 @@ describe("HiveMap MCP SDK server", () => {
       }),
     });
 
+    const findingValidationResult = await client.callTool({
+      name: "scan_finding_validate",
+      arguments: {
+        workspaceId: "workspace-a",
+        scanId: "scan-boundary",
+        criterionId: "duplicate-responsibility",
+      },
+    });
+    expect(findingValidationResult.structuredContent).toEqual({
+      ok: true,
+      tool: "scan_finding_validate",
+      value: expect.objectContaining({
+        scanId: "scan-boundary",
+        criterionId: "duplicate-responsibility",
+        assessment: expect.objectContaining({
+          classification: "ambiguous-shape",
+        }),
+      }),
+    });
+
     const calibrationDecisionResult = await client.callTool({
       name: "scan_calibration_decide",
       arguments: {
@@ -360,6 +382,32 @@ describe("HiveMap MCP SDK server", () => {
       value: expect.objectContaining({
         overlayPath: ".hivemap/scan-profiles/code-quality.yaml",
         guidanceTool: "scan_profile_overlay_help",
+        overlayBuildWorkflow: expect.any(Array),
+        symptomToFieldHints: expect.arrayContaining([
+          expect.objectContaining({ id: "scope-roots", fields: expect.arrayContaining(["boundaryMapRoots"]) }),
+        ]),
+      }),
+    });
+
+    const overlaySuggestionResult = await client.callTool({
+      name: "scan_profile_overlay_suggest",
+      arguments: {
+        workspaceId: "workspace-a",
+        scanId: "scan-boundary",
+        symptomId: "scope-roots",
+      },
+    });
+    expect(overlaySuggestionResult.structuredContent).toEqual({
+      ok: true,
+      tool: "scan_profile_overlay_suggest",
+      value: expect.objectContaining({
+        scanId: "scan-boundary",
+        recommendedDecision: "refine-overlay",
+        symptom: expect.objectContaining({ id: "scope-roots" }),
+        suggestedFields: expect.arrayContaining([
+          expect.objectContaining({ name: "include" }),
+          expect.objectContaining({ name: "boundaryMapRoots" }),
+        ]),
       }),
     });
 

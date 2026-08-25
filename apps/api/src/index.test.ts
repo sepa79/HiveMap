@@ -270,6 +270,22 @@ describe("api server", () => {
         }),
       }),
     );
+
+    const overlaySuggestionResponse = await postJson("/workspaces/workspace-a/scans/scan-boundary/overlay-suggestion", {
+      symptomId: "scope-roots",
+    });
+    expect(overlaySuggestionResponse.status).toBe(200);
+    expect(parseJson(overlaySuggestionResponse)).toEqual(
+      expect.objectContaining({
+        scanId: "scan-boundary",
+        recommendedDecision: "refine-overlay",
+        symptom: expect.objectContaining({ id: "scope-roots" }),
+        suggestedFields: expect.arrayContaining([
+          expect.objectContaining({ name: "include" }),
+          expect.objectContaining({ name: "boundaryMapRoots" }),
+        ]),
+      }),
+    );
   });
 
   it("returns 409 when boundary map build skips the explicit calibration decision", async () => {
@@ -723,6 +739,38 @@ describe("api server", () => {
           discoveredCount: 3,
           includedCount: 1,
           warnings: [],
+        }),
+      }),
+    );
+  });
+
+  it("classifies a code-scan finding through REST before durable creation", async () => {
+    await createWorkspace();
+    await createCompletedRepositoryIndex();
+
+    const startResponse = await postJson("/workspaces/workspace-a/scans", {
+      scan: {
+        id: "scan-validate",
+        profileId: "code-quality-review",
+        profileVersion: 1,
+        repositoryIndexId: "repo-index-scan",
+        actor: { agentId: "agent-a", tool: "codex" },
+        startedAt: "2026-08-20T12:10:00.000Z",
+      },
+    });
+    expect(startResponse.status).toBe(201);
+
+    const response = await postJson("/workspaces/workspace-a/scans/scan-validate/finding-validation", {
+      criterionId: "duplicate-responsibility",
+    });
+
+    expect(response.status).toBe(200);
+    expect(parseJson(response)).toEqual(
+      expect.objectContaining({
+        scanId: "scan-validate",
+        criterionId: "duplicate-responsibility",
+        assessment: expect.objectContaining({
+          classification: "ambiguous-shape",
         }),
       }),
     );

@@ -353,6 +353,20 @@ export type ScanCalibrationAssessment = {
   recommendedActions: string[];
 };
 
+export type ScanFindingValidationClassification =
+  | "likely-real-finding"
+  | "profile-gap"
+  | "missing-evidence"
+  | "ambiguous-shape";
+
+export type ScanFindingValidationAssessment = {
+  classification: ScanFindingValidationClassification;
+  confidence: "low" | "medium" | "high";
+  summary: string;
+  reasons: string[];
+  recommendedActions: string[];
+};
+
 export type ScanCalibrationDecisionGuidance = {
   decisionRequired: true;
   availableDecisions: ScanCalibrationDecision[];
@@ -404,6 +418,25 @@ export type GetScanProfileOverlayHelpRequest = {
   profileVersion: number;
 };
 
+export const SCAN_PROFILE_OVERLAY_SYMPTOM_VALUES = [
+  "scope-roots",
+  "boundary-map-heuristics",
+  "duplicate-responsibility-selection",
+  "duplicate-authority-selection",
+  "missing-owner-materiality",
+  "stale-documentation-currentness",
+  "ssot-order",
+] as const;
+
+export type ScanProfileOverlaySymptomId = (typeof SCAN_PROFILE_OVERLAY_SYMPTOM_VALUES)[number];
+
+export type ScanProfileOverlaySymptomHint = {
+  id: ScanProfileOverlaySymptomId;
+  symptom: string;
+  fields: string[];
+  rationale: string;
+};
+
 export type GetScanProfileOverlayHelpResponse = {
   profileId: string;
   profileVersion: number;
@@ -420,12 +453,36 @@ export type GetScanProfileOverlayHelpResponse = {
     required: boolean;
     description: string;
   }>;
+  overlayBuildWorkflow: string[];
+  symptomToFieldHints: ScanProfileOverlaySymptomHint[];
   baseScope: {
     include: string[];
     exclude: string[];
   };
   template: string;
   example: string;
+};
+
+export type SuggestScanProfileOverlayRequest = {
+  workspaceId: string;
+  scanId: string;
+  symptomId: ScanProfileOverlaySymptomId;
+};
+
+export type SuggestScanProfileOverlayResponse = {
+  scanId: string;
+  profileId: string;
+  profileVersion: number;
+  overlay: ScanProfileOverlayResolution;
+  recommendedDecision: "refine-overlay";
+  symptom: ScanProfileOverlaySymptomHint;
+  suggestedFields: Array<{
+    name: string;
+    source: "effective-profile" | "boundary-map-config";
+    currentValues: string[];
+  }>;
+  suggestedOverlayPatch: string;
+  nextActions: string[];
 };
 
 export type ApplyGraphCommandsRequest = {
@@ -574,6 +631,19 @@ export type RecordScanCalibrationDecisionResponse = {
   recordedDecision: ScanCalibrationDecisionRecord;
 };
 
+export type ValidateScanFindingRequest = {
+  workspaceId: string;
+  scanId: string;
+  criterionId: string;
+  boundaryMap?: BoundaryMapArtifact;
+};
+
+export type ValidateScanFindingResponse = {
+  scanId: string;
+  criterionId: string;
+  assessment: ScanFindingValidationAssessment;
+};
+
 export type CreateScanFindingRequest = { workspaceId: string; scanId: string; finding: FindingNodeInput };
 export type CreateScanFindingResponse = { node: import("@hivemap/graph-core").GraphNode; run: InProgressScanRun };
 
@@ -618,6 +688,7 @@ export type McpToolName =
   | "repository_evidence_candidates"
   | "scan_boundary_map_build"
   | "scan_profile_overlay_help"
+  | "scan_profile_overlay_suggest"
   | "concept_embedding_upsert"
   | "concept_embedding_refresh"
   | "concept_embedding_backfill"
@@ -635,6 +706,7 @@ export type McpToolName =
   | "scan_start"
   | "scan_record_coverage"
   | "scan_calibration_decide"
+  | "scan_finding_validate"
   | "scan_finding_create"
   | "finding_update"
   | "scan_complete"
@@ -656,6 +728,7 @@ export type McpToolRequestMap = {
   repository_evidence_candidates: ListRepositoryEvidenceCandidatesRequest;
   scan_boundary_map_build: BuildScanBoundaryMapRequest;
   scan_profile_overlay_help: GetScanProfileOverlayHelpRequest;
+  scan_profile_overlay_suggest: SuggestScanProfileOverlayRequest;
   concept_embedding_upsert: UpsertConceptEmbeddingRequest;
   concept_embedding_refresh: RefreshConceptEmbeddingRequest;
   concept_embedding_backfill: BackfillConceptEmbeddingsRequest;
@@ -673,6 +746,7 @@ export type McpToolRequestMap = {
   scan_start: StartScanRequest;
   scan_record_coverage: RecordScanCoverageRequest;
   scan_calibration_decide: RecordScanCalibrationDecisionRequest;
+  scan_finding_validate: ValidateScanFindingRequest;
   scan_finding_create: CreateScanFindingRequest;
   finding_update: UpdateFindingRequest;
   scan_complete: CompleteScanRequest;
@@ -693,6 +767,7 @@ export type RestEndpointName =
   | "repository-index.evidence-candidates"
   | "scan.boundary-map.build"
   | "scan-profile-overlay.help"
+  | "scan-profile-overlay.suggest"
   | "concept-embedding.upsert"
   | "concept-embedding.refresh"
   | "concept-embedding.backfill"
@@ -713,6 +788,7 @@ export type RestEndpointName =
   | "scan.list"
   | "scan.start"
   | "scan.coverage.record"
+  | "scan.finding.validate"
   | "scan.finding.create"
   | "finding.update"
   | "scan.complete"
@@ -812,6 +888,15 @@ export function validateGetScanProfileOverlayHelpRequest(request: GetScanProfile
   assertNonEmpty("profileId", request.profileId);
   if (!Number.isInteger(request.profileVersion) || request.profileVersion < 1) {
     throw new ApiContractValidationError("profileVersion must be a positive integer");
+  }
+}
+
+export function validateSuggestScanProfileOverlayRequest(request: SuggestScanProfileOverlayRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("scanId", request.scanId);
+  assertNonEmpty("symptomId", request.symptomId);
+  if (!SCAN_PROFILE_OVERLAY_SYMPTOM_VALUES.includes(request.symptomId)) {
+    throw new ApiContractValidationError(`Unknown scan profile overlay symptom: ${request.symptomId}`);
   }
 }
 
@@ -949,6 +1034,15 @@ export function validateRecordScanCalibrationDecisionRequest(request: RecordScan
   }
   assertNonEmpty("rationale", request.rationale);
   assertDate("recordedAt", request.recordedAt);
+}
+
+export function validateValidateScanFindingRequest(request: ValidateScanFindingRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("scanId", request.scanId);
+  assertNonEmpty("criterionId", request.criterionId);
+  if (request.boundaryMap !== undefined) {
+    validateBoundaryMap(request.boundaryMap);
+  }
 }
 
 export function validateCreateScanFindingRequest(request: CreateScanFindingRequest): void {

@@ -33,6 +33,7 @@ describe("MCP tool adapter", () => {
       "repository_evidence_candidates",
       "scan_boundary_map_build",
       "scan_profile_overlay_help",
+      "scan_profile_overlay_suggest",
       "concept_embedding_upsert",
       "concept_embedding_refresh",
       "concept_embedding_backfill",
@@ -50,6 +51,7 @@ describe("MCP tool adapter", () => {
       "scan_start",
       "scan_record_coverage",
       "scan_calibration_decide",
+      "scan_finding_validate",
       "scan_finding_create",
       "finding_update",
       "scan_complete",
@@ -343,6 +345,126 @@ describe("MCP tool adapter", () => {
         profileVersion: 1,
         overlayPath: ".hivemap/scan-profiles/code-quality.yaml",
         guidanceTool: "scan_profile_overlay_help",
+        overlayBuildWorkflow: expect.any(Array),
+        symptomToFieldHints: expect.arrayContaining([
+          expect.objectContaining({ id: "scope-roots", fields: expect.arrayContaining(["boundaryMapRoots"]) }),
+        ]),
+      }),
+    });
+  });
+
+  it("returns a repo-aware overlay suggestion through shared runtime", async () => {
+    await handleMcpTool(runtime, "project_create", {
+      workspace: {
+        id: "workspace-a",
+        name: "Alpha",
+        createdAt: "2026-05-13T21:00:00.000Z",
+      },
+    });
+    await handleMcpTool(runtime, "repository_index_start", {
+      workspaceId: "workspace-a",
+      index: {
+        id: "repo-index-overlay-suggest",
+        repositoryUrl: "/fixtures/repo",
+        requestedRef: "main",
+        mode: "safe",
+        requestedAt: "2026-08-25T10:00:00.000Z",
+        actor: {
+          agentId: "codex",
+          tool: "mcp",
+        },
+      },
+    });
+    await handleMcpTool(runtime, "repository_index_execute", {
+      workspaceId: "workspace-a",
+      indexId: "repo-index-overlay-suggest",
+    });
+    await handleMcpTool(runtime, "scan_start", {
+      workspaceId: "workspace-a",
+      scan: {
+        id: "scan-overlay-suggest",
+        profileId: "code-quality-review",
+        profileVersion: 1,
+        repositoryIndexId: "repo-index-overlay-suggest",
+        actor: { agentId: "agent-a", tool: "codex" },
+        startedAt: "2026-08-25T10:01:00.000Z",
+      },
+    });
+
+    await expect(
+      handleMcpTool(runtime, "scan_profile_overlay_suggest", {
+        workspaceId: "workspace-a",
+        scanId: "scan-overlay-suggest",
+        symptomId: "scope-roots",
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      tool: "scan_profile_overlay_suggest",
+      value: expect.objectContaining({
+        scanId: "scan-overlay-suggest",
+        recommendedDecision: "refine-overlay",
+        symptom: expect.objectContaining({ id: "scope-roots" }),
+        suggestedFields: expect.arrayContaining([
+          expect.objectContaining({ name: "include" }),
+          expect.objectContaining({ name: "boundaryMapRoots" }),
+        ]),
+      }),
+    });
+  });
+
+  it("classifies a code-scan finding through shared runtime", async () => {
+    await handleMcpTool(runtime, "project_create", {
+      workspace: {
+        id: "workspace-a",
+        name: "Alpha",
+        createdAt: "2026-05-13T21:00:00.000Z",
+      },
+    });
+    await handleMcpTool(runtime, "repository_index_start", {
+      workspaceId: "workspace-a",
+      index: {
+        id: "repo-index-a",
+        repositoryUrl: "/fixtures/repo",
+        requestedRef: "main",
+        mode: "safe",
+        requestedAt: "2026-08-20T12:00:00.000Z",
+        actor: {
+          agentId: "codex",
+          tool: "mcp",
+        },
+      },
+    });
+    await handleMcpTool(runtime, "repository_index_execute", {
+      workspaceId: "workspace-a",
+      indexId: "repo-index-a",
+    });
+    await handleMcpTool(runtime, "scan_start", {
+      workspaceId: "workspace-a",
+      scan: {
+        id: "scan-validate",
+        profileId: "code-quality-review",
+        profileVersion: 1,
+        repositoryIndexId: "repo-index-a",
+        actor: { agentId: "agent-a", tool: "codex" },
+        startedAt: "2026-08-20T12:10:00.000Z",
+      },
+    });
+
+    await expect(
+      handleMcpTool(runtime, "scan_finding_validate", {
+        workspaceId: "workspace-a",
+        scanId: "scan-validate",
+        criterionId: "duplicate-responsibility",
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      tool: "scan_finding_validate",
+      value: expect.objectContaining({
+        scanId: "scan-validate",
+        criterionId: "duplicate-responsibility",
+        assessment: expect.objectContaining({
+          classification: "ambiguous-shape",
+        }),
       }),
     });
   });

@@ -16,6 +16,7 @@ import {
   validateCreateWorkspaceRequest,
   validateExecuteRepositoryIndexRequest,
   validateGetScanProfileOverlayHelpRequest,
+  validateSuggestScanProfileOverlayRequest,
   validateListRepositoryEvidenceCandidatesRequest,
   validateGetWorkspaceSummaryRequest,
   validateGetProjectionRequest,
@@ -29,6 +30,7 @@ import {
   validateResolveWorkspaceRequest,
   validateSearchRepositoryIndexRequest,
   validateStartRepositoryIndexRequest,
+  validateValidateScanFindingRequest,
   type McpToolName,
   type McpToolRequestMap,
 } from "./index.js";
@@ -131,7 +133,24 @@ describe("api contracts", () => {
         profileVersion: 1,
       }),
     ).not.toThrow();
+    expect(() =>
+      validateSuggestScanProfileOverlayRequest({
+        workspaceId: "workspace-a",
+        scanId: "scan-a",
+        symptomId: "scope-roots",
+      }),
+    ).not.toThrow();
     expect(() => validateBuildScanBoundaryMapRequest({ workspaceId: "workspace-a", scanId: "scan-a" })).not.toThrow();
+  });
+
+  it("rejects unknown overlay suggestion symptoms", () => {
+    expect(() =>
+      validateSuggestScanProfileOverlayRequest({
+        workspaceId: "workspace-a",
+        scanId: "scan-a",
+        symptomId: "bad-symptom" as "scope-roots",
+      }),
+    ).toThrow("Unknown scan profile overlay symptom");
   });
 
   it("rejects semantically invalid boundary-map payloads on scan completion", () => {
@@ -213,6 +232,23 @@ describe("api contracts", () => {
         recordedAt: "2026-08-25T10:00:00.000Z",
       }),
     ).toThrow("Unknown scan calibration decision");
+  });
+
+  it("validates criterion-scoped finding validation requests", () => {
+    expect(() =>
+      validateValidateScanFindingRequest({
+        workspaceId: "workspace-a",
+        scanId: "scan-a",
+        criterionId: "duplicate-responsibility",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateValidateScanFindingRequest({
+        workspaceId: "workspace-a",
+        scanId: "scan-a",
+        criterionId: " ",
+      }),
+    ).toThrow("criterionId");
   });
 
   it("rejects empty graph command batches", () => {

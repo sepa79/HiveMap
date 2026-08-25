@@ -19,10 +19,23 @@ Before recording findings on a new repository shape or newly refined profile, ru
 3. Record one explicit calibration decision with `scan_calibration_decide`: `continue`, `refine-overlay`, `correct-coverage`, `build-boundary-map`, or `restart-scan`.
 4. For code/test/tool scans, call `scan_boundary_map_build` after recording `build-boundary-map` when the repository shape is new, uncertain, or suspiciously broad.
 5. Inspect the preliminary output for structural mismatches such as fixture corpora treated as first-class boundaries, missing docs or CLI surfaces, helper exports treated as public API, or tests attached to the wrong boundary.
-6. If the profile shape is wrong, refine the repository-local overlay or record one explicit coverage correction and then restart the scan from the same completed repository index with a new scan id.
-7. Only after the preliminary pass looks coherent should the agent record `continue` and proceed into the normal findings workflow.
+6. Use `scan_finding_validate` for representative criteria once the provisional repository shape looks coherent enough to distinguish real repository gaps from calibration defects.
+7. If the profile shape is wrong, call `scan_profile_overlay_suggest` for one concrete symptom first, then refine the repository-local overlay or criterion-oriented evidence recipe fields, including duplicate-authority claim/topic selectors, missing-owner materiality markers, stale-documentation currentness markers, or duplicate-responsibility symbol/path selectors, or record one explicit coverage correction, and then restart the scan from the same completed repository index with a new scan id.
+8. Only after the preliminary pass looks coherent should the agent record `continue` and proceed into the normal findings workflow.
 
 This loop is the preferred place to discover that a repository needs different include/exclude scope, SSOT order, criteria emphasis, or boundary-map heuristics. Do not paper over those issues by pushing low-confidence findings into the first pass.
+
+## Overlay Build Process
+
+Use the same repeatable process for any repository:
+
+1. Start from one completed repository index and one provisional `scan_start`; do not tune overlay fields against an unbounded local working tree.
+2. Look at one concrete calibration symptom first: wrong roots, wrong test/contract linking, noisy authority packets, missing-owner materiality drift, stale-documentation currentness drift, or mis-ranked SSOT.
+3. Call `scan_profile_overlay_help` and pick the smallest matching field set from `symptomToFieldHints` instead of editing unrelated fields.
+4. Call `scan_profile_overlay_suggest` with that symptom id to get a repo-aware YAML scaffold seeded from the active effective profile and current boundary-map config.
+5. Change recipe fields before broad scope fields when the problem is packet shape; change scope fields before recipe fields when the wrong files are included at all.
+6. Record `refine-overlay`, restart the scan from the same repository index, and compare whether the new provisional pass removed the original symptom.
+7. Keep only overlay fields that changed calibration outcome; remove guesses that did not materially change coverage, boundary shape, or evidence packets.
 
 ## Retrieve Evidence Packets
 
@@ -39,6 +52,7 @@ The current documentation/SSOT slice is intentionally selective:
 - duplicate-authority packets should already be topic-aware rather than broad pairwise authority matches;
 - stale-documentation packets should already be narrowed to lower-precedence, current-looking docs that conflict with stronger SSOT sources;
 - missing-owner packets should prefer material docs over generic glossary/history pages.
+- When those packet shapes are wrong for the repository, prefer changing the explicit recipe fields in the repo-local overlay over adding more runtime heuristics.
 
 ## Review Derived Coverage
 
@@ -52,15 +66,16 @@ Coverage is evidence of what the scan considered. A source that was not discover
 ## Map And Record Findings
 
 1. Use explicit `graph_command` operations to map bounded concepts and relationships after reviewing the selected evidence packets for the active criterion.
-2. Call `scan_finding_create` for bounded problems. Documentation scans commonly use conflicts, stale claims, missing ownership, implementation drift, broken references, or quality problems. Technical scans should use precise kinds such as architecture-risk, runtime-risk, authority-gap, test-gap, or deployment-risk when those better describe the cleanup.
+2. Call `scan_finding_validate` before `scan_finding_create` for each suspected bounded problem, passing the reviewed `boundaryMap` when the scan depends on repository structure.
 3. Record `continue` before calling `scan_finding_create`.
-4. Give every finding a stable semantic fingerprint that should recur across scans when the same problem remains.
-5. Attach exact source references, bounded claims, criterion ids, affected concepts, severity, confidence, and a recommended action.
-6. Conflict findings require at least two claims.
-7. Create a findings-first overview projection using the stable `Critical`, `High`, `Medium`, and `Low` priority columns from the scan contract. Keep finding kind visible on each card and keep the underlying domain map as a separate view.
-8. Verify that diving into a finding shows the finding and every concept named by `affectedNodeIds`; source claims remain in the detail panel.
-9. Add a projection orientation note describing what the scan map is for, how priority columns and finding kinds are used, how to open evidence, and how Back returns to the review queue.
-10. Verify the same overview → finding → overview transition with both the application Back button and browser Back.
+4. Call `scan_finding_create` only for bounded problems whose validation is now `likely-real-finding`. Documentation scans commonly use conflicts, stale claims, missing ownership, implementation drift, broken references, or quality problems. Technical scans should use precise kinds such as architecture-risk, runtime-risk, authority-gap, test-gap, or deployment-risk when those better describe the cleanup.
+5. Give every finding a stable semantic fingerprint that should recur across scans when the same problem remains.
+6. Attach exact source references, bounded claims, criterion ids, affected concepts, severity, confidence, and a recommended action.
+7. Conflict findings require at least two claims.
+8. Create a findings-first overview projection using the stable `Critical`, `High`, `Medium`, and `Low` priority columns from the scan contract. Keep finding kind visible on each card and keep the underlying domain map as a separate view.
+9. Verify that diving into a finding shows the finding and every concept named by `affectedNodeIds`; source claims remain in the detail panel.
+10. Add a projection orientation note describing what the scan map is for, how priority columns and finding kinds are used, how to open evidence, and how Back returns to the review queue.
+11. Verify the same overview → finding → overview transition with both the application Back button and browser Back.
 
 Do not create a finding merely because a file changed. Record a bounded semantic problem supported by the selected criterion.
 

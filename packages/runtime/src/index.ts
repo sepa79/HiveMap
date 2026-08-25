@@ -5,6 +5,7 @@ import {
   validateExecuteRepositoryIndexRequest,
   validateBuildScanBoundaryMapRequest,
   validateGetScanProfileOverlayHelpRequest,
+  validateSuggestScanProfileOverlayRequest,
   validateGetRepositoryIndexRequest,
   validateGetWorkspaceSummaryRequest,
   validateListRepositoryIndexesRequest,
@@ -36,6 +37,7 @@ import {
   validateRecordScanCoverageRequest,
   validateStartScanRequest,
   validateUpdateFindingRequest,
+  validateValidateScanFindingRequest,
   type ApplyGraphCommandsRequest,
   type ApplyGraphCommandsResponse,
   type ApplyProposalRequest,
@@ -58,6 +60,10 @@ import {
   type GetWorkspaceSummaryResponse,
   type GetScanProfileOverlayHelpRequest,
   type GetScanProfileOverlayHelpResponse,
+  type ScanProfileOverlaySymptomHint,
+  type ScanProfileOverlaySymptomId,
+  type SuggestScanProfileOverlayRequest,
+  type SuggestScanProfileOverlayResponse,
   type GetCategoriesResponse,
   type GetGraphRequest,
   type GetGraphResponse,
@@ -76,6 +82,7 @@ import {
   type ScanCalibrationAssessment,
   type ScanCalibrationDecisionGuidance,
   type ScanCoverageSummary,
+  type ScanFindingValidationAssessment,
   type ScanProfileOverlayResolution,
   type GetWorkspaceResponse,
   type ListFeedbackRequest,
@@ -127,6 +134,8 @@ import {
   type UpdateFindingResponse,
   type UpsertConceptEmbeddingRequest,
   type UpsertConceptEmbeddingResponse,
+  type ValidateScanFindingRequest,
+  type ValidateScanFindingResponse,
   type WorkspaceSummary,
 } from "@hivemap/api-contracts";
 import { applyApprovedProposal, approvePendingProposal, DEFAULT_CAPTURE_POLICY, rejectPendingProposal } from "@hivemap/capture";
@@ -558,6 +567,59 @@ export class HiveMapRuntime {
     const state = await this.store.loadWorkspaceState(request.workspaceId);
     const profile = findScanProfile(state, request.profileId, request.profileVersion);
     return createScanProfileOverlayHelp(profile);
+  }
+
+  async suggestScanProfileOverlay(request: SuggestScanProfileOverlayRequest): Promise<SuggestScanProfileOverlayResponse> {
+    validateSuggestScanProfileOverlayRequest(request);
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
+    const run = findInProgressScan(state, request.scanId);
+    if (run.effectiveProfile === undefined) {
+      throw new RuntimeError(`Scan effective profile snapshot is required before suggesting overlay edits: ${run.id}`, {
+        code: "SCAN_EFFECTIVE_PROFILE_REQUIRED",
+        details: { scanId: run.id },
+      });
+    }
+
+    const repositoryIndexId = run.repository.repositoryIndexId;
+    if (repositoryIndexId === undefined) {
+      throw new RuntimeError(`Scan must reference a completed repository index before suggesting overlay edits: ${run.id}`, {
+        code: "SCAN_REPOSITORY_INDEX_REQUIRED",
+        details: { scanId: run.id },
+      });
+    }
+
+    const repositoryIndex = await this.store.getRepositoryIndex(request.workspaceId, repositoryIndexId);
+    if (repositoryIndex.stage !== "completed") {
+      throw new RuntimeError(`Repository index must be completed before suggesting overlay edits: ${repositoryIndex.id}`, {
+        code: "REPOSITORY_INDEX_NOT_COMPLETED",
+        details: { indexId: repositoryIndex.id, stage: repositoryIndex.stage },
+      });
+    }
+
+    const baseProfile = findScanProfile(state, run.profileId, run.profileVersion);
+    const files = await this.store.listRepositoryIndexFiles(request.workspaceId, repositoryIndexId);
+    const chunks = await this.store.listRepositoryIndexChunks(request.workspaceId, repositoryIndexId);
+    const symbols = await this.store.listRepositoryIndexSymbols(request.workspaceId, repositoryIndexId);
+    const profileContext = resolveScanProfileContext(baseProfile, files, chunks, symbols);
+    const boundaryMapConfig = resolveBoundaryMapBuildConfig(baseProfile, files, chunks);
+    const symptom = findOverlaySymptomHint(run.effectiveProfile, request.symptomId);
+    const suggestedFields = createSuggestedOverlayFields(run.effectiveProfile, boundaryMapConfig, symptom);
+
+    return {
+      scanId: run.id,
+      profileId: run.profileId,
+      profileVersion: run.profileVersion,
+      overlay: profileContext.overlay,
+      recommendedDecision: "refine-overlay",
+      symptom,
+      suggestedFields,
+      suggestedOverlayPatch: serializeSuggestedOverlayPatch(run.effectiveProfile, suggestedFields),
+      nextActions: [
+        `Edit ${profileContext.overlay.overlayPath} using only the fields in this scaffold.`,
+        "Record calibration decision refine-overlay before restarting the scan from the same completed repository index.",
+        "Restart the scan with a new scan id and verify that the original calibration symptom disappears before creating findings.",
+      ],
+    };
   }
 
   async upsertConceptEmbedding(request: UpsertConceptEmbeddingRequest): Promise<UpsertConceptEmbeddingResponse> {
@@ -1016,6 +1078,108 @@ export class HiveMapRuntime {
     validateScanRun(updated, state.scanProfiles, state.graph);
     await this.store.saveWorkspaceState({ ...state, scanRuns: replaceById(state.scanRuns, updated) });
     return { run: updated };
+  }
+
+  async validateScanFinding(request: ValidateScanFindingRequest): Promise<ValidateScanFindingResponse> {
+    validateValidateScanFindingRequest(request);
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
+    const run = findInProgressScan(state, request.scanId);
+    if (run.coverage === undefined) {
+      throw new RuntimeError(`Scan coverage is required before validating findings: ${run.id}`, {
+        code: "SCAN_COVERAGE_REQUIRED",
+        details: { scanId: run.id },
+      });
+    }
+    const repositoryIndexId = run.repository.repositoryIndexId;
+    if (repositoryIndexId === undefined) {
+      throw new RuntimeError(`Scan must reference a completed repository index before validating findings: ${run.id}`, {
+        code: "SCAN_REPOSITORY_INDEX_REQUIRED",
+        details: { scanId: run.id },
+      });
+    }
+
+    const baseProfile = findScanProfile(state, run.profileId, run.profileVersion);
+    const profile = run.effectiveProfile ?? baseProfile;
+    if (!profile.criteria.some((criterion) => criterion.id === request.criterionId)) {
+      throw new RuntimeError(`Scan criterion not found in effective profile: ${request.criterionId}`, {
+        code: "SCAN_CRITERION_NOT_FOUND",
+        details: {
+          scanId: run.id,
+          profileId: profile.id,
+          profileVersion: profile.version,
+          criterionId: request.criterionId,
+        },
+      });
+    }
+
+    const repositoryIndex = await this.store.getRepositoryIndex(request.workspaceId, repositoryIndexId);
+    if (repositoryIndex.stage !== "completed") {
+      throw new RuntimeError(`Repository index must be completed before validating findings: ${repositoryIndex.id}`, {
+        code: "REPOSITORY_INDEX_NOT_COMPLETED",
+        details: { indexId: repositoryIndex.id, stage: repositoryIndex.stage },
+      });
+    }
+
+    const files = await this.store.listRepositoryIndexFiles(request.workspaceId, repositoryIndexId);
+    const chunks = await this.store.listRepositoryIndexChunks(request.workspaceId, repositoryIndexId);
+    const symbols = await this.store.listRepositoryIndexSymbols(request.workspaceId, repositoryIndexId);
+    const dependencies = await this.store.listRepositoryIndexDependencies(request.workspaceId, repositoryIndexId);
+    const profileContext = resolveScanProfileContext(baseProfile, files, chunks, symbols);
+    const coverageSummary = summarizeRecordedCoverage(run.coverage, files, symbols);
+    const overlay = profileContext.overlay;
+
+    const structuralAssessment =
+      request.boundaryMap === undefined
+        ? createStartScanCalibrationAssessment(profile, overlay, coverageSummary)
+        : createBoundaryMapCalibrationAssessment(coverageSummary, request.boundaryMap);
+    if (structuralAssessment.classification !== "findings-ready") {
+      return {
+        scanId: run.id,
+        criterionId: request.criterionId,
+        assessment: mapCalibrationAssessmentToFindingValidation(structuralAssessment),
+      };
+    }
+
+    const candidates = createRepositoryEvidenceCandidates({
+      profile,
+      criterionId: request.criterionId,
+      files,
+      chunks,
+      symbols,
+      dependencies,
+      limit: 20,
+    });
+    const evidenceAssessment = createEvidenceCandidatesCalibrationAssessment(
+      request.criterionId,
+      coverageSummary,
+      overlay,
+      candidates,
+    );
+    if (evidenceAssessment.classification !== "findings-ready") {
+      return {
+        scanId: run.id,
+        criterionId: request.criterionId,
+        assessment: mapCalibrationAssessmentToFindingValidation(evidenceAssessment),
+      };
+    }
+
+    return {
+      scanId: run.id,
+      criterionId: request.criterionId,
+      assessment: {
+        classification: "likely-real-finding",
+        confidence: candidates.some((candidate) => candidate.kind === "deterministic") ? "high" : "medium",
+        summary: `The calibrated run has bounded evidence for criterion ${request.criterionId}; the next review step can focus on whether the suspected issue is a real finding.`,
+        reasons: [
+          `Structural calibration is findings-ready for scan ${run.id}.`,
+          `Prepared evidence packets exist for criterion ${request.criterionId}.`,
+        ],
+        recommendedActions: [
+          "Review the bounded candidate packets and create a finding only if the specific claims support a semantic problem.",
+          "If the candidate packets still feel indirect, keep the result as a bounded open question instead of forcing a high-confidence finding.",
+        ],
+      },
+    };
   }
 
   async createScanFinding(request: CreateScanFindingRequest): Promise<CreateScanFindingResponse> {
@@ -1485,6 +1649,42 @@ function createScanProfileOverlayHelp(profile: ScanProfile): GetScanProfileOverl
     "  - test",
     "criteria:",
     "  - contract-drift: Implementation behavior differs from the owning contract.",
+    "duplicateAuthorityClaimPatterns:",
+    "  - source of truth",
+    "duplicateAuthorityIgnoredTopicTokens:",
+    "  - source",
+    "  - truth",
+    "duplicateAuthorityGenericTopicTokens:",
+    "  - runtime",
+    "  - policy",
+    "missingOwnerMaterialPaths:",
+    "  - readme.md",
+    "missingOwnerMaterialFileNames:",
+    "  - agents.md",
+    "missingOwnerIgnoredPathMarkers:",
+    "  - docs/design/",
+    "missingOwnerPathKeywords:",
+    "  - contract",
+    "missingOwnerTextKeywords:",
+    "  - incident",
+    "staleDocumentationMaterialFileNames:",
+    "  - readme.md",
+    "staleDocumentationIgnoredPathMarkers:",
+    "  - glossary",
+    "staleDocumentationPathKeywords:",
+    "  - spec",
+    "staleDocumentationTextKeywords:",
+    "  - supported",
+    "staleDocumentationNonCurrentPathMarkers:",
+    "  - legacy",
+    "staleDocumentationNonCurrentTextMarkers:",
+    "  - this document is deprecated",
+    "duplicateResponsibilityTopLevelSymbolKinds:",
+    "  - class",
+    "  - function",
+    "duplicateResponsibilityIgnorePathGlobs:",
+    "  - '**/generated/**'",
+    "  - '**/__fixtures__/**'",
     "ssotOrder:",
     "  - AGENTS.md",
     "  - docs/specs/**",
@@ -1541,6 +1741,16 @@ function createScanProfileOverlayHelp(profile: ScanProfile): GetScanProfileOverl
           "criteria:",
           "  - duplicate-responsibility: Multiple services own the same runtime policy behavior.",
           "  - undocumented-api: A public service behavior lacks an owning contract.",
+          "duplicateResponsibilityTopLevelSymbolKinds:",
+          "  - class",
+          "  - function",
+          "  - type-alias",
+          "duplicateResponsibilityIgnorePathGlobs:",
+          "  - '**/legacy/**'",
+          "  - '**/*.generated.ts'",
+          "duplicateAuthorityGenericTopicTokens:",
+          "  - runtime",
+          "  - service",
           "ssotOrder:",
           "  - AGENTS.md",
           "  - docs/specs/**",
@@ -1582,6 +1792,21 @@ function createScanProfileOverlayHelp(profile: ScanProfile): GetScanProfileOverl
           "  - docs/archive/**",
           "archivePatterns:",
           "  - historical/**",
+          "duplicateAuthorityClaimPatterns:",
+          "  - source of truth",
+          "duplicateAuthorityGenericTopicTokens:",
+          "  - semantic",
+          "  - graph",
+          "missingOwnerMaterialFileNames:",
+          "  - agents.md",
+          "  - readme.md",
+          "missingOwnerPathKeywords:",
+          "  - design",
+          "  - contract",
+          "staleDocumentationNonCurrentPathMarkers:",
+          "  - archive",
+          "staleDocumentationNonCurrentTextMarkers:",
+          "  - superseded by",
           "ssotOrder:",
           "  - AGENTS.md",
           "  - docs/specs/**",
@@ -1590,6 +1815,8 @@ function createScanProfileOverlayHelp(profile: ScanProfile): GetScanProfileOverl
           "boundaryMapTestDirectoryNames:",
           "  - tests",
         ];
+  const overlayBuildWorkflow = createOverlayBuildWorkflow();
+  const symptomToFieldHints = createOverlaySymptomHints(profile);
 
   return {
     profileId: profile.id,
@@ -1609,6 +1836,22 @@ function createScanProfileOverlayHelp(profile: ScanProfile): GetScanProfileOverl
       "archivePatterns, legacyPatterns, and generatedPatterns append to the effective exclude list.",
       "sourceTypes replaces the built-in source type list.",
       "criteria replaces the built-in criterion list; use '- criterion-id: description' entries.",
+      "duplicateAuthorityClaimPatterns replaces the regex patterns used to detect authority-style documentation claims.",
+      "duplicateAuthorityIgnoredTopicTokens replaces the topic tokens ignored when duplicate-authority derives shared concerns from headings and lines.",
+      "duplicateAuthorityGenericTopicTokens replaces the generic shared tokens that are insufficient on their own for duplicate-authority evidence selection.",
+      "missingOwnerMaterialPaths replaces the exact normalized paths always treated as material for missing-owner evidence selection.",
+      "missingOwnerMaterialFileNames replaces the documentation basenames always treated as material for missing-owner evidence selection.",
+      "missingOwnerIgnoredPathMarkers replaces the ignored path markers for missing-owner evidence selection.",
+      "missingOwnerPathKeywords replaces the path keywords for missing-owner evidence selection.",
+      "missingOwnerTextKeywords replaces the text keywords for missing-owner evidence selection.",
+      "staleDocumentationMaterialFileNames replaces the documentation basenames always treated as material for stale-documentation evidence selection.",
+      "staleDocumentationIgnoredPathMarkers replaces the ignored path markers for stale-documentation evidence selection.",
+      "staleDocumentationPathKeywords replaces the path keywords for stale-documentation evidence selection.",
+      "staleDocumentationTextKeywords replaces the text keywords for stale-documentation evidence selection.",
+      "staleDocumentationNonCurrentPathMarkers replaces the non-current path markers for stale-documentation evidence selection.",
+      "staleDocumentationNonCurrentTextMarkers replaces the non-current text markers for stale-documentation evidence selection.",
+      "duplicateResponsibilityTopLevelSymbolKinds replaces the allowed top-level symbol kinds for duplicate-responsibility evidence selection.",
+      "duplicateResponsibilityIgnorePathGlobs replaces the ignored path globs for duplicate-responsibility evidence selection.",
       "ssotOrder replaces the built-in SSOT precedence order.",
       "requiredOutputs replaces the built-in required output list.",
       "boundaryMapRoots replaces the built-in root-to-boundary-kind rules for scan_boundary_map_build.",
@@ -1634,6 +1877,78 @@ function createScanProfileOverlayHelp(profile: ScanProfile): GetScanProfileOverl
       { name: "generatedPatterns", required: false, description: "Generated-code globs appended to the effective exclude list." },
       { name: "sourceTypes", required: false, description: "Replacement source type list for this repository." },
       { name: "criteria", required: false, description: "Replacement criterion list using '- criterion-id: description' entries." },
+      {
+        name: "duplicateAuthorityClaimPatterns",
+        required: false,
+        description: "Replacement regex patterns used to detect authority-style documentation claims.",
+      },
+      {
+        name: "duplicateAuthorityIgnoredTopicTokens",
+        required: false,
+        description: "Replacement topic tokens ignored when duplicate-authority derives shared concerns from headings and lines.",
+      },
+      {
+        name: "duplicateAuthorityGenericTopicTokens",
+        required: false,
+        description: "Replacement generic shared tokens that are insufficient on their own for duplicate-authority evidence selection.",
+      },
+      {
+        name: "missingOwnerMaterialPaths",
+        required: false,
+        description: "Replacement exact normalized paths always treated as material for missing-owner evidence selection.",
+      },
+      {
+        name: "missingOwnerMaterialFileNames",
+        required: false,
+        description: "Replacement documentation basenames always treated as material for missing-owner evidence selection.",
+      },
+      {
+        name: "missingOwnerIgnoredPathMarkers",
+        required: false,
+        description: "Replacement ignored path markers for missing-owner evidence selection.",
+      },
+      { name: "missingOwnerPathKeywords", required: false, description: "Replacement path keywords for missing-owner evidence selection." },
+      { name: "missingOwnerTextKeywords", required: false, description: "Replacement text keywords for missing-owner evidence selection." },
+      {
+        name: "staleDocumentationMaterialFileNames",
+        required: false,
+        description: "Replacement documentation basenames always treated as material for stale-documentation evidence selection.",
+      },
+      {
+        name: "staleDocumentationIgnoredPathMarkers",
+        required: false,
+        description: "Replacement ignored path markers for stale-documentation evidence selection.",
+      },
+      {
+        name: "staleDocumentationPathKeywords",
+        required: false,
+        description: "Replacement path keywords for stale-documentation evidence selection.",
+      },
+      {
+        name: "staleDocumentationTextKeywords",
+        required: false,
+        description: "Replacement text keywords for stale-documentation evidence selection.",
+      },
+      {
+        name: "staleDocumentationNonCurrentPathMarkers",
+        required: false,
+        description: "Replacement non-current path markers for stale-documentation evidence selection.",
+      },
+      {
+        name: "staleDocumentationNonCurrentTextMarkers",
+        required: false,
+        description: "Replacement non-current text markers for stale-documentation evidence selection.",
+      },
+      {
+        name: "duplicateResponsibilityTopLevelSymbolKinds",
+        required: false,
+        description: "Replacement allowed top-level symbol kinds for duplicate-responsibility evidence selection.",
+      },
+      {
+        name: "duplicateResponsibilityIgnorePathGlobs",
+        required: false,
+        description: "Replacement ignored path globs for duplicate-responsibility evidence selection.",
+      },
       { name: "ssotOrder", required: false, description: "Replacement SSOT precedence order for this repository." },
       { name: "requiredOutputs", required: false, description: "Replacement required output list for this repository." },
       { name: "boundaryMapRoots", required: false, description: "Replacement root rules for boundary-map build in path-prefix:boundary-kind format." },
@@ -1646,6 +1961,8 @@ function createScanProfileOverlayHelp(profile: ScanProfile): GetScanProfileOverl
       { name: "boundaryMapApiPathMarkers", required: false, description: "Replacement path markers used to classify API entrypoints during boundary mapping." },
       { name: "boundaryMapApiNameSuffixes", required: false, description: "Replacement symbol-name suffixes used to classify API entrypoints during boundary mapping." },
     ],
+    overlayBuildWorkflow,
+    symptomToFieldHints,
     baseScope: {
       include: [...profile.scope.include],
       exclude: [...profile.scope.exclude],
@@ -1653,6 +1970,242 @@ function createScanProfileOverlayHelp(profile: ScanProfile): GetScanProfileOverl
     template: templateLines.join("\n"),
     example: exampleLines.join("\n"),
   };
+}
+
+type SuggestedOverlayField = SuggestScanProfileOverlayResponse["suggestedFields"][number];
+
+function createOverlayBuildWorkflow(): string[] {
+  return [
+    "Start from scan_start on a completed repository index and treat the first pass as provisional calibration, not final findings.",
+    "Review overlay status, derived coverage shape, and representative repository_evidence_candidates or boundary-map output before editing any fields.",
+    "Write only the smallest overlay change that explains the mismatch, preferring recipe fields or root markers over broad include/exclude churn.",
+    "Record refine-overlay, restart the scan from the same repository index, and compare whether the new packets remove the original calibration symptom.",
+    "Keep fields that proved necessary, remove guesswork that did not change packet shape, and preserve the final overlay as repo-local contract.",
+  ];
+}
+
+function createOverlaySymptomHints(profile: ScanProfile): ScanProfileOverlaySymptomHint[] {
+  return profile.id === "code-quality-review"
+    ? [
+        {
+          id: "scope-roots",
+          symptom: "Coverage misses the actual code roots, tool roots, or test families used by the repository.",
+          fields: ["include", "exclude", "boundaryMapRoots", "boundaryMapTestDirectoryNames"],
+          rationale: "Fix scan scope and boundary roots before tuning downstream evidence packets.",
+        },
+        {
+          id: "boundary-map-heuristics",
+          symptom: "Boundary map misclassifies contracts, entrypoints, or tests even though coverage looks right.",
+          fields: [
+            "boundaryMapContractPathMarkers",
+            "boundaryMapContractFileStems",
+            "boundaryMapRoutePathMarkers",
+            "boundaryMapRouteNameSuffixes",
+            "boundaryMapApiPathMarkers",
+            "boundaryMapApiNameSuffixes",
+          ],
+          rationale: "These fields tune structural interpretation without changing the covered inventory.",
+        },
+        {
+          id: "duplicate-responsibility-selection",
+          symptom: "Duplicate-responsibility packets include fixture/generated code or miss the real public symbols.",
+          fields: ["duplicateResponsibilityTopLevelSymbolKinds", "duplicateResponsibilityIgnorePathGlobs"],
+          rationale: "Tune evidence selection before filing a duplicated-ownership finding.",
+        },
+      ]
+    : [
+        {
+          id: "duplicate-authority-selection",
+          symptom: "Authority-style packets are too broad, too noisy, or miss repository-specific authority phrasing.",
+          fields: [
+            "duplicateAuthorityClaimPatterns",
+            "duplicateAuthorityIgnoredTopicTokens",
+            "duplicateAuthorityGenericTopicTokens",
+          ],
+          rationale: "Tune duplicate-authority claim detection and topic matching before changing broader scan scope.",
+        },
+        {
+          id: "missing-owner-materiality",
+          symptom: "Missing-owner packets ignore material docs or keep surfacing glossary/history-style pages.",
+          fields: [
+            "missingOwnerMaterialPaths",
+            "missingOwnerMaterialFileNames",
+            "missingOwnerIgnoredPathMarkers",
+            "missingOwnerPathKeywords",
+            "missingOwnerTextKeywords",
+          ],
+          rationale: "Tune materiality first so missing-owner packets reflect repository-specific documentation shape.",
+        },
+        {
+          id: "stale-documentation-currentness",
+          symptom: "Stale-documentation packets treat archived docs as current or miss the real current-looking conflicts.",
+          fields: [
+            "staleDocumentationMaterialFileNames",
+            "staleDocumentationIgnoredPathMarkers",
+            "staleDocumentationPathKeywords",
+            "staleDocumentationTextKeywords",
+            "staleDocumentationNonCurrentPathMarkers",
+            "staleDocumentationNonCurrentTextMarkers",
+          ],
+          rationale: "Tune currentness and materiality before changing SSOT precedence or broad scope.",
+        },
+        {
+          id: "ssot-order",
+          symptom: "The right docs are in scope but stale or conflict packets still rank the wrong owner higher.",
+          fields: ["ssotOrder"],
+          rationale: "SSOT precedence should move only after packet shape and currentness look coherent.",
+        },
+      ];
+}
+
+function findOverlaySymptomHint(profile: ScanProfile, symptomId: ScanProfileOverlaySymptomId): ScanProfileOverlaySymptomHint {
+  const hint = createOverlaySymptomHints(profile).find((candidate) => candidate.id === symptomId);
+  if (hint === undefined) {
+    throw new RuntimeError(`Overlay symptom ${symptomId} is not supported for profile ${profile.id}@${profile.version}`, {
+      code: "SCAN_PROFILE_OVERLAY_SYMPTOM_NOT_SUPPORTED",
+      details: {
+        profileId: profile.id,
+        profileVersion: profile.version,
+        symptomId,
+      },
+    });
+  }
+  return hint;
+}
+
+function createSuggestedOverlayFields(
+  profile: ScanProfile,
+  boundaryMapConfig: ReturnType<typeof createBoundaryMapBuildConfig>,
+  symptom: ScanProfileOverlaySymptomHint,
+): SuggestedOverlayField[] {
+  return symptom.fields.map((field) => {
+    const boundaryMapValues = resolveBoundaryMapFieldValues(boundaryMapConfig, field);
+    if (boundaryMapValues !== undefined) {
+      return {
+        name: field,
+        source: "boundary-map-config",
+        currentValues: boundaryMapValues,
+      };
+    }
+
+    return {
+      name: field,
+      source: "effective-profile",
+      currentValues: resolveProfileOverlayFieldValues(profile, field),
+    };
+  });
+}
+
+function resolveBoundaryMapFieldValues(
+  config: ReturnType<typeof createBoundaryMapBuildConfig>,
+  field: string,
+): string[] | undefined {
+  switch (field) {
+    case "boundaryMapRoots":
+      return config.roots.map((rule) => `${rule.pathPrefix}:${rule.kind}`);
+    case "boundaryMapContractPathMarkers":
+      return [...config.contractPathMarkers];
+    case "boundaryMapContractFileStems":
+      return [...config.contractFileStems];
+    case "boundaryMapIgnoredTokens":
+      return [...config.ignoredDocTokens];
+    case "boundaryMapTestDirectoryNames":
+      return [...config.testDirectoryNames];
+    case "boundaryMapRoutePathMarkers":
+      return [...config.routePathMarkers];
+    case "boundaryMapRouteNameSuffixes":
+      return [...config.routeNameSuffixes];
+    case "boundaryMapApiPathMarkers":
+      return [...config.apiPathMarkers];
+    case "boundaryMapApiNameSuffixes":
+      return [...config.apiNameSuffixes];
+    default:
+      return undefined;
+  }
+}
+
+function resolveProfileOverlayFieldValues(profile: ScanProfile, field: string): string[] {
+  switch (field) {
+    case "include":
+      return [...profile.scope.include];
+    case "exclude":
+      return [...profile.scope.exclude];
+    case "ssotOrder":
+      return [...profile.ssotOrder];
+    case "duplicateAuthorityClaimPatterns":
+      return requireStringListField(profile.duplicateAuthorityClaimPatterns, field, profile);
+    case "duplicateAuthorityIgnoredTopicTokens":
+      return requireStringListField(profile.duplicateAuthorityIgnoredTopicTokens, field, profile);
+    case "duplicateAuthorityGenericTopicTokens":
+      return requireStringListField(profile.duplicateAuthorityGenericTopicTokens, field, profile);
+    case "missingOwnerMaterialPaths":
+      return requireStringListField(profile.missingOwnerMaterialPaths, field, profile);
+    case "missingOwnerMaterialFileNames":
+      return requireStringListField(profile.missingOwnerMaterialFileNames, field, profile);
+    case "missingOwnerIgnoredPathMarkers":
+      return requireStringListField(profile.missingOwnerIgnoredPathMarkers, field, profile);
+    case "missingOwnerPathKeywords":
+      return requireStringListField(profile.missingOwnerPathKeywords, field, profile);
+    case "missingOwnerTextKeywords":
+      return requireStringListField(profile.missingOwnerTextKeywords, field, profile);
+    case "staleDocumentationMaterialFileNames":
+      return requireStringListField(profile.staleDocumentationMaterialFileNames, field, profile);
+    case "staleDocumentationIgnoredPathMarkers":
+      return requireStringListField(profile.staleDocumentationIgnoredPathMarkers, field, profile);
+    case "staleDocumentationPathKeywords":
+      return requireStringListField(profile.staleDocumentationPathKeywords, field, profile);
+    case "staleDocumentationTextKeywords":
+      return requireStringListField(profile.staleDocumentationTextKeywords, field, profile);
+    case "staleDocumentationNonCurrentPathMarkers":
+      return requireStringListField(profile.staleDocumentationNonCurrentPathMarkers, field, profile);
+    case "staleDocumentationNonCurrentTextMarkers":
+      return requireStringListField(profile.staleDocumentationNonCurrentTextMarkers, field, profile);
+    case "duplicateResponsibilityTopLevelSymbolKinds":
+      return requireStringListField(profile.duplicateResponsibilityTopLevelSymbolKinds, field, profile);
+    case "duplicateResponsibilityIgnorePathGlobs":
+      return requireStringListField(profile.duplicateResponsibilityIgnorePathGlobs, field, profile);
+    default:
+      throw new RuntimeError(`Overlay suggestion does not support profile field ${field}`, {
+        code: "SCAN_PROFILE_OVERLAY_FIELD_NOT_SUPPORTED",
+        details: {
+          profileId: profile.id,
+          profileVersion: profile.version,
+          field,
+        },
+      });
+  }
+}
+
+function requireStringListField(values: readonly string[] | undefined, field: string, profile: ScanProfile): string[] {
+  if (values === undefined) {
+    throw new RuntimeError(`Overlay suggestion requires active field ${field} on profile ${profile.id}@${profile.version}`, {
+      code: "SCAN_PROFILE_OVERLAY_FIELD_UNDEFINED",
+      details: {
+        profileId: profile.id,
+        profileVersion: profile.version,
+        field,
+      },
+    });
+  }
+  return [...values];
+}
+
+function serializeSuggestedOverlayPatch(profile: ScanProfile, suggestedFields: readonly SuggestedOverlayField[]): string {
+  const lines = [
+    `formatVersion: ${SCAN_PROFILE_OVERLAY_FORMAT_VERSION}`,
+    `profileId: ${profile.id}`,
+  ];
+  for (const field of suggestedFields) {
+    lines.push(`${field.name}:`);
+    for (const value of field.currentValues) {
+      lines.push(`  - ${serializeOverlayYamlListItem(value)}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function serializeOverlayYamlListItem(value: string): string {
+  return JSON.stringify(value);
 }
 
 function createRepositoryEvidenceCandidates(options: {
@@ -1674,22 +2227,28 @@ function createRepositoryEvidenceCandidates(options: {
     case "documentation-conflicts":
       switch (options.criterionId) {
         case "contradictory-claims":
-          return buildContradictoryClaimCandidates(includedFiles, includedChunks, options.limit);
+          return buildContradictoryClaimCandidates(options.profile, includedFiles, includedChunks, options.limit);
         case "stale-documentation":
           return buildStaleDocumentationCandidates(options.profile, includedFiles, includedChunks, options.limit);
         case "broken-references":
           return buildBrokenReferenceCandidates(options.files, includedChunks, options.chunks, options.limit);
         case "duplicate-authority":
-          return buildDuplicateAuthorityCandidates(includedChunks, options.limit);
+          return buildDuplicateAuthorityCandidates(options.profile, includedChunks, options.limit);
         case "missing-owner":
-          return buildMissingOwnerCandidates(includedFiles, includedChunks, options.limit);
+          return buildMissingOwnerCandidates(options.profile, includedFiles, includedChunks, options.limit);
         default:
           return [];
       }
     case "code-quality-review":
       switch (options.criterionId) {
         case "duplicate-responsibility":
-          return buildDuplicateResponsibilityCandidates(includedFiles, includedSymbols, includedDependencies, options.limit);
+          return buildDuplicateResponsibilityCandidates(
+            includedFiles,
+            includedSymbols,
+            includedDependencies,
+            options.limit,
+            createDuplicateResponsibilityEvidenceRecipe(options.profile),
+          );
         default:
           return [];
       }
@@ -1698,41 +2257,61 @@ function createRepositoryEvidenceCandidates(options: {
   }
 }
 
-const TOP_LEVEL_RESPONSIBILITY_SYMBOL_KINDS = new Set(["class", "interface", "enum", "record", "function"]);
-const NON_MATERIAL_DUPLICATE_RESPONSIBILITY_PATH_PATTERNS = [
-  "**/archive/**",
-  "**/archives/**",
-  "**/archived/**",
-  "**/legacy/**",
-  "**/deprecated/**",
-  "**/generated/**",
-  "**/__generated__/**",
-  "**/*.generated.*",
-  "**/fixtures/**",
-  "**/__fixtures__/**",
-  "**/examples/**",
-  "**/example/**",
-  "**/samples/**",
-  "**/sample/**",
-  "**/demo/**",
-  "**/demos/**",
-  "**/mocks/**",
-  "**/__mocks__/**",
-  "**/*.mock.*",
-  "**/*.stories.*",
-  "**/storybook/**",
-] as const;
+type DuplicateResponsibilityEvidenceRecipe = {
+  topLevelSymbolKinds: Set<string>;
+  ignorePathGlobs: string[];
+};
+
+type DuplicateAuthorityEvidenceRecipe = {
+  claimPatterns: RegExp[];
+  ignoredTopicTokens: Set<string>;
+  genericTopicTokens: Set<string>;
+};
+
+type MissingOwnerEvidenceRecipe = {
+  materialPaths: Set<string>;
+  materialFileNames: Set<string>;
+  ignoredPathMarkers: string[];
+  pathKeywords: string[];
+  textKeywords: string[];
+};
+
+type StaleDocumentationEvidenceRecipe = {
+  materialFileNames: Set<string>;
+  ignoredPathMarkers: string[];
+  pathKeywords: string[];
+  textKeywords: string[];
+  nonCurrentPathMarkers: string[];
+  nonCurrentTextMarkers: string[];
+};
+
+type RecipeStringListField =
+  | "duplicateAuthorityClaimPatterns"
+  | "duplicateAuthorityIgnoredTopicTokens"
+  | "duplicateAuthorityGenericTopicTokens"
+  | "missingOwnerMaterialPaths"
+  | "missingOwnerMaterialFileNames"
+  | "missingOwnerIgnoredPathMarkers"
+  | "missingOwnerPathKeywords"
+  | "missingOwnerTextKeywords"
+  | "staleDocumentationMaterialFileNames"
+  | "staleDocumentationIgnoredPathMarkers"
+  | "staleDocumentationPathKeywords"
+  | "staleDocumentationTextKeywords"
+  | "staleDocumentationNonCurrentPathMarkers"
+  | "staleDocumentationNonCurrentTextMarkers";
 
 function buildDuplicateResponsibilityCandidates(
   files: readonly RepositoryFileRecord[],
   symbols: readonly RepositorySymbolRecord[],
   dependencies: readonly RepositoryDependencyRecord[],
   limit: number,
+  recipe: DuplicateResponsibilityEvidenceRecipe,
 ): RepositoryEvidenceCandidate[] {
   const codePaths = new Set(
     files
       .filter((file) => file.sourceKind === "code")
-      .filter((file) => isMaterialDuplicateResponsibilityPath(file.path))
+      .filter((file) => isMaterialDuplicateResponsibilityPath(file.path, recipe))
       .map((file) => normalizeRepositoryPath(file.path)),
   );
   const groups = new Map<string, RepositorySymbolRecord[]>();
@@ -1748,7 +2327,7 @@ function buildDuplicateResponsibilityCandidates(
     if (!symbol.isExported && !symbol.isPublic) {
       continue;
     }
-    if (!TOP_LEVEL_RESPONSIBILITY_SYMBOL_KINDS.has(symbol.kind)) {
+    if (!recipe.topLevelSymbolKinds.has(symbol.kind.toLocaleLowerCase())) {
       continue;
     }
     const normalizedName = symbol.name.trim().toLocaleLowerCase();
@@ -1816,8 +2395,90 @@ function buildDuplicateResponsibilityCandidates(
     });
 }
 
-function isMaterialDuplicateResponsibilityPath(path: string): boolean {
-  return !matchesAnyGlob(normalizeRepositoryPath(path).toLocaleLowerCase(), NON_MATERIAL_DUPLICATE_RESPONSIBILITY_PATH_PATTERNS);
+function createDuplicateResponsibilityEvidenceRecipe(profile: ScanProfile): DuplicateResponsibilityEvidenceRecipe {
+  if (
+    profile.duplicateResponsibilityTopLevelSymbolKinds === undefined ||
+    profile.duplicateResponsibilityTopLevelSymbolKinds.length === 0
+  ) {
+    throw new RuntimeError(
+      `Scan profile ${profile.id}@${profile.version} is missing duplicateResponsibilityTopLevelSymbolKinds for duplicate-responsibility evidence selection`,
+      { code: "SCAN_PROFILE_INVALID" },
+    );
+  }
+  if (profile.duplicateResponsibilityIgnorePathGlobs === undefined) {
+    throw new RuntimeError(
+      `Scan profile ${profile.id}@${profile.version} is missing duplicateResponsibilityIgnorePathGlobs for duplicate-responsibility evidence selection`,
+      { code: "SCAN_PROFILE_INVALID" },
+    );
+  }
+  return {
+    topLevelSymbolKinds: new Set(profile.duplicateResponsibilityTopLevelSymbolKinds.map((value) => value.toLocaleLowerCase())),
+    ignorePathGlobs: profile.duplicateResponsibilityIgnorePathGlobs.map((value) => normalizeRepositoryPath(value).toLocaleLowerCase()),
+  };
+}
+
+function createDuplicateAuthorityEvidenceRecipe(profile: ScanProfile): DuplicateAuthorityEvidenceRecipe {
+  const claimPatterns = normalizeRecipeValues(profile, "duplicateAuthorityClaimPatterns");
+  return {
+    claimPatterns: claimPatterns.map((pattern) => {
+      try {
+        return new RegExp(pattern, "i");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Invalid regular expression";
+        throw new RuntimeError(`Scan profile ${profile.id}@${profile.version} uses an invalid duplicateAuthorityClaimPatterns entry: ${message}`, {
+          code: "SCAN_PROFILE_INVALID",
+          details: {
+            profileId: profile.id,
+            profileVersion: profile.version,
+            field: "duplicateAuthorityClaimPatterns",
+            pattern,
+          },
+        });
+      }
+    }),
+    ignoredTopicTokens: new Set(normalizeRecipeValues(profile, "duplicateAuthorityIgnoredTopicTokens")),
+    genericTopicTokens: new Set(normalizeRecipeValues(profile, "duplicateAuthorityGenericTopicTokens")),
+  };
+}
+
+function createMissingOwnerEvidenceRecipe(profile: ScanProfile): MissingOwnerEvidenceRecipe {
+  return {
+    materialPaths: new Set(normalizeRecipeValues(profile, "missingOwnerMaterialPaths")),
+    materialFileNames: new Set(normalizeRecipeValues(profile, "missingOwnerMaterialFileNames")),
+    ignoredPathMarkers: normalizeRecipeValues(profile, "missingOwnerIgnoredPathMarkers"),
+    pathKeywords: normalizeRecipeValues(profile, "missingOwnerPathKeywords"),
+    textKeywords: normalizeRecipeValues(profile, "missingOwnerTextKeywords"),
+  };
+}
+
+function createStaleDocumentationEvidenceRecipe(profile: ScanProfile): StaleDocumentationEvidenceRecipe {
+  return {
+    materialFileNames: new Set(normalizeRecipeValues(profile, "staleDocumentationMaterialFileNames")),
+    ignoredPathMarkers: normalizeRecipeValues(profile, "staleDocumentationIgnoredPathMarkers"),
+    pathKeywords: normalizeRecipeValues(profile, "staleDocumentationPathKeywords"),
+    textKeywords: normalizeRecipeValues(profile, "staleDocumentationTextKeywords"),
+    nonCurrentPathMarkers: normalizeRecipeValues(profile, "staleDocumentationNonCurrentPathMarkers"),
+    nonCurrentTextMarkers: normalizeRecipeValues(profile, "staleDocumentationNonCurrentTextMarkers"),
+  };
+}
+
+function normalizeRecipeValues(profile: ScanProfile, field: RecipeStringListField): string[] {
+  const value = profile[field];
+  if (!Array.isArray(value)) {
+    throw new RuntimeError(`Scan profile ${profile.id}@${profile.version} is missing required recipe field ${field}`, {
+      code: "SCAN_PROFILE_INVALID",
+      details: {
+        profileId: profile.id,
+        profileVersion: profile.version,
+        field,
+      },
+    });
+  }
+  return value.map((entry) => entry.toLocaleLowerCase());
+}
+
+function isMaterialDuplicateResponsibilityPath(path: string, recipe: DuplicateResponsibilityEvidenceRecipe): boolean {
+  return !matchesAnyGlob(normalizeRepositoryPath(path).toLocaleLowerCase(), recipe.ignorePathGlobs);
 }
 
 function compareRepositorySymbols(left: RepositorySymbolRecord, right: RepositorySymbolRecord): number {
@@ -2014,10 +2675,12 @@ function buildBrokenReferenceCandidates(
 }
 
 function buildContradictoryClaimCandidates(
+  profile: ScanProfile,
   files: readonly RepositoryFileRecord[],
   chunks: readonly RepositoryChunkRecord[],
   limit: number,
 ): RepositoryEvidenceCandidate[] {
+  const recipe = createStaleDocumentationEvidenceRecipe(profile);
   const chunksByFile = new Map<string, RepositoryChunkRecord[]>();
   for (const chunk of chunks) {
     const current = chunksByFile.get(chunk.filePath) ?? [];
@@ -2025,7 +2688,7 @@ function buildContradictoryClaimCandidates(
     chunksByFile.set(chunk.filePath, current);
   }
   const contradictionClaims = collectContradictionClaims(
-    files.filter((file) => isMaterialContradictionDocument(file, chunksByFile.get(file.path) ?? [])),
+    files.filter((file) => isMaterialContradictionDocument(file, chunksByFile.get(file.path) ?? [], recipe)),
     chunks,
   );
   const candidates: RepositoryEvidenceCandidate[] = [];
@@ -2079,13 +2742,14 @@ function buildStaleDocumentationCandidates(
   chunks: readonly RepositoryChunkRecord[],
   limit: number,
 ): RepositoryEvidenceCandidate[] {
+  const recipe = createStaleDocumentationEvidenceRecipe(profile);
   const chunksByFile = new Map<string, RepositoryChunkRecord[]>();
   for (const chunk of chunks) {
     const current = chunksByFile.get(chunk.filePath) ?? [];
     current.push(chunk);
     chunksByFile.set(chunk.filePath, current);
   }
-  const materialFiles = files.filter((file) => isMaterialContradictionDocument(file, chunksByFile.get(file.path) ?? []));
+  const materialFiles = files.filter((file) => isMaterialContradictionDocument(file, chunksByFile.get(file.path) ?? [], recipe));
   const fileByPath = new Map(materialFiles.map((file) => [file.path, file] as const));
   const contradictionClaims = collectContradictionClaims(materialFiles, chunks);
   const candidates: RepositoryEvidenceCandidate[] = [];
@@ -2116,8 +2780,8 @@ function buildStaleDocumentationCandidates(
       if (
         staleFile === undefined ||
         authoritativeFile === undefined ||
-        !isCurrentLookingDocumentationSource(staleFile, staleChunks) ||
-        !isCurrentLookingDocumentationSource(authoritativeFile, authoritativeChunks)
+        !isCurrentLookingDocumentationSource(staleFile, staleChunks, recipe) ||
+        !isCurrentLookingDocumentationSource(authoritativeFile, authoritativeChunks, recipe)
       ) {
         continue;
       }
@@ -2256,10 +2920,12 @@ function createStaleDocumentationSummary(
 }
 
 function buildDuplicateAuthorityCandidates(
+  profile: ScanProfile,
   chunks: readonly RepositoryChunkRecord[],
   limit: number,
 ): RepositoryEvidenceCandidate[] {
-  const authorityClaims = collectAuthorityClaims(chunks);
+  const recipe = createDuplicateAuthorityEvidenceRecipe(profile);
+  const authorityClaims = collectAuthorityClaims(chunks, recipe);
   const candidates: RepositoryEvidenceCandidate[] = [];
 
   for (let leftIndex = 0; leftIndex < authorityClaims.length; leftIndex += 1) {
@@ -2272,7 +2938,7 @@ function buildDuplicateAuthorityCandidates(
       if (right === undefined || right.filePath === left.filePath) {
         continue;
       }
-      const sharedTokens = selectAuthoritySharedTokens(left.topicTokens, right.topicTokens);
+      const sharedTokens = selectAuthoritySharedTokens(left.topicTokens, right.topicTokens, recipe);
       if (sharedTokens.length === 0) {
         continue;
       }
@@ -2295,10 +2961,12 @@ function buildDuplicateAuthorityCandidates(
 }
 
 function buildMissingOwnerCandidates(
+  profile: ScanProfile,
   files: readonly RepositoryFileRecord[],
   chunks: readonly RepositoryChunkRecord[],
   limit: number,
 ): RepositoryEvidenceCandidate[] {
+  const recipe = createMissingOwnerEvidenceRecipe(profile);
   const documentationFiles = files.filter((file) => file.sourceKind === "documentation");
   const authorityFilePaths = collectOwnershipMarkerFilePaths(chunks);
   const chunksByFile = new Map<string, RepositoryChunkRecord[]>();
@@ -2313,7 +2981,7 @@ function buildMissingOwnerCandidates(
     if (authorityFilePaths.has(file.path)) {
       continue;
     }
-    if (!isMaterialOwnershipDocument(file, chunksByFile.get(file.path) ?? [])) {
+    if (!isMaterialOwnershipDocument(file, chunksByFile.get(file.path) ?? [], recipe)) {
       continue;
     }
     const firstChunk = (chunksByFile.get(file.path) ?? [])[0];
@@ -2359,7 +3027,7 @@ function collectOwnershipMarkerFilePaths(chunks: readonly RepositoryChunkRecord[
   return filePaths;
 }
 
-function collectAuthorityClaims(chunks: readonly RepositoryChunkRecord[]): Array<{
+function collectAuthorityClaims(chunks: readonly RepositoryChunkRecord[], recipe: DuplicateAuthorityEvidenceRecipe): Array<{
   filePath: string;
   line: number;
   source: RepositoryEvidenceSource;
@@ -2378,14 +3046,14 @@ function collectAuthorityClaims(chunks: readonly RepositoryChunkRecord[]): Array
       if (heading !== undefined) {
         currentHeading = heading;
       }
-      const phrase = matchAuthorityPhrase(line);
+      const phrase = matchAuthorityPhrase(line, recipe);
       if (phrase === undefined) {
         continue;
       }
       claims.push({
         filePath: chunk.filePath,
         line: chunk.startLine + offset,
-        topicTokens: extractAuthorityTopicTokens(line, currentHeading),
+        topicTokens: extractAuthorityTopicTokens(line, currentHeading, recipe),
         source: createChunkEvidenceSource(
           chunk,
           line.trim(),
@@ -2568,8 +3236,8 @@ function matchExclusiveSelectionClaim(
   };
 }
 
-function matchAuthorityPhrase(value: string): string | undefined {
-  for (const pattern of AUTHORITY_CLAIM_PATTERNS) {
+function matchAuthorityPhrase(value: string, recipe: DuplicateAuthorityEvidenceRecipe): string | undefined {
+  for (const pattern of recipe.claimPatterns) {
     const match = value.match(pattern);
     if (match !== null) {
       return match[1] ?? match[0];
@@ -2654,13 +3322,17 @@ function normalizeMarkdownHeadingSlug(value: string): string {
     .replace(/-+/g, "-");
 }
 
-function extractAuthorityTopicTokens(line: string, heading?: string): string[] {
-  return normalizeTopicTokens([heading ?? "", line].join(" "));
+function extractAuthorityTopicTokens(line: string, heading: string | undefined, recipe: DuplicateAuthorityEvidenceRecipe): string[] {
+  return normalizeTopicTokens([heading ?? "", line].join(" "), recipe.ignoredTopicTokens);
 }
 
-function selectAuthoritySharedTokens(left: readonly string[], right: readonly string[]): string[] {
+function selectAuthoritySharedTokens(
+  left: readonly string[],
+  right: readonly string[],
+  recipe: DuplicateAuthorityEvidenceRecipe,
+): string[] {
   const sharedTokens = intersectNormalizedTokens(left, right);
-  const materialSharedTokens = sharedTokens.filter((token) => !GENERIC_AUTHORITY_TOPIC_TOKENS.has(token));
+  const materialSharedTokens = sharedTokens.filter((token) => !recipe.genericTopicTokens.has(token));
   if (materialSharedTokens.length === 0) {
     return [];
   }
@@ -2670,17 +3342,17 @@ function selectAuthoritySharedTokens(left: readonly string[], right: readonly st
   return materialSharedTokens;
 }
 
-function normalizeTopicTokens(value: string): string[] {
+function normalizeTopicTokens(value: string, ignoredTopicTokens: ReadonlySet<string>): string[] {
   const tokens = value
     .toLocaleLowerCase()
     .split(/[^a-z0-9]+/i)
     .map((token) => normalizeTopicToken(token))
-    .filter((token) => token.length > 1 && !IGNORED_TOPIC_TOKENS.has(token));
+    .filter((token) => token.length > 1 && !ignoredTopicTokens.has(token));
   return [...new Set(tokens)];
 }
 
 function normalizeClaimTokens(value: string): string[] {
-  return normalizeTopicTokens(value).filter((token) => !IGNORED_CLAIM_TOKENS.has(token));
+  return normalizeTopicTokens(value, IGNORED_TOPIC_TOKENS).filter((token) => !IGNORED_CLAIM_TOKENS.has(token));
 }
 
 function normalizeTopicToken(value: string): string {
@@ -2719,45 +3391,57 @@ function capitalize(value: string): string {
   return value.length === 0 ? value : `${value[0]?.toLocaleUpperCase() ?? ""}${value.slice(1)}`;
 }
 
-function isMaterialOwnershipDocument(file: RepositoryFileRecord, chunks: readonly RepositoryChunkRecord[]): boolean {
+function isMaterialOwnershipDocument(
+  file: RepositoryFileRecord,
+  chunks: readonly RepositoryChunkRecord[],
+  recipe: MissingOwnerEvidenceRecipe,
+): boolean {
   const normalizedPath = normalizeRepositoryPath(file.path).toLocaleLowerCase();
   const baseName = pathPosix.basename(normalizedPath);
   const fullText = chunks.map((chunk) => chunk.text).join("\n").toLocaleLowerCase();
-  if (IGNORED_MISSING_OWNER_PATH_PATTERNS.some((pattern) => normalizedPath.includes(pattern) || baseName.includes(pattern))) {
+  if (recipe.ignoredPathMarkers.some((marker) => normalizedPath.includes(marker) || baseName.includes(marker))) {
     return false;
   }
-  if (baseName === "agents.md" || normalizedPath === "readme.md") {
+  if (recipe.materialPaths.has(normalizedPath) || recipe.materialFileNames.has(baseName)) {
     return true;
   }
-  if (MATERIAL_OWNER_PATH_KEYWORDS.some((keyword) => normalizedPath.includes(keyword) || baseName.includes(keyword))) {
+  if (recipe.pathKeywords.some((keyword) => normalizedPath.includes(keyword) || baseName.includes(keyword))) {
     return true;
   }
-  return MATERIAL_OWNER_TEXT_KEYWORDS.some((keyword) => fullText.includes(keyword));
+  return recipe.textKeywords.some((keyword) => fullText.includes(keyword));
 }
 
-function isMaterialContradictionDocument(file: RepositoryFileRecord, chunks: readonly RepositoryChunkRecord[]): boolean {
+function isMaterialContradictionDocument(
+  file: RepositoryFileRecord,
+  chunks: readonly RepositoryChunkRecord[],
+  recipe: StaleDocumentationEvidenceRecipe,
+): boolean {
   const normalizedPath = normalizeRepositoryPath(file.path).toLocaleLowerCase();
   const baseName = pathPosix.basename(normalizedPath);
   const fullText = chunks.map((chunk) => chunk.text).join("\n").toLocaleLowerCase();
-  if (IGNORED_CONTRADICTION_PATH_PATTERNS.some((pattern) => normalizedPath.includes(pattern) || baseName.includes(pattern))) {
+  if (recipe.ignoredPathMarkers.some((marker) => normalizedPath.includes(marker) || baseName.includes(marker))) {
     return false;
   }
-  if (baseName === "agents.md" || baseName === "readme.md") {
+  if (recipe.materialFileNames.has(baseName)) {
     return true;
   }
-  if (MATERIAL_CONTRADICTION_PATH_KEYWORDS.some((keyword) => normalizedPath.includes(keyword) || baseName.includes(keyword))) {
+  if (recipe.pathKeywords.some((keyword) => normalizedPath.includes(keyword) || baseName.includes(keyword))) {
     return true;
   }
-  return MATERIAL_CONTRADICTION_TEXT_KEYWORDS.some((keyword) => fullText.includes(keyword));
+  return recipe.textKeywords.some((keyword) => fullText.includes(keyword));
 }
 
-function isCurrentLookingDocumentationSource(file: RepositoryFileRecord, chunks: readonly RepositoryChunkRecord[]): boolean {
+function isCurrentLookingDocumentationSource(
+  file: RepositoryFileRecord,
+  chunks: readonly RepositoryChunkRecord[],
+  recipe: StaleDocumentationEvidenceRecipe,
+): boolean {
   const normalizedPath = normalizeRepositoryPath(file.path).toLocaleLowerCase();
   const fullText = chunks.map((chunk) => chunk.text).join("\n").toLocaleLowerCase();
-  if (NON_CURRENT_DOCUMENT_PATH_PATTERNS.some((pattern) => normalizedPath.includes(pattern))) {
+  if (recipe.nonCurrentPathMarkers.some((marker) => normalizedPath.includes(marker))) {
     return false;
   }
-  if (NON_CURRENT_DOCUMENT_TEXT_PATTERNS.some((pattern) => fullText.includes(pattern))) {
+  if (recipe.nonCurrentTextMarkers.some((marker) => fullText.includes(marker))) {
     return false;
   }
   return true;
@@ -2792,31 +3476,6 @@ const IGNORED_TOPIC_TOKENS = new Set([
   "this",
   "truth",
 ]);
-const GENERIC_AUTHORITY_TOPIC_TOKENS = new Set([
-  "agent",
-  "agents",
-  "architecture",
-  "design",
-  "doc",
-  "guide",
-  "module",
-  "owner",
-  "ownership",
-  "policy",
-  "project",
-  "projection",
-  "repo",
-  "repository",
-  "rule",
-  "runtime",
-  "scan",
-  "spec",
-  "system",
-  "tool",
-  "workflow",
-  "workspace",
-]);
-
 const IGNORED_CLAIM_TOKENS = new Set([
   "available",
   "canonical",
@@ -2834,47 +3493,6 @@ const IGNORED_CLAIM_TOKENS = new Set([
   "unavailable",
 ]);
 
-const IGNORED_MISSING_OWNER_PATH_PATTERNS = [
-  "glossary",
-  "changelog",
-  "release-notes",
-  "terms",
-  "archive",
-  "history",
-  "docs/ai/",
-  "docs/adr/",
-  "docs/design/",
-  "docs/product/",
-];
-const MATERIAL_OWNER_PATH_KEYWORDS = ["contract", "policy", "runbook", "playbook", "operations", "ownership", "responsibility", "schema", "api", "mcp"];
-const MATERIAL_OWNER_TEXT_KEYWORDS = [
-  "rollback",
-  "incident",
-  "operator",
-  "on-call",
-  "oncall",
-];
-const AUTHORITY_CLAIM_PATTERNS = [
-  /\b(single source of truth|source of truth|canonical|authoritative)\b.*\b(?:lives here|belongs here|defined here|recorded here|maintained here)\b/i,
-  /\bthis\s+(?:document|doc|page|file|guide|spec|readme|runbook|playbook|section)\b.*\b(single source of truth|source of truth|canonical|authoritative)\b/i,
-  /\b(?:document|doc|page|file|guide|spec|readme|runbook|playbook|section)\b.*\b(?:is|are|remains)\s+(?:the\s+)?(single source of truth|source of truth|canonical|authoritative)\b/i,
-  /\b(?:document|doc|guide|spec|readme|runbook|playbook|page|file)\b.*\bowned by\b/i,
-] as const;
-const IGNORED_CONTRADICTION_PATH_PATTERNS = ["glossary", "changelog", "release-notes", "terms", "archive", "history"];
-const MATERIAL_CONTRADICTION_PATH_KEYWORDS = ["architecture", "design", "spec", "contract", "policy", "workflow", "runbook", "playbook", "guide", "deploy", "operations", "runtime", "storage", "transport"];
-const MATERIAL_CONTRADICTION_TEXT_KEYWORDS = ["primary", "default", "supported", "deprecated", "removed", "deferred", "runtime", "backend", "interface", "target"];
-const NON_CURRENT_DOCUMENT_PATH_PATTERNS = ["legacy", "deprecated", "archive", "histor", "changelog", "release-notes"];
-const NON_CURRENT_DOCUMENT_TEXT_PATTERNS = [
-  "legacy documentation",
-  "legacy doc",
-  "historical reference",
-  "for historical reference",
-  "archived document",
-  "archived for reference",
-  "superseded by",
-  "this document is obsolete",
-  "this document is deprecated",
-];
 const CONTRADICTION_STATUS_PATTERNS = [
   {
     group: "support",
@@ -3561,6 +4179,21 @@ function createBoundaryMapCalibrationAssessment(
   };
 }
 
+function mapCalibrationAssessmentToFindingValidation(
+  assessment: ScanCalibrationAssessment,
+): ScanFindingValidationAssessment {
+  return {
+    classification:
+      assessment.classification === "findings-ready"
+        ? "likely-real-finding"
+        : assessment.classification,
+    confidence: assessment.confidence,
+    summary: assessment.summary,
+    reasons: [...assessment.reasons],
+    recommendedActions: [...assessment.recommendedActions],
+  };
+}
+
 function dedupeStrings(values: readonly string[]): string[] {
   return [...new Set(values)];
 }
@@ -3592,6 +4225,22 @@ function parseScanProfileOverlayYaml(text: string, overlayPath: string): ScanPro
     | "generatedPatterns"
     | "sourceTypes"
     | "criteria"
+    | "duplicateAuthorityClaimPatterns"
+    | "duplicateAuthorityIgnoredTopicTokens"
+    | "duplicateAuthorityGenericTopicTokens"
+    | "missingOwnerMaterialPaths"
+    | "missingOwnerMaterialFileNames"
+    | "missingOwnerIgnoredPathMarkers"
+    | "missingOwnerPathKeywords"
+    | "missingOwnerTextKeywords"
+    | "staleDocumentationMaterialFileNames"
+    | "staleDocumentationIgnoredPathMarkers"
+    | "staleDocumentationPathKeywords"
+    | "staleDocumentationTextKeywords"
+    | "staleDocumentationNonCurrentPathMarkers"
+    | "staleDocumentationNonCurrentTextMarkers"
+    | "duplicateResponsibilityTopLevelSymbolKinds"
+    | "duplicateResponsibilityIgnorePathGlobs"
     | "ssotOrder"
     | "requiredOutputs"
     | "boundaryMapRoots"
@@ -3690,6 +4339,22 @@ function parseScanProfileOverlayYaml(text: string, overlayPath: string): ScanPro
       case "generatedPatterns":
       case "sourceTypes":
       case "criteria":
+      case "duplicateAuthorityClaimPatterns":
+      case "duplicateAuthorityIgnoredTopicTokens":
+      case "duplicateAuthorityGenericTopicTokens":
+      case "missingOwnerMaterialPaths":
+      case "missingOwnerMaterialFileNames":
+      case "missingOwnerIgnoredPathMarkers":
+      case "missingOwnerPathKeywords":
+      case "missingOwnerTextKeywords":
+      case "staleDocumentationMaterialFileNames":
+      case "staleDocumentationIgnoredPathMarkers":
+      case "staleDocumentationPathKeywords":
+      case "staleDocumentationTextKeywords":
+      case "staleDocumentationNonCurrentPathMarkers":
+      case "staleDocumentationNonCurrentTextMarkers":
+      case "duplicateResponsibilityTopLevelSymbolKinds":
+      case "duplicateResponsibilityIgnorePathGlobs":
       case "ssotOrder":
       case "requiredOutputs":
       case "boundaryMapRoots":
