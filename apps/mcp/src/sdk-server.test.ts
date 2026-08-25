@@ -73,6 +73,7 @@ describe("HiveMap MCP SDK server", () => {
       "workspace_export_zip",
       "workspace_import_zip",
     ]);
+    expect(result.tools.find((tool) => tool.name === "scan_start")?.description).toContain("calibration-phase response");
   });
 
   it("calls HiveMap tools through MCP transport", async () => {
@@ -253,6 +254,9 @@ describe("HiveMap MCP SDK server", () => {
         profileId: "documentation-conflicts",
         profileVersion: 1,
         criterionId: "broken-references",
+        calibrationAssessment: expect.objectContaining({
+          classification: "missing-evidence",
+        }),
         candidates: [],
         overlay: expect.objectContaining({
           status: "missing",
@@ -280,6 +284,11 @@ describe("HiveMap MCP SDK server", () => {
       tool: "scan_start",
       value: expect.objectContaining({
         run: expect.objectContaining({ id: "scan-boundary", status: "in_progress" }),
+        workflowPhase: "calibration",
+        calibrationChecklist: expect.arrayContaining([expect.stringContaining("Confirm profile identity: code-quality-review@1.")]),
+        calibrationAssessment: expect.objectContaining({
+          classification: "ambiguous-shape",
+        }),
       }),
     });
 
@@ -296,6 +305,9 @@ describe("HiveMap MCP SDK server", () => {
       value: expect.objectContaining({
         scanId: "scan-boundary",
         profileId: "code-quality-review",
+        calibrationAssessment: expect.objectContaining({
+          classification: "ambiguous-shape",
+        }),
         boundaryMap: expect.objectContaining({
           boundaries: [
             expect.objectContaining({

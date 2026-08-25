@@ -24,8 +24,10 @@ const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   repository_index_start: "Persist one explicit repository index job request for the current safe-mode indexing phase.",
   repository_index_execute: "Execute one safe-mode repository index job and persist resolved commit, files, and chunks.",
   repository_search: "Search bounded file and chunk evidence inside one completed repository index.",
-  repository_evidence_candidates: "Return bounded repository evidence packets for one scan profile criterion on one completed repository index, plus the effective scan profile, overlay status, coverage summary, and a reminder that scan_profile_overlay_help explains per-repo overlays.",
-  scan_boundary_map_build: "Build one candidate boundary-map artifact from the current scan coverage and selected completed repository index facts.",
+  repository_evidence_candidates:
+    "Return bounded repository evidence packets for one scan profile criterion on one completed repository index, plus the effective scan profile, overlay status, coverage summary, calibration assessment, and a reminder that scan_profile_overlay_help explains per-repo overlays.",
+  scan_boundary_map_build:
+    "Build one candidate boundary-map artifact from the current scan coverage and selected completed repository index facts, and classify whether the result now looks findings-ready, profile-misaligned, evidence-poor, or still structurally ambiguous.",
   scan_profile_overlay_help: "Explain the optional .hivemap/scan-profiles/<profile>.yaml overlay contract, merge rules, template, defaults behavior, and fail-fast validation for one scan profile.",
   concept_embedding_upsert: "Store or refresh one explicit concept embedding for a workspace node and model.",
   concept_embedding_refresh: "Generate or refresh one concept embedding through a configured provider:model ref.",
@@ -41,7 +43,8 @@ const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   proposal_apply: "Apply one approved graph proposal to the canonical graph.",
   scan_profile_list: "List versioned agent scan recipes, discovery rules, criteria, SSOT order, and required outputs.",
   scan_list: "List auditable in-progress and completed repository scan runs for a workspace.",
-  scan_start: "Start an agent-executed scan from one completed repository index and receive derived coverage, effective scan profile, overlay status, coverage warnings, and exact completion instructions.",
+  scan_start:
+    "Start an agent-executed scan from one completed repository index and return a calibration-phase response with derived coverage, effective scan profile, overlay status, coverage warnings, calibration checklist, calibration assessment, and exact completion instructions.",
   scan_record_coverage: "Replace the derived coverage for an in-progress scan only when one explicit full correction is needed.",
   scan_finding_create: "Create a validated finding node with stable fingerprint, source claims, severity, and origin scan evidence.",
   finding_update: "Update an active finding status or severity; resolved status requires explicit resolution evidence.",

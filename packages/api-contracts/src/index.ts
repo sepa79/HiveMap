@@ -340,6 +340,16 @@ export type ScanCoverageSummary = {
   warnings: string[];
 };
 
+export type ScanCalibrationClassification = "findings-ready" | "profile-gap" | "missing-evidence" | "ambiguous-shape";
+
+export type ScanCalibrationAssessment = {
+  classification: ScanCalibrationClassification;
+  confidence: "low" | "medium" | "high";
+  summary: string;
+  reasons: string[];
+  recommendedActions: string[];
+};
+
 export type ListRepositoryEvidenceCandidatesRequest = {
   workspaceId: string;
   indexId: string;
@@ -358,6 +368,7 @@ export type ListRepositoryEvidenceCandidatesResponse = {
   effectiveProfile: ScanProfile;
   overlay: ScanProfileOverlayResolution;
   coverageSummary: ScanCoverageSummary;
+  calibrationAssessment: ScanCalibrationAssessment;
   candidates: RepositoryEvidenceCandidate[];
 };
 
@@ -372,6 +383,7 @@ export type BuildScanBoundaryMapResponse = {
   profileVersion: number;
   repositoryIndexId: string;
   coverageSummary: ScanCoverageSummary;
+  calibrationAssessment: ScanCalibrationAssessment;
   boundaryMap: BoundaryMapArtifact;
 };
 
@@ -529,6 +541,9 @@ export type StartScanResponse = {
   baseProfile: ScanProfile;
   overlay: ScanProfileOverlayResolution;
   coverageSummary: ScanCoverageSummary;
+  workflowPhase: "calibration";
+  calibrationChecklist: string[];
+  calibrationAssessment: ScanCalibrationAssessment;
   instructions: string[];
 };
 

@@ -9,7 +9,7 @@ Current prioritization is driven by two near-term use cases without turning the 
 
 Those use cases set implementation order only. Repository-indexing contracts, scan flows, and stored facts remain product-agnostic and language/tooling capabilities must be modeled in reusable terms.
 
-After the current runtime/container/HiveForge base is closed, the next deliberate repository-scan feature track should turn those structural facts into a generic boundary-mapping workflow and artifact. The goal is to help agents understand how an arbitrary repository is partitioned, where public entrypoints and ownership claims live, and how contracts/tests relate to implementation without encoding product-specific maps.
+After the current runtime/container/HiveForge base is closed, the next deliberate repository-scan feature track should turn those structural facts into a repository-understanding and calibrated-review workflow. Boundary mapping remains a key first artifact, but the broader goal is to help agents calibrate scan scope, understand how an arbitrary repository is partitioned, identify where public entrypoints and ownership claims live, and validate findings against contracts/tests without encoding product-specific maps.
 
 ## Locked Direction
 

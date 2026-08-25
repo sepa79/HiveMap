@@ -744,6 +744,38 @@ describe("HiveMapRuntime", () => {
     );
   });
 
+  it("starts repository-backed scans in an explicit calibration phase", async () => {
+    await seedWorkspaceFixture();
+    await ensureCompletedRepositoryIndex("repo-index-calibration");
+
+    await expect(
+      runtime.startScan({
+        workspaceId: "workspace-a",
+        scan: {
+          id: "scan-calibration",
+          profileId: "documentation-conflicts",
+          profileVersion: 1,
+          repositoryIndexId: "repo-index-calibration",
+          actor: { agentId: "agent-a", tool: "codex" },
+          startedAt: "2026-08-20T18:46:00.000Z",
+        },
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        workflowPhase: "calibration",
+        calibrationChecklist: expect.arrayContaining([
+          "Confirm profile identity: documentation-conflicts@1.",
+          expect.stringContaining("Confirm that built-in defaults are acceptable"),
+        ]),
+        calibrationAssessment: expect.objectContaining({
+          classification: "findings-ready",
+          confidence: "medium",
+        }),
+        instructions: expect.arrayContaining([expect.stringContaining("Calibration checkpoint: before creating findings")]),
+      }),
+    );
+  });
+
   it("builds a boundary map with repository-local boundary heuristics from the overlay", async () => {
     await seedWorkspaceFixture();
     const overlayRuntime = new HiveMapRuntime({
@@ -784,6 +816,12 @@ describe("HiveMapRuntime", () => {
     const response = await overlayRuntime.buildScanBoundaryMap({ workspaceId: "workspace-a", scanId: "scan-overlay-boundary-map" });
 
     expect(response.coverageSummary).toEqual(expect.objectContaining({ includedCodeFileCount: 2 }));
+    expect(response.calibrationAssessment).toEqual(
+      expect.objectContaining({
+        classification: "findings-ready",
+        confidence: "high",
+      }),
+    );
     expect(response.boundaryMap.boundaries).toEqual([
       expect.objectContaining({
         id: "library:services-runtime",
@@ -883,6 +921,10 @@ describe("HiveMapRuntime", () => {
       profileId: "code-quality-review",
       profileVersion: 1,
       criterionId: "duplicate-responsibility",
+      calibrationAssessment: expect.objectContaining({
+        classification: "findings-ready",
+        confidence: "medium",
+      }),
       overlay: expect.objectContaining({
         status: "found",
         source: "repo",
@@ -922,6 +964,29 @@ describe("HiveMapRuntime", () => {
         }),
       ],
     }));
+  });
+
+  it("marks empty evidence packets as missing-evidence during calibration", async () => {
+    await seedWorkspaceFixture();
+    await ensureCompletedRepositoryIndex("repo-index-empty-evidence");
+
+    await expect(
+      runtime.listRepositoryEvidenceCandidates({
+        workspaceId: "workspace-a",
+        indexId: "repo-index-empty-evidence",
+        profileId: "documentation-conflicts",
+        profileVersion: 1,
+        criterionId: "broken-references",
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        calibrationAssessment: expect.objectContaining({
+          classification: "missing-evidence",
+          confidence: "medium",
+        }),
+        candidates: [],
+      }),
+    );
   });
 
   it("fails clearly when a repository scan profile overlay is invalid", async () => {

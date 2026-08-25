@@ -80,9 +80,9 @@ The first repository-backed pass for a profile/revision pair is provisional unti
 Before creating or completing findings, the agent should review:
 
 - effective profile identity, criteria, required outputs, and overlay status from `scan_start`;
-- coverage summary and included inventory shape from `scan_start`;
-- bounded evidence candidates for representative criteria when they are available;
-- candidate boundary-map output when the scan touches code/test/tool structure or when repository shape is unfamiliar.
+- coverage summary, included inventory shape, and calibration assessment from `scan_start`;
+- bounded evidence candidates and their calibration assessment for representative criteria when they are available;
+- candidate boundary-map output and its calibration assessment when the scan touches code/test/tool structure or when repository shape is unfamiliar.
 
 This gate exists to catch profile mismatches early, for example:
 
@@ -94,6 +94,13 @@ This gate exists to catch profile mismatches early, for example:
 If the preliminary pass shows that the repository shape is wrong, the agent must stop before filing final findings, refine the repository-local overlay or recorded coverage explicitly, and restart the scan from the same completed repository index with a new scan id. Do not silently continue from a mis-scoped preliminary pass into `scan_complete`.
 
 MCP/API integrations should surface this as an explicit confirmation checkpoint between `scan_start` and final findings rather than assuming that derived coverage is automatically good enough on the first attempt.
+
+The returned calibration assessment should classify the current state as one of:
+
+- `findings-ready`: calibration no longer indicates that the agent is looking at the wrong repository shape;
+- `profile-gap`: profile, overlay, or explicit coverage still appears mis-scoped for the repository;
+- `missing-evidence`: the calibrated run still lacks enough bounded evidence to support a durable finding;
+- `ambiguous-shape`: repository structure remains too unclear to separate product defects from scan interpretation defects.
 
 ## Coverage
 
@@ -117,6 +124,8 @@ The minimal typed artifact is evidence, not semantic graph truth. It contains:
 - zero or more relations between boundaries with stable ids, generic relation kinds, and bounded evidence source refs.
 
 The first slice is intentionally product-agnostic. Boundary kinds, entrypoint kinds, and relation kinds stay generic enough to describe arbitrary repositories without encoding product-specific architecture vocabularies.
+
+For tool boundaries, public entrypoints may come either from exported/public top-level symbols or from deterministic launcher files such as bounded `bin` or `cli` scripts when the tool surface is file-based rather than symbol-exported.
 
 The current build workflow is explicit:
 

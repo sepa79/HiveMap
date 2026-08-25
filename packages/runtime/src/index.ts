@@ -72,6 +72,7 @@ import {
   type ListRepositoryEvidenceCandidatesResponse,
   type RepositoryEvidenceCandidate,
   type RepositoryEvidenceSource,
+  type ScanCalibrationAssessment,
   type ScanCoverageSummary,
   type ScanProfileOverlayResolution,
   type GetWorkspaceResponse,
@@ -444,6 +445,16 @@ export class HiveMapRuntime {
       });
     }
 
+    const candidates = createRepositoryEvidenceCandidates({
+      profile: profileContext.effectiveProfile,
+      criterionId: request.criterionId,
+      files,
+      chunks,
+      symbols,
+      dependencies,
+      limit: request.limit ?? 20,
+    });
+
     return {
       indexId: request.indexId,
       profileId: request.profileId,
@@ -453,15 +464,13 @@ export class HiveMapRuntime {
       effectiveProfile: profileContext.effectiveProfile,
       overlay: profileContext.overlay,
       coverageSummary: profileContext.coverageSummary,
-      candidates: createRepositoryEvidenceCandidates({
-        profile: profileContext.effectiveProfile,
-        criterionId: request.criterionId,
-        files,
-        chunks,
-        symbols,
-        dependencies,
-        limit: request.limit ?? 20,
-      }),
+      calibrationAssessment: createEvidenceCandidatesCalibrationAssessment(
+        request.criterionId,
+        profileContext.coverageSummary,
+        profileContext.overlay,
+        candidates,
+      ),
+      candidates,
     };
   }
 
@@ -498,20 +507,23 @@ export class HiveMapRuntime {
     const boundaryMapConfig = resolveBoundaryMapBuildConfig(profile, files, chunks);
 
     try {
+      const coverageSummary = summarizeRecordedCoverage(run.coverage, files, symbols);
+      const boundaryMap = buildBoundaryMapArtifact({
+        coverage: run.coverage,
+        files,
+        symbols,
+        dependencies,
+        revision: repositoryIndex.resolvedCommit,
+        config: boundaryMapConfig,
+      });
       return {
         scanId: run.id,
         profileId: run.profileId,
         profileVersion: run.profileVersion,
         repositoryIndexId,
-        coverageSummary: summarizeRecordedCoverage(run.coverage, files, symbols),
-        boundaryMap: buildBoundaryMapArtifact({
-          coverage: run.coverage,
-          files,
-          symbols,
-          dependencies,
-          revision: repositoryIndex.resolvedCommit,
-          config: boundaryMapConfig,
-        }),
+        coverageSummary,
+        calibrationAssessment: createBoundaryMapCalibrationAssessment(coverageSummary, boundaryMap),
+        boundaryMap,
       };
     } catch (error) {
       if (error instanceof Error) {
@@ -935,6 +947,17 @@ export class HiveMapRuntime {
       baseProfile: profileContext.baseProfile,
       overlay: profileContext.overlay,
       coverageSummary: profileContext.coverageSummary,
+      workflowPhase: "calibration",
+      calibrationChecklist: createScanCalibrationChecklist(
+        profileContext.effectiveProfile,
+        profileContext.overlay,
+        profileContext.coverageSummary,
+      ),
+      calibrationAssessment: createStartScanCalibrationAssessment(
+        profileContext.effectiveProfile,
+        profileContext.overlay,
+        profileContext.coverageSummary,
+      ),
       instructions: createScanInstructions(profileContext.effectiveProfile, run, profileContext.overlay, profileContext.coverageSummary),
     };
   }
@@ -3196,6 +3219,7 @@ function createScanInstructions(
 ): string[] {
   return [
     ...profile.instructions,
+    `Calibration checkpoint: before creating findings, confirm that the effective profile, overlay status, and included repository shape match this repository.`,
     `Use the repository-index-derived coverage already attached to this run from ${run.repository.root} at revision ${run.repository.revision}.`,
     overlay.applied
       ? `Applied repository scan profile overlay from ${overlay.overlayPath}.`
@@ -3211,6 +3235,193 @@ function createScanInstructions(
     `Apply every criterion: ${profile.criteria.map((criterion) => criterion.id).join(", ")}.`,
     `Declare outputs: ${profile.requiredOutputs.join(", ")}.`,
   ];
+}
+
+function createScanCalibrationChecklist(
+  profile: ReturnType<typeof findScanProfile>,
+  overlay: ScanProfileOverlayResolution,
+  coverageSummary: ScanCoverageSummary,
+): string[] {
+  return [
+    `Confirm profile identity: ${profile.id}@${profile.version}.`,
+    overlay.applied
+      ? `Confirm the repository-local overlay at ${overlay.overlayPath} is intended for this repository shape.`
+      : `Confirm that built-in defaults are acceptable because no repository-local overlay exists at ${overlay.overlayPath}.`,
+    `Confirm included inventory shape before findings: ${coverageSummary.includedCount} included out of ${coverageSummary.discoveredCount} discovered sources.`,
+    `If code/test/tool boundaries are unclear, build a boundary map before creating findings.`,
+    `If calibration is wrong, refine the repository-local overlay or record one explicit coverage correction and restart the scan instead of forcing findings.`,
+  ];
+}
+
+const MISSING_CONTRACT_DOC_QUESTION = "No contract-local documentation matched this boundary under current scan coverage.";
+const MISSING_TEST_QUESTION = "No verifying test source was linked to this boundary under current scan coverage.";
+const MISSING_ENTRYPOINT_QUESTION = "No public entrypoint was detected from exported or public top-level symbols.";
+
+function createStartScanCalibrationAssessment(
+  profile: ReturnType<typeof findScanProfile>,
+  overlay: ScanProfileOverlayResolution,
+  coverageSummary: ScanCoverageSummary,
+): ScanCalibrationAssessment {
+  if (coverageSummary.warnings.length > 0) {
+    return {
+      classification: "profile-gap",
+      confidence: "high",
+      summary: "The provisional scan shape looks wrong for this repository and should be recalibrated before findings.",
+      reasons: [...coverageSummary.warnings],
+      recommendedActions: [
+        `Review the active overlay at ${overlay.overlayPath} and refine repository-specific scope or boundary settings.`,
+        "If the profile is conceptually correct but inventory is still wrong, record one explicit coverage correction and restart the scan.",
+      ],
+    };
+  }
+
+  const codeOrTestScan =
+    profile.sourceTypes.includes("code") || profile.sourceTypes.includes("test") || coverageSummary.includedCodeFileCount > 0;
+  if (codeOrTestScan) {
+    return {
+      classification: "ambiguous-shape",
+      confidence: "medium",
+      summary: "Coverage is provisionally coherent, but repository structure still needs boundary calibration before findings.",
+      reasons: [
+        "No coverage warning indicates an immediate profile mismatch, but code/test/tool ownership has not yet been checked through a boundary artifact.",
+      ],
+      recommendedActions: [
+        "Call scan_boundary_map_build before creating findings for code, test, or tool concerns.",
+        "Use repository_evidence_candidates for representative criteria after the structural pass.",
+      ],
+    };
+  }
+
+  return {
+    classification: "findings-ready",
+    confidence: "medium",
+    summary: "The provisional scan shape looks coherent enough to continue with bounded evidence review.",
+    reasons: ["No coverage warning indicates an obvious profile mismatch at scan start."],
+    recommendedActions: [
+      "Use repository_evidence_candidates where available before creating findings.",
+      "Create findings only for issues supported by bounded evidence from the calibrated run.",
+    ],
+  };
+}
+
+function createEvidenceCandidatesCalibrationAssessment(
+  criterionId: string,
+  coverageSummary: ScanCoverageSummary,
+  overlay: ScanProfileOverlayResolution,
+  candidates: readonly RepositoryEvidenceCandidate[],
+): ScanCalibrationAssessment {
+  if (coverageSummary.warnings.length > 0) {
+    return {
+      classification: "profile-gap",
+      confidence: "high",
+      summary: "Evidence candidate review is premature because the active scan shape still looks wrong for this repository.",
+      reasons: [...coverageSummary.warnings],
+      recommendedActions: [
+        `Review the active overlay at ${overlay.overlayPath} before trusting missing or noisy evidence for criterion ${criterionId}.`,
+        "Restart the scan after profile or coverage correction instead of turning calibration defects into findings.",
+      ],
+    };
+  }
+
+  if (candidates.length === 0) {
+    return {
+      classification: "missing-evidence",
+      confidence: "medium",
+      summary: `No bounded evidence candidates were prepared for criterion ${criterionId} under the current calibrated scope.`,
+      reasons: [
+        `Criterion ${criterionId} currently has no prepared evidence packets.`,
+        "This may mean the repository has no matching evidence yet, or that the agent still needs direct bounded review.",
+      ],
+      recommendedActions: [
+        "Review the bounded coverage directly for this criterion before creating a finding.",
+        "If the suspected issue depends on unclear structure, build a boundary map before deciding whether the gap is real.",
+      ],
+    };
+  }
+
+  return {
+    classification: "findings-ready",
+    confidence: "medium",
+    summary: `Bounded evidence candidates exist for criterion ${criterionId}; review can continue without rediscovering repository shape.`,
+    reasons: [`Prepared evidence packets are available for criterion ${criterionId}.`],
+    recommendedActions: [
+      "Review the returned packets first and create findings only from claims they actually support.",
+      "If the packets expose a structural gap, use boundary-map output to distinguish repository defects from process defects.",
+    ],
+  };
+}
+
+function createBoundaryMapCalibrationAssessment(
+  coverageSummary: ScanCoverageSummary,
+  boundaryMap: BuildScanBoundaryMapResponse["boundaryMap"],
+): ScanCalibrationAssessment {
+  if (coverageSummary.warnings.length > 0) {
+    return {
+      classification: "profile-gap",
+      confidence: "high",
+      summary: "Boundary output was built from a scan shape that still looks miscalibrated.",
+      reasons: [...coverageSummary.warnings],
+      recommendedActions: [
+        "Refine the repository-local overlay or record one explicit coverage correction before trusting structural findings.",
+        "Restart the scan from the same repository index after calibration changes.",
+      ],
+    };
+  }
+
+  const boundariesMissingEntrypoints = boundaryMap.boundaries.filter((boundary) =>
+    boundary.openQuestions?.includes(MISSING_ENTRYPOINT_QUESTION),
+  );
+  if (boundariesMissingEntrypoints.length > 0) {
+    return {
+      classification: "ambiguous-shape",
+      confidence: "high",
+      summary: "Boundary structure is still ambiguous enough that findings would risk mixing repository defects with scan interpretation gaps.",
+      reasons: boundariesMissingEntrypoints.map(
+        (boundary) => `${boundary.id} still lacks a clear public entrypoint under the current calibrated scope.`,
+      ),
+      recommendedActions: [
+        "Review whether the active profile or overlay is missing repository-specific entrypoint rules or roots.",
+        "If the repository shape is genuinely unusual, keep the result as an open question and avoid premature findings.",
+      ],
+    };
+  }
+
+  const evidenceGapBoundaries = boundaryMap.boundaries.filter((boundary) =>
+    (boundary.openQuestions ?? []).some((question) => question === MISSING_CONTRACT_DOC_QUESTION || question === MISSING_TEST_QUESTION),
+  );
+  if (evidenceGapBoundaries.length > 0) {
+    return {
+      classification: "findings-ready",
+      confidence: "high",
+      summary: "Boundary shape is coherent; the remaining gaps now look like likely repository findings or evidence deficits rather than profile defects.",
+      reasons: dedupeStrings(
+        evidenceGapBoundaries.flatMap((boundary) =>
+          (boundary.openQuestions ?? [])
+            .filter((question) => question === MISSING_CONTRACT_DOC_QUESTION || question === MISSING_TEST_QUESTION)
+            .map((question) => `${boundary.id}: ${question}`),
+        ),
+      ),
+      recommendedActions: [
+        "Review the affected boundaries against criteria such as missing-tests or undocumented-api before filing findings.",
+        "Use repository_evidence_candidates and the boundary artifact together so evidence gaps stay bounded and explicit.",
+      ],
+    };
+  }
+
+  return {
+    classification: "findings-ready",
+    confidence: "high",
+    summary: "Boundary shape looks coherent enough that remaining review work can focus on repository findings rather than scan calibration.",
+    reasons: ["Boundary map produced stable boundaries, entrypoints, and relations without structural open questions."],
+    recommendedActions: [
+      "Use the boundary artifact as the working repository map for the rest of the scan.",
+      "Create findings only for problems supported by bounded code, test, or contract evidence.",
+    ],
+  };
+}
+
+function dedupeStrings(values: readonly string[]): string[] {
+  return [...new Set(values)];
 }
 
 function readRepositoryIndexedFileText(filePath: string, chunks: readonly RepositoryChunkRecord[]): string {

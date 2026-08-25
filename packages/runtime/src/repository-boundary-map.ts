@@ -105,6 +105,8 @@ export function buildBoundaryMapArtifact(options: {
     boundary.publicEntrypoints.set(entrypoint.id, entrypoint);
   }
 
+  attachToolFileEntrypoints(boundaries, includedFiles, options.revision);
+
   const relationMap = new Map<string, MutableRelation>();
   const targetBoundaryIdsByTestFile = new Map<string, Set<string>>();
   for (const dependency of includedDependencies) {
@@ -267,6 +269,42 @@ function createBoundaryEntrypoint(
   };
 }
 
+function attachToolFileEntrypoints(
+  boundaries: ReadonlyMap<string, MutableBoundary>,
+  files: readonly RepositoryFileRecord[],
+  revision: string,
+): void {
+  const fileByPath = new Map(files.map((file) => [normalizeRepositoryPath(file.path), file] as const));
+  for (const boundary of boundaries.values()) {
+    if (boundary.kind !== "tool" || boundary.publicEntrypoints.size > 0) {
+      continue;
+    }
+
+    const entrypointFile = selectToolEntrypointFile(boundary, fileByPath);
+    if (entrypointFile === undefined) {
+      continue;
+    }
+
+    const normalizedPath = normalizeRepositoryPath(entrypointFile.path);
+    const label = pathPosix.basename(normalizedPath);
+    boundary.publicEntrypoints.set(`${normalizeIdentifier(normalizedPath)}:file-entrypoint`, {
+      id: `${normalizeIdentifier(normalizedPath)}:file-entrypoint`,
+      label,
+      kind: "cli",
+      filePath: normalizedPath,
+      sourceRefs: [
+        createSourceRef({
+          role: "implements",
+          source: "code",
+          target: normalizedPath,
+          revision,
+          label,
+        }),
+      ],
+    });
+  }
+}
+
 function classifyEntrypointKind(
   symbol: RepositorySymbolRecord,
   boundaryKind: BoundaryKind,
@@ -288,6 +326,60 @@ function classifyEntrypointKind(
     return "api";
   }
   return "export";
+}
+
+function selectToolEntrypointFile(
+  boundary: MutableBoundary,
+  fileByPath: ReadonlyMap<string, RepositoryFileRecord>,
+): RepositoryFileRecord | undefined {
+  const candidates = [...boundary.ownedPaths]
+    .map((path) => fileByPath.get(path))
+    .filter((file): file is RepositoryFileRecord => file !== undefined && file.sourceKind === "code")
+    .sort((left, right) => compareToolEntrypointFiles(normalizeRepositoryPath(left.path), normalizeRepositoryPath(right.path)));
+
+  if (candidates.length === 0) {
+    return undefined;
+  }
+
+  const launcherCandidate = candidates.find((file) => isLikelyToolLauncherPath(normalizeRepositoryPath(file.path), boundary.rootPath));
+  if (launcherCandidate !== undefined) {
+    return launcherCandidate;
+  }
+
+  return candidates.length === 1 ? candidates[0] : undefined;
+}
+
+function compareToolEntrypointFiles(leftPath: string, rightPath: string): number {
+  const rankDelta = toolEntrypointPathRank(leftPath) - toolEntrypointPathRank(rightPath);
+  if (rankDelta !== 0) {
+    return rankDelta;
+  }
+  return leftPath.localeCompare(rightPath);
+}
+
+function toolEntrypointPathRank(path: string): number {
+  const basename = pathPosix.basename(path).toLowerCase();
+  const directory = pathPosix.dirname(path).toLowerCase();
+  if (directory.endsWith("/bin") || directory.endsWith("/cli")) {
+    return 0;
+  }
+  if (!basename.includes(".")) {
+    return 1;
+  }
+  if (basename.startsWith("cli.") || basename.endsWith(".cli") || basename.includes("-cli.") || basename.endsWith("-cli.ts") || basename.endsWith("-cli.js")) {
+    return 2;
+  }
+  if (basename.startsWith("bin.") || basename.endsWith(".bin") || basename.includes("-bin.") || basename.endsWith("-bin.ts") || basename.endsWith("-bin.js")) {
+    return 3;
+  }
+  return 4;
+}
+
+function isLikelyToolLauncherPath(path: string, rootPath: string): boolean {
+  if (path === rootPath || path.startsWith(`${rootPath}/`)) {
+    return toolEntrypointPathRank(path) < 4 || pathPosix.dirname(path).toLowerCase() === rootPath.toLowerCase();
+  }
+  return toolEntrypointPathRank(path) < 4;
 }
 
 function findTargetBoundary(

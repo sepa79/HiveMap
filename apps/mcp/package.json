@@ -16,7 +16,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "pretest": "npm run build -w @hivemap/runtime",
+    "pretest": "npm run build -w @hivemap/api-contracts && npm run build -w @hivemap/runtime",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

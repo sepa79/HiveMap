@@ -273,4 +273,49 @@ describe("createRepositorySymbols", () => {
       ]),
     );
   });
+
+  it("resolves relative imports that include an explicit module extension", () => {
+    const sourceFacts = createRepositorySyntaxFacts({
+      workspaceId: "workspace-a",
+      indexId: "repo-index-a",
+      filePath: "test/unit/bin.test.js",
+      language: "javascript",
+      sourceKind: "code",
+      text: "import '../../bin/main.js';",
+    });
+
+    const dependencies = createRepositoryDependencies({
+      files: [
+        {
+          workspaceId: "workspace-a",
+          indexId: "repo-index-a",
+          path: "test/unit/bin.test.js",
+          language: "javascript",
+          sourceKind: "code",
+          contentHash: "hash-test",
+          byteSize: 50,
+        },
+        {
+          workspaceId: "workspace-a",
+          indexId: "repo-index-a",
+          path: "bin/main.js",
+          language: "javascript",
+          sourceKind: "code",
+          contentHash: "hash-bin",
+          byteSize: 50,
+        },
+      ],
+      symbols: sourceFacts.symbols,
+      references: sourceFacts.references,
+    });
+
+    expect(dependencies).toEqual([
+      expect.objectContaining({
+        kind: "import",
+        targetText: "../../bin/main.js",
+        targetFilePath: "bin/main.js",
+        resolutionConfidence: "high",
+      }),
+    ]);
+  });
 });

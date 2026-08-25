@@ -688,11 +688,30 @@ function createImportAliases(filePath: string): string[] {
 }
 
 function resolveImportTargetFilePath(sourceFilePath: string, targetText: string, importTargetIndex: Map<string, string>): string | undefined {
-  if (!targetText.startsWith(".")) {
-    return importTargetIndex.get(targetText.trim());
+  const normalizedTarget = targetText.trim();
+  if (normalizedTarget.length === 0) {
+    return undefined;
   }
-  const resolved = normalizeRepositoryPath(pathPosix.join(pathPosix.dirname(normalizeRepositoryPath(sourceFilePath)), targetText.trim()));
-  return importTargetIndex.get(resolved);
+
+  const lookupCandidates = targetText.startsWith(".")
+    ? createImportLookupCandidates(
+        normalizeRepositoryPath(pathPosix.join(pathPosix.dirname(normalizeRepositoryPath(sourceFilePath)), normalizedTarget)),
+      )
+    : createImportLookupCandidates(normalizedTarget);
+
+  for (const candidate of lookupCandidates) {
+    const targetFilePath = importTargetIndex.get(candidate);
+    if (targetFilePath !== undefined) {
+      return targetFilePath;
+    }
+  }
+  return undefined;
+}
+
+function createImportLookupCandidates(targetPath: string): string[] {
+  const normalizedPath = normalizeRepositoryPath(targetPath);
+  const strippedPath = stripRepositoryModuleExtension(normalizedPath);
+  return strippedPath === normalizedPath ? [normalizedPath] : [normalizedPath, strippedPath];
 }
 
 function stripRepositoryModuleExtension(filePath: string): string {

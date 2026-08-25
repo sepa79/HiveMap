@@ -306,6 +306,9 @@ describe("MCP tool adapter", () => {
         profileId: "documentation-conflicts",
         profileVersion: 1,
         criterionId: "broken-references",
+        calibrationAssessment: expect.objectContaining({
+          classification: "missing-evidence",
+        }),
         candidates: [],
         overlay: expect.objectContaining({
           status: "missing",
@@ -573,6 +576,16 @@ describe("MCP tool adapter", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.run.status).toBe("in_progress");
+      expect(result.value.workflowPhase).toBe("calibration");
+      expect(result.value.calibrationChecklist).toEqual(
+        expect.arrayContaining([expect.stringContaining("Confirm profile identity: documentation-conflicts@1.")]),
+      );
+      expect(result.value.calibrationAssessment).toEqual(
+        expect.objectContaining({
+          classification: "findings-ready",
+          confidence: "medium",
+        }),
+      );
       expect(result.value.run.repository).toMatchObject({
         repositoryIndexId: "repo-index-scan",
         root: "index:repo-index-scan",
@@ -580,6 +593,9 @@ describe("MCP tool adapter", () => {
       });
       expect(result.value.run.coverage?.included).toEqual(["docs/architecture.md"]);
       expect(result.value.overlay.guidanceTool).toBe("scan_profile_overlay_help");
+      expect(result.value.instructions).toContainEqual(
+        expect.stringContaining("Calibration checkpoint: before creating findings"),
+      );
       expect(result.value.instructions).toContainEqual(
         expect.stringContaining("Use the repository-index-derived coverage already attached to this run"),
       );
@@ -608,6 +624,9 @@ describe("MCP tool adapter", () => {
       value: expect.objectContaining({
         scanId: "scan-boundary",
         profileId: "code-quality-review",
+        calibrationAssessment: expect.objectContaining({
+          classification: "ambiguous-shape",
+        }),
         boundaryMap: expect.objectContaining({
           boundaries: [
             expect.objectContaining({

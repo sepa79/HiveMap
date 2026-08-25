@@ -33,7 +33,7 @@ Upgrade HiveMap from the current local-first SQLite alpha shape to a container-f
 - [x] This tracked execution path covers Postgres runtime, containerization, local Docker validation, and HiveForge readiness.
 - [x] The base Postgres/container/HiveForge milestone did not block on embedding-provider work; provider-backed refresh/backfill is now a follow-on slice on top of that base.
 - [x] `pgvector` remains part of the target backend direction, but vector-powered behavior is not required to complete the base runtime/container milestone.
-- [x] Once the remaining Phase 4 and Phase 6 work is closed, the next deliberate feature track is generic repository boundary mapping for scans, built on repository-indexing structural facts rather than PocketHive-specific heuristics.
+- [x] Once the remaining Phase 4 and Phase 6 work is closed, the next deliberate feature track should help agents calibrate scans, understand unfamiliar repositories, and validate findings from repository-index structural facts rather than from PocketHive-specific heuristics.
 
 ## Phase 0 — Workflow Baseline
 
@@ -111,10 +111,59 @@ Current state:
 
 ## Next Feature Track After Base Runtime
 
-- [ ] Start a generic repository boundary-mapping track after the base runtime/container/HiveForge exit criteria are closed.
-- [ ] Keep that track product-agnostic: derive candidate boundaries, owned paths/symbols, contract/test links, and boundary-to-boundary relations from repository-index structural facts rather than repository-specific hardcoding.
-- [ ] Use PocketHive and HiveMap as proving repositories for the workflow, not as special-case contracts.
-- [ ] Treat hosted MCP as a separate follow-up after the runtime base is stable; do not let it displace the first generic boundary-mapping slice once the current runtime/HiveForge work is complete.
+Keep the base runtime/container/HiveForge plan intact. Replace only the post-base feature roadmap with a repository-understanding and calibrated-review track.
+
+### Goal
+
+Help an agent reach a correct working model of an unfamiliar repository before it files durable findings. HiveMap should reduce uncertainty first, not just produce scan output faster.
+
+### Guardrails
+
+- [ ] Keep the track product-agnostic: derive candidate boundaries, contracts, tests, and findings from repository-index structural facts rather than repository-specific hardcoding.
+- [ ] Keep PocketHive and HiveMap as proving repositories for the workflow, not as special-case contracts.
+- [ ] Keep hosted MCP as a separate follow-up after the runtime base is stable; it must not displace this track.
+- [ ] Prefer externalized scan recipes and overlays over encoding repository-family assumptions in code.
+
+### Phase A — Calibration Contract
+
+- [ ] Treat `scan_start` as an explicit calibration-stage response, not only as run creation.
+- [ ] Return clear workflow state for the provisional pass, including calibration checklist, overlay status, coverage summary, and next recommended actions.
+- [ ] Require one explicit decision after the provisional pass: continue, refine overlay, correct coverage, build boundary map, or restart the scan.
+- [ ] Make MCP/API responses distinguish between findings-ready and calibration-not-yet-complete states.
+
+### Phase B — Repository Understanding Artifacts
+
+- [ ] Treat boundary maps as working understanding artifacts before they become completed-scan evidence.
+- [ ] Keep the first artifact set focused on repository topology, candidate boundaries, owned paths/symbols, public entrypoints, contract links, test links, inter-boundary relations, and open questions.
+- [ ] Support code, test, and tool surfaces equally, including file-based CLI/tool entrypoints that are not symbol-exported.
+- [ ] Keep artifact generation fail-fast and repo-overridable when roots, test families, or contract markers do not match the active repository.
+
+### Phase C — Finding Validation Workflow
+
+- [ ] Help the agent distinguish between a likely real finding, a profile/overlay gap, a missing-evidence gap, and a still-ambiguous repository shape.
+- [ ] Add criterion-oriented evidence recipes so the preferred review unit is a bounded packet, not an unstructured reread of the whole included inventory.
+- [ ] Preserve open questions as first-class calibration output instead of forcing premature findings.
+- [ ] Use completed-scan comparison to show whether calibration or heuristic changes improved the result or only changed wording.
+
+### Phase D — Externalized Scan Recipes
+
+- [ ] Move more repository-shaped scan behavior out of code and into explicit profile/overlay recipes.
+- [ ] Cover roots, contract markers, test families, entrypoint rules, ignore rules, and evidence-selection hints with replaceable profile fields where practical.
+- [ ] Keep merge vs replace semantics explicit and fail fast on invalid overlays; no silent fallback to guessed behavior.
+- [ ] Document repeatable process for building repository-specific overlays from a first calibration pass.
+
+### Phase E — Comparison-Driven Tuning
+
+- [ ] Use repeat scans and before/after comparison as the main tuning mechanism for heuristics and workflow changes.
+- [ ] Track whether a change removed false boundaries, improved contract/test linking, or reduced repeated open questions.
+- [ ] Tune heuristics only after repeated evidence across multiple repositories, not from one-off special cases.
+- [ ] Keep the tuning benchmark set small, safe, and diverse: small libraries, CLI repos, docs-heavy repos, and at least one larger multi-boundary repository.
+
+### Later Follow-Up
+
+- [ ] Add additional repository-understanding layers such as authority/contract maps, test-to-boundary maps, and risk maps once the first calibration workflow is stable.
+- [ ] Capture repository-specific understanding as durable reusable scan knowledge after a good first pass, instead of rediscovering the same layout every run.
+- [ ] Consider a human-facing calibration UI only after the MCP/API workflow proves useful in practice.
 
 ## Deferred Product Follow-Up
 

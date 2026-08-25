@@ -73,8 +73,9 @@ export const executeSafeRepositoryIndex: RepositoryIndexExecutor = async (option
       const byteSize = bytes.byteLength;
       indexedBytes += byteSize;
       const sourceKind = classifySourceKind(normalizedPath);
-      const language = detectLanguage(normalizedPath, sourceKind);
       const contentHash = digestBytes(bytes);
+      const text = isProbablyTextFile(bytes) ? bytes.toString("utf8").replace(/\r\n/g, "\n") : undefined;
+      const language = detectLanguage(normalizedPath, sourceKind, text);
 
       files.push({
         workspaceId: options.workspaceId,
@@ -86,11 +87,10 @@ export const executeSafeRepositoryIndex: RepositoryIndexExecutor = async (option
         byteSize,
       });
 
-      if (!isProbablyTextFile(bytes)) {
+      if (text === undefined) {
         continue;
       }
 
-      const text = bytes.toString("utf8").replace(/\r\n/g, "\n");
       const nextChunks = createRepositoryChunks({
         workspaceId: options.workspaceId,
         indexId: options.indexId,
@@ -214,7 +214,7 @@ function isProbablyTextFile(bytes: Uint8Array): boolean {
   return suspicious / bytes.length < 0.05;
 }
 
-function detectLanguage(path: string, sourceKind: string): string {
+function detectLanguage(path: string, sourceKind: string, text?: string): string {
   const extension = extname(path).toLocaleLowerCase();
   switch (extension) {
     case ".ts":
@@ -252,8 +252,37 @@ function detectLanguage(path: string, sourceKind: string): string {
     case ".sh":
       return "shell";
     default:
+      if (sourceKind === "code" || sourceKind === "test") {
+        const inferredScriptLanguage = inferScriptLanguage(path, text);
+        if (inferredScriptLanguage !== undefined) {
+          return inferredScriptLanguage;
+        }
+      }
       return sourceKind === "documentation" ? "text" : "plain-text";
   }
+}
+
+function inferScriptLanguage(path: string, text: string | undefined): "javascript" | "shell" | undefined {
+  if (text === undefined) {
+    return undefined;
+  }
+
+  const firstLine = text.split("\n", 1)[0]?.trim().toLowerCase() ?? "";
+  if (firstLine.startsWith("#!")) {
+    if (firstLine.includes("node") || firstLine.includes("deno") || firstLine.includes("bun")) {
+      return "javascript";
+    }
+    if (firstLine.includes("sh") || firstLine.includes("bash") || firstLine.includes("zsh")) {
+      return "shell";
+    }
+  }
+
+  const normalizedPath = normalizeRepositoryPath(path).toLowerCase();
+  if ((normalizedPath.includes("/bin/") || normalizedPath.includes("/cli/")) && /(?:^|\n)\s*(?:import\s|export\s|const\s+\w+\s*=\s*require\()/u.test(text)) {
+    return "javascript";
+  }
+
+  return undefined;
 }
 
 function classifySourceKind(path: string): string {

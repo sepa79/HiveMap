@@ -1,0 +1,3 @@
+interface:
+  display_name: "Repository Understanding Scan"
+  short_description: "Calibration-first HiveMap repo scans"
