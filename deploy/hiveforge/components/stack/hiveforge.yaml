@@ -18,4 +18,3 @@ deployment:
 requirements:
   environment:
     - HIVEMAP_IMAGE
-    - HIVEMAP_OLLAMA_BASE_URL

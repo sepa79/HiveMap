@@ -5,17 +5,22 @@ services:
     environment:
       HIVEMAP_API_HOST: "0.0.0.0"
       HIVEMAP_API_PORT: "8787"
+      HIVEMAP_STATE_DIR: "/var/lib/hivemap"
       HIVEMAP_POSTGRES_DB: "{{ hivemap_postgres_db }}"
       HIVEMAP_POSTGRES_PORT: "{{ hivemap_postgres_port }}"
       HIVEMAP_DATA_DIR: "/var/lib/hivemap/postgres"
+      HIVEMAP_OLLAMA_ENABLED: "{{ hivemap_ollama_enabled }}"
+      HIVEMAP_OLLAMA_HOST: "127.0.0.1:11434"
+      HIVEMAP_OLLAMA_MODELS_DIR: "/var/lib/hivemap/ollama"
+      HIVEMAP_OLLAMA_PULL_MODELS: "{{ hivemap_ollama_pull_models }}"
       HIVEMAP_WEB_DIST: "/app/apps/web/dist"
-{% if hivemap_ollama_base_url | length > 0 %}
+{% if hivemap_ollama_enabled != '1' and hivemap_ollama_base_url | length > 0 %}
       HIVEMAP_OLLAMA_BASE_URL: "{{ hivemap_ollama_base_url }}"
 {% endif %}
     ports:
       - "{{ hivemap_http_port }}:8787"
     volumes:
-      - "{{ (hivemap_profile == 'docker-swarm') | ternary((hivemap_data_bind_source | length > 0) | ternary(hivemap_data_bind_source, hivemap_bind_source_dir ~ '/state/postgres/data'), hivemap_state_root ~ '/data') }}:/var/lib/hivemap/postgres"
+      - "{{ (hivemap_profile == 'docker-swarm') | ternary(hivemap_data_bind_source, hivemap_state_root) }}:/var/lib/hivemap"
     deploy:
       replicas: 1
       restart_policy:

@@ -20,15 +20,21 @@ FROM pgvector/pgvector:pg16-bookworm AS runtime
 ENV NODE_ENV=production \
   HIVEMAP_API_HOST=0.0.0.0 \
   HIVEMAP_API_PORT=8787 \
+  HIVEMAP_STATE_DIR=/var/lib/hivemap \
   HIVEMAP_POSTGRES_DB=hivemap \
   HIVEMAP_POSTGRES_PORT=5432 \
   HIVEMAP_DATA_DIR=/var/lib/hivemap/postgres \
+  HIVEMAP_OLLAMA_ENABLED=0 \
+  HIVEMAP_OLLAMA_HOST=127.0.0.1:11434 \
+  HIVEMAP_OLLAMA_MODELS_DIR=/var/lib/hivemap/ollama \
+  HIVEMAP_OLLAMA_PULL_MODELS= \
   HIVEMAP_WEB_DIST=/app/apps/web/dist
 
 WORKDIR /app
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git \
+  && apt-get install -y --no-install-recommends ca-certificates curl git zstd \
+  && curl -fsSL https://ollama.com/download/ollama-linux-amd64.tar.zst | tar --zstd -x -C /usr \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=node:22-bookworm-slim /usr/local /usr/local
@@ -39,11 +45,11 @@ COPY --from=build /app/packages ./packages
 COPY docker/hivemap-entrypoint.sh /usr/local/bin/hivemap-entrypoint
 
 RUN chmod +x /usr/local/bin/hivemap-entrypoint \
-  && mkdir -p /var/lib/hivemap/postgres \
+  && mkdir -p /var/lib/hivemap/postgres /var/lib/hivemap/ollama \
   && chown -R postgres:postgres /var/lib/hivemap
 
 EXPOSE 8787
-VOLUME ["/var/lib/hivemap/postgres"]
+VOLUME ["/var/lib/hivemap"]
 
 HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=5 CMD node --input-type=module -e "const response = await fetch('http://127.0.0.1:8787/workspaces'); if (!response.ok) process.exit(1);"
 

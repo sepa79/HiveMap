@@ -68,6 +68,7 @@ Upgrade HiveMap from the current local-first SQLite alpha shape to a container-f
 
 - [x] Add a production-oriented `Dockerfile` for HiveMap.
 - [ ] Build one self-contained local container image that runs HiveMap, Postgres, plugins, and local model-serving dependencies together.
+  Current progress: the local image now bundles the Ollama binary plus a shared `/var/lib/hivemap` state root for Postgres data and container-owned model storage; plugin bundling remains the missing part of the one-container target.
 - [x] Make persistence optional through a mounted filesystem path for Postgres data.
 - [x] Keep local startup free of user-managed DB URLs or DB file paths.
 - [x] Add healthcheck behavior and explicit runtime env vars for the container-owned runtime only.
@@ -100,7 +101,7 @@ Current state:
 - Local HiveForge adapter smoke passes for `docker-single` by rendering Compose through Ansible and validating it with `docker compose config`.
 - HiveForge on August 19, 2026 is connected to trusted-LAN Forgejo at `http://192.168.88.50:3001/`.
 - HiveMap now deploys to the shared `swarm` environment as `hivemap-development` through the `docker-swarm` profile.
-- The temporary swarm dev path is pinned to `.50` with an explicit placement constraint because its Postgres bind source is node-local and currently lives under `/opt/pockethive-data/hivemap/data`.
+- The temporary swarm dev path is pinned to `.50` with an explicit placement constraint because its HiveMap state bind source is node-local and currently lives under `/opt/pockethive-data/hivemap/state`.
 - Remaining HiveForge work is about tightening the local development loop and adding stronger e2e coverage, not proving first deploy viability.
 
 ## Phase 7 — Hosted MCP Follow-Up
@@ -136,21 +137,24 @@ Help an agent reach a correct working model of an unfamiliar repository before i
 - [x] Treat boundary maps as working understanding artifacts before they become completed-scan evidence.
 - [x] Keep the first artifact set focused on repository topology, candidate boundaries, owned paths/symbols, public entrypoints, contract links, test links, inter-boundary relations, and open questions.
 - [x] Support code, test, and tool surfaces equally, including file-based CLI/tool entrypoints that are not symbol-exported.
-- [x] Keep artifact generation fail-fast and repo-overridable when roots, test families, or contract markers do not match the active repository.
+- [x] Keep artifact generation fail-fast when roots do not match the active repository, and keep test families plus contract markers repo-overridable through explicit overlays.
 
 ### Phase C — Finding Validation Workflow
 
-- [ ] Help the agent distinguish between a likely real finding, a profile/overlay gap, a missing-evidence gap, and a still-ambiguous repository shape.
+- [x] Help the agent distinguish between a likely real finding, a profile/overlay gap, a missing-evidence gap, and a still-ambiguous repository shape.
 - [ ] Add criterion-oriented evidence recipes so the preferred review unit is a bounded packet, not an unstructured reread of the whole included inventory.
+  Current progress: duplicate-authority, duplicate-responsibility, missing-owner, and stale-documentation now use explicit profile/overlay recipe fields instead of hidden runtime defaults.
 - [ ] Preserve open questions as first-class calibration output instead of forcing premature findings.
 - [ ] Use completed-scan comparison to show whether calibration or heuristic changes improved the result or only changed wording.
 
 ### Phase D — Externalized Scan Recipes
 
 - [ ] Move more repository-shaped scan behavior out of code and into explicit profile/overlay recipes.
+  Current progress: boundary-map roots/markers, duplicate-authority selection, duplicate-responsibility selection, missing-owner materiality, and stale-documentation currentness are now repo-overridable through the profile overlay contract.
 - [ ] Cover roots, contract markers, test families, entrypoint rules, ignore rules, and evidence-selection hints with replaceable profile fields where practical.
 - [ ] Keep merge vs replace semantics explicit and fail fast on invalid overlays; no silent fallback to guessed behavior.
 - [ ] Document repeatable process for building repository-specific overlays from a first calibration pass.
+  Current progress: `scan_profile_overlay_help` now returns an overlay-build workflow plus symptom-to-field hints, and the repository scan workflow spec documents the repeatable pass.
 
 ### Phase E — Comparison-Driven Tuning
 

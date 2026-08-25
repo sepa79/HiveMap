@@ -12,7 +12,7 @@
 
 - name: Ensure HiveMap state directory exists
   ansible.builtin.file:
-    path: "{{ hivemap_state_root }}/data"
+    path: "{{ hivemap_state_root }}"
     state: directory
     mode: "0755"
 

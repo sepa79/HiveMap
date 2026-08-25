@@ -83,7 +83,21 @@ A working single-image Docker path exists as well:
 docker compose up --build
 ```
 
-That path bundles Postgres with the API and built web assets in one container, with optional persistence mounted at `./.local/hivemap-postgres`. Local Docker smoke coverage has been exercised for workspace create, graph mutation, projection read/write, and ZIP download/import. Plugin bundling and local model-serving dependencies remain a follow-up inside the same container track.
+That path bundles Postgres with the API and built web assets in one container, with optional persistence mounted at `./.local/hivemap-state`. Local Docker smoke coverage has been exercised for workspace create, graph mutation, projection read/write, and ZIP download/import. Plugin bundling remains a follow-up inside the same container track.
+
+To start bundled local model serving in that same container, enable Ollama explicitly:
+
+```bash
+HIVEMAP_OLLAMA_ENABLED=1 docker compose up --build
+```
+
+If you also want the container to pre-pull one or more models on startup, set:
+
+```bash
+HIVEMAP_OLLAMA_ENABLED=1 \
+HIVEMAP_OLLAMA_PULL_MODELS=nomic-embed-text \
+docker compose up --build
+```
 
 For the current Forgejo-backed development loop on `192.168.88.50`, the repo also carries:
 
@@ -96,11 +110,11 @@ That command snapshots the current working tree into a temporary clone, force-pu
 For the `docker-swarm` profile, set both:
 
 ```bash
-HIVEMAP_DATA_BIND_SOURCE=/opt/pockethive-data/hivemap/data
+HIVEMAP_DATA_BIND_SOURCE=/opt/pockethive-data/hivemap/state
 HIVEMAP_SWARM_PLACEMENT_CONSTRAINT='node.hostname == docker-swarm-mgr-1'
 ```
 
-The bind source is the exact local Postgres path on the swarm node. The placement constraint is required because that path is node-local; without it, Swarm can reschedule HiveMap onto a different node and break persistence. This `.50` + `/opt/pockethive-data/hivemap/data` setup is temporary development infrastructure only. The older `HIVEFORGE_BIND_SOURCE_DIR` fallback still works, but it derives a nested `<dir>/state/postgres/data` path and is mainly there for backward compatibility with the first HiveForge slice.
+The bind source is the exact local HiveMap state path on the swarm node. The placement constraint is required because that path is node-local; without it, Swarm can reschedule HiveMap onto a different node and break persistence. This `.50` + `/opt/pockethive-data/hivemap/state` setup is temporary development infrastructure only.
 
 The server binds to `127.0.0.1` intentionally. Do not expose this alpha directly to a network: it has no authentication or authorization layer.
 
@@ -111,6 +125,8 @@ HIVEMAP_OLLAMA_BASE_URL=http://127.0.0.1:11434
 ```
 
 Then use model refs such as `ollama:nomic-embed-text` through REST or MCP for one-node refresh and workspace backfill. These operations are explicit and synchronous in the current slice; graph mutations do not silently regenerate embeddings.
+
+If `HIVEMAP_OLLAMA_ENABLED=1` is set on the bundled Docker runtime or HiveForge stack, do not also set `HIVEMAP_OLLAMA_BASE_URL`; HiveMap fails fast unless that base URL matches the container-owned local Ollama endpoint.
 
 ## Legacy Local MCP Adapter
 
@@ -271,7 +287,7 @@ HiveMap is licensed under `GPL-3.0-or-later`, matching PocketHive. See [LICENSE]
 
 Planned next steps for the runtime are:
 
-1. extend the one-container local runtime to include the remaining bundled dependencies such as plugins and local model-serving pieces,
+1. extend the one-container local runtime to include the remaining bundled dependencies such as plugins,
 2. integrate that runtime shape with HiveForge,
 3. revisit hosted MCP after the storage/runtime/deployment base is stable.
 

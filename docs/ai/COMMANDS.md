@@ -50,7 +50,21 @@ Single-image container path:
 docker compose up --build
 ```
 
-That container path is validated for workspace create, graph mutation, projection create/read, and ZIP export/import. Plugin bundling and local model-serving dependencies remain follow-up work on the same container track.
+That container path is validated for workspace create, graph mutation, projection create/read, and ZIP export/import. Plugin bundling remains follow-up work on the same container track.
+
+Bundled local model serving can now be enabled explicitly in the same container:
+
+```bash
+HIVEMAP_OLLAMA_ENABLED=1 docker compose up --build
+```
+
+Optional startup model pulls stay explicit:
+
+```bash
+HIVEMAP_OLLAMA_ENABLED=1 \
+HIVEMAP_OLLAMA_PULL_MODELS=nomic-embed-text \
+docker compose up --build
+```
 
 Legacy local MCP adapter only when explicitly needed:
 
@@ -78,11 +92,10 @@ Current HiveForge environment note:
 - Trusted-LAN Forgejo is `http://192.168.88.50:3001/`.
 - Shared HiveForge environment is `swarm`, so remote deploy validation should use the `docker-swarm` project profile, not `docker-single`.
 - The shared stack playbooks now accept both `docker-single` and `docker-swarm`.
-- For `docker-swarm`, prefer `HIVEMAP_DATA_BIND_SOURCE` as the exact local persistence path on the swarm node, for example `/opt/pockethive-data/hivemap/data`.
+- For `docker-swarm`, require `HIVEMAP_DATA_BIND_SOURCE` as the exact local persistence path on the swarm node, for example `/opt/pockethive-data/hivemap/state`.
 - For `docker-swarm`, also require `HIVEMAP_SWARM_PLACEMENT_CONSTRAINT`, for example `node.hostname == docker-swarm-mgr-1`, so HiveMap cannot move away from its node-local Postgres bind mount.
-- `HIVEFORGE_BIND_SOURCE_DIR` remains as a legacy fallback and renders to `<dir>/state/postgres/data`.
-- The current `.50` development setup intentionally reuses `/opt/pockethive-data/hivemap/data` as a temporary local path while HiveMap is still being iterated in the shared swarm. Treat that as disposable test infrastructure, not the final hosting contract.
-- The current `swarm` environment advertises non-NFS local bind roots under `/opt/pockethive-data/*`; if HiveMap uses its own dedicated local path such as `/opt/pockethive-data/hivemap/data`, that path must exist and be allowed by the HiveForge environment policy before deployment.
+- The current `.50` development setup intentionally reuses `/opt/pockethive-data/hivemap/state` as a temporary local path while HiveMap is still being iterated in the shared swarm. Treat that as disposable test infrastructure, not the final hosting contract.
+- The current `swarm` environment advertises non-NFS local bind roots under `/opt/pockethive-data/*`; if HiveMap uses its own dedicated local path such as `/opt/pockethive-data/hivemap/state`, that path must exist and be allowed by the HiveForge environment policy before deployment.
 
 Local Forgejo/HiveForge dev snapshot loop:
 
