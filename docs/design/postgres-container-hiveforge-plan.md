@@ -134,9 +134,9 @@ Help an agent reach a correct working model of an unfamiliar repository before i
 ### Phase B — Repository Understanding Artifacts
 
 - [x] Treat boundary maps as working understanding artifacts before they become completed-scan evidence.
-- [ ] Keep the first artifact set focused on repository topology, candidate boundaries, owned paths/symbols, public entrypoints, contract links, test links, inter-boundary relations, and open questions.
-- [ ] Support code, test, and tool surfaces equally, including file-based CLI/tool entrypoints that are not symbol-exported.
-- [ ] Keep artifact generation fail-fast and repo-overridable when roots, test families, or contract markers do not match the active repository.
+- [x] Keep the first artifact set focused on repository topology, candidate boundaries, owned paths/symbols, public entrypoints, contract links, test links, inter-boundary relations, and open questions.
+- [x] Support code, test, and tool surfaces equally, including file-based CLI/tool entrypoints that are not symbol-exported.
+- [x] Keep artifact generation fail-fast and repo-overridable when roots, test families, or contract markers do not match the active repository.
 
 ### Phase C — Finding Validation Workflow
 

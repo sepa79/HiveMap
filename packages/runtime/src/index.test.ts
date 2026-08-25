@@ -981,6 +981,152 @@ describe("HiveMapRuntime", () => {
     });
   });
 
+  it("fails clearly when boundary-map coverage includes tests outside configured test directory markers", async () => {
+    await seedWorkspaceFixture();
+    const overlayRuntime = new HiveMapRuntime({
+      store,
+      embeddingProviders: { test: createTestEmbeddingProvider() },
+      repositoryIndexExecutor: async ({ workspaceId, indexId }) =>
+        createRepositoryBoundaryMapUnknownTestFamilyIndexResult(workspaceId, indexId),
+      now: () => "2026-08-20T19:12:00.000Z",
+    });
+
+    await overlayRuntime.startRepositoryIndex({
+      workspaceId: "workspace-a",
+      index: {
+        id: "repo-index-unknown-test-family",
+        repositoryUrl: "/fixtures/repo",
+        requestedRef: "main",
+        mode: "safe",
+        requestedAt: "2026-08-20T19:12:00.000Z",
+        actor: {
+          agentId: "codex",
+          tool: "mcp",
+        },
+      },
+    });
+    await overlayRuntime.executeRepositoryIndex({ workspaceId: "workspace-a", indexId: "repo-index-unknown-test-family" });
+
+    await overlayRuntime.startScan({
+      workspaceId: "workspace-a",
+      scan: {
+        id: "scan-unknown-test-family",
+        profileId: "code-quality-review",
+        profileVersion: 1,
+        repositoryIndexId: "repo-index-unknown-test-family",
+        actor: { agentId: "agent-a", tool: "codex" },
+        startedAt: "2026-08-20T19:13:00.000Z",
+      },
+    });
+    await overlayRuntime.recordScanCalibrationDecision({
+      workspaceId: "workspace-a",
+      scanId: "scan-unknown-test-family",
+      decision: "build-boundary-map",
+      rationale: "The scan needs a structural pass before findings.",
+      recordedAt: "2026-08-20T19:13:30.000Z",
+    });
+
+    await expect(
+      overlayRuntime.buildScanBoundaryMap({ workspaceId: "workspace-a", scanId: "scan-unknown-test-family" }),
+    ).rejects.toMatchObject({
+      code: "BOUNDARY_MAP_BUILD_FAILED",
+      message: expect.stringContaining("boundaryMapTestDirectoryNames"),
+    });
+  });
+
+  it("uses repository-local test family and contract markers when overlay declares them", async () => {
+    await seedWorkspaceFixture();
+    const overlayRuntime = new HiveMapRuntime({
+      store,
+      embeddingProviders: { test: createTestEmbeddingProvider() },
+      repositoryIndexExecutor: async ({ workspaceId, indexId }) =>
+        createRepositoryBoundaryMapCustomMarkerOverlayIndexResult(workspaceId, indexId),
+      now: () => "2026-08-20T19:14:00.000Z",
+    });
+
+    await overlayRuntime.startRepositoryIndex({
+      workspaceId: "workspace-a",
+      index: {
+        id: "repo-index-custom-boundary-markers",
+        repositoryUrl: "/fixtures/repo",
+        requestedRef: "main",
+        mode: "safe",
+        requestedAt: "2026-08-20T19:14:00.000Z",
+        actor: {
+          agentId: "codex",
+          tool: "mcp",
+        },
+      },
+    });
+    await overlayRuntime.executeRepositoryIndex({ workspaceId: "workspace-a", indexId: "repo-index-custom-boundary-markers" });
+
+    await overlayRuntime.startScan({
+      workspaceId: "workspace-a",
+      scan: {
+        id: "scan-custom-boundary-markers",
+        profileId: "code-quality-review",
+        profileVersion: 1,
+        repositoryIndexId: "repo-index-custom-boundary-markers",
+        actor: { agentId: "agent-a", tool: "codex" },
+        startedAt: "2026-08-20T19:15:00.000Z",
+      },
+    });
+    await overlayRuntime.recordScanCalibrationDecision({
+      workspaceId: "workspace-a",
+      scanId: "scan-custom-boundary-markers",
+      decision: "build-boundary-map",
+      rationale: "The repository uses custom blueprint docs and QA tests.",
+      recordedAt: "2026-08-20T19:15:30.000Z",
+    });
+
+    const response = await overlayRuntime.buildScanBoundaryMap({
+      workspaceId: "workspace-a",
+      scanId: "scan-custom-boundary-markers",
+    });
+
+    expect(response.boundaryMap.boundaries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "package:packages-runtime",
+          kind: "package",
+          ownedPaths: ["packages/runtime/src/runtime-policy/RuntimePolicy.ts"],
+          contractSourceRefs: expect.arrayContaining([
+            expect.objectContaining({
+              role: "defines",
+              source: "repo-doc",
+              target: "packages/runtime/blueprints/runtime-policy.md",
+            }),
+          ]),
+          testSourceRefs: expect.arrayContaining([
+            expect.objectContaining({
+              role: "verifies",
+              source: "test",
+              target: "packages/runtime/qa/RuntimePolicyCheck.ts",
+            }),
+          ]),
+          publicEntrypoints: expect.arrayContaining([
+            expect.objectContaining({
+              kind: "export",
+              label: "RuntimePolicy",
+              filePath: "packages/runtime/src/runtime-policy/RuntimePolicy.ts",
+            }),
+          ]),
+        }),
+        expect.objectContaining({
+          id: "test-suite:packages-runtime-qa",
+          kind: "test-suite",
+          ownedPaths: ["packages/runtime/qa/RuntimePolicyCheck.ts"],
+          publicEntrypoints: expect.arrayContaining([
+            expect.objectContaining({
+              kind: "test-harness",
+              filePath: "packages/runtime/qa/RuntimePolicyCheck.ts",
+            }),
+          ]),
+        }),
+      ]),
+    );
+  });
+
   it("applies a repository scan profile overlay from indexed repository files", async () => {
     await seedWorkspaceFixture();
     const overlayRuntime = new HiveMapRuntime({
@@ -2582,6 +2728,188 @@ function createRepositoryBoundaryMapUnmappedRootIndexResult(
       fileCount: 2,
       chunkCount: 2,
       indexedBytes: 296,
+    },
+  };
+}
+
+function createRepositoryBoundaryMapUnknownTestFamilyIndexResult(
+  workspaceId = "workspace-a",
+  indexId = "repo-index-a",
+): Awaited<ReturnType<RepositoryIndexExecutor>> {
+  return {
+    resolvedCommit: "6666666666666666666666666666666666666666",
+    files: [
+      {
+        workspaceId,
+        indexId,
+        path: "packages/runtime/src/runtime-policy/RuntimePolicy.ts",
+        language: "typescript",
+        sourceKind: "code",
+        contentHash: "hash-runtime-policy-custom-test-family",
+        byteSize: 120,
+      },
+      {
+        workspaceId,
+        indexId,
+        path: "packages/runtime/qa/RuntimePolicyCheck.ts",
+        language: "typescript",
+        sourceKind: "test",
+        contentHash: "hash-runtime-policy-qa-test",
+        byteSize: 88,
+      },
+      {
+        workspaceId,
+        indexId,
+        path: "packages/runtime/blueprints/runtime-policy.md",
+        language: "markdown",
+        sourceKind: "documentation",
+        contentHash: "hash-runtime-policy-blueprint",
+        byteSize: 96,
+      },
+    ],
+    chunks: [
+      {
+        workspaceId,
+        indexId,
+        id: "chunk-runtime-policy-custom-test-family",
+        filePath: "packages/runtime/src/runtime-policy/RuntimePolicy.ts",
+        language: "typescript",
+        sourceKind: "code",
+        startLine: 1,
+        endLine: 3,
+        text: "export class RuntimePolicy {\n  describe() { return 'runtime'; }\n}",
+        contentHash: "chunk-runtime-policy-custom-test-family",
+      },
+      {
+        workspaceId,
+        indexId,
+        id: "chunk-runtime-policy-qa-test",
+        filePath: "packages/runtime/qa/RuntimePolicyCheck.ts",
+        language: "typescript",
+        sourceKind: "test",
+        startLine: 1,
+        endLine: 3,
+        text: "import { RuntimePolicy } from '../src/runtime-policy/RuntimePolicy';\nexport class RuntimePolicyCheck {}\n",
+        contentHash: "chunk-runtime-policy-qa-test",
+      },
+      {
+        workspaceId,
+        indexId,
+        id: "chunk-runtime-policy-blueprint",
+        filePath: "packages/runtime/blueprints/runtime-policy.md",
+        language: "markdown",
+        sourceKind: "documentation",
+        startLine: 1,
+        endLine: 2,
+        text: "# Runtime Policy Blueprint\nBlueprint for runtime boundary behavior.",
+        contentHash: "chunk-runtime-policy-blueprint",
+      },
+    ],
+    symbols: [
+      {
+        workspaceId,
+        indexId,
+        key: "custom-runtime-policy",
+        filePath: "packages/runtime/src/runtime-policy/RuntimePolicy.ts",
+        language: "typescript",
+        name: "RuntimePolicy",
+        qualifiedName: "RuntimePolicy",
+        kind: "class",
+        startLine: 1,
+        startColumn: 0,
+        endLine: 3,
+        endColumn: 1,
+        isExported: true,
+        isPublic: false,
+        producerTool: "test",
+        producerVersion: "1",
+      },
+      {
+        workspaceId,
+        indexId,
+        key: "custom-runtime-policy-check",
+        filePath: "packages/runtime/qa/RuntimePolicyCheck.ts",
+        language: "typescript",
+        name: "RuntimePolicyCheck",
+        qualifiedName: "RuntimePolicyCheck",
+        kind: "class",
+        startLine: 2,
+        startColumn: 0,
+        endLine: 2,
+        endColumn: 34,
+        isExported: true,
+        isPublic: false,
+        producerTool: "test",
+        producerVersion: "1",
+      },
+    ],
+    dependencies: [
+      {
+        workspaceId,
+        indexId,
+        key: "custom-runtime-policy-qa-dep",
+        filePath: "packages/runtime/qa/RuntimePolicyCheck.ts",
+        language: "typescript",
+        sourceKind: "test",
+        kind: "import",
+        targetText: "../src/runtime-policy/RuntimePolicy",
+        targetFilePath: "packages/runtime/src/runtime-policy/RuntimePolicy.ts",
+        startLine: 1,
+        startColumn: 0,
+        endLine: 1,
+        endColumn: 55,
+        resolutionConfidence: "high",
+        producerTool: "test",
+        producerVersion: "1",
+      },
+    ],
+    stats: {
+      fileCount: 3,
+      chunkCount: 3,
+      indexedBytes: 304,
+    },
+  };
+}
+
+function createRepositoryBoundaryMapCustomMarkerOverlayIndexResult(
+  workspaceId = "workspace-a",
+  indexId = "repo-index-a",
+): Awaited<ReturnType<RepositoryIndexExecutor>> {
+  const result = createRepositoryBoundaryMapUnknownTestFamilyIndexResult(workspaceId, indexId);
+  return {
+    ...result,
+    files: [
+      {
+        workspaceId,
+        indexId,
+        path: ".hivemap/scan-profiles/code-quality.yaml",
+        language: "yaml",
+        sourceKind: "config",
+        contentHash: "hash-custom-boundary-markers-overlay",
+        byteSize: 120,
+      },
+      ...result.files,
+    ],
+    chunks: [
+      {
+        workspaceId,
+        indexId,
+        id: "chunk-custom-boundary-markers-overlay",
+        filePath: ".hivemap/scan-profiles/code-quality.yaml",
+        language: "yaml",
+        sourceKind: "config",
+        startLine: 1,
+        endLine: 6,
+        text:
+          "formatVersion: 1\nprofileId: code-quality-review\nboundaryMapTestDirectoryNames:\n  - qa\nboundaryMapContractPathMarkers:\n  - /blueprints/",
+        contentHash: "chunk-custom-boundary-markers-overlay",
+      },
+      ...result.chunks,
+    ],
+    stats: {
+      fileCount: result.stats.fileCount + 1,
+      chunkCount: result.stats.chunkCount + 1,
+      indexedBytes: result.stats.indexedBytes + 120,
     },
   };
 }
