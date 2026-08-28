@@ -100,12 +100,13 @@ That command:
   `hivemap-dev-loop` with an explicit lease, so a concurrent remote update fails
   instead of being overwritten,
 - builds and pushes both `192.168.88.50:3001/hiveforge/hivemap:dev-latest` and an immutable timestamped tag,
-- prints the exact `gitRef` and image values to feed into the next HiveForge deploy/update action.
+- prints the exact `gitRef` and immutable image value to feed into the next HiveForge deploy/update action.
 
 Current boundary:
 
-- the repo-local command does not yet call the HiveForge API itself because this environment does not expose local CLI/auth for that API;
-- after the one-time HiveForge runtime env is pinned to `...:dev-latest`, the remaining action is a normal HiveForge `deploy` or `update` for `projectId=hivemap-development`, `profile=docker-swarm`, `component=stack`, `gitRef=hivemap-dev-loop`.
+- the repo-local command prepares Git and image artifacts; HiveForge MCP remains the operator boundary for runtime-env and lifecycle changes;
+- before every deploy/update, set `HIVEMAP_IMAGE` for `projectId=hivemap-development` and profile `docker-swarm` to the printed immutable image, then run the normal `deploy` or `update` for component `stack` and `gitRef=hivemap-dev-loop`;
+- do not use `dev-latest` as deployment identity: Portainer/Swarm may retain the previously resolved digest when a service is updated with the same moving tag.
 
 Bundle import helper for a running HiveMap API:
 

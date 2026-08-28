@@ -11,7 +11,7 @@ Forgejo development branch, and build/push dev image tags for HiveForge.
 Options:
   --branch <name>         Forgejo branch to update. Default: hivemap-dev-loop
   --image-tag <tag>       Immutable image tag. Default: <branch-slug>-<utc-stamp>
-  --floating-tag <tag>    Moving image tag for repeated deploys. Default: dev-latest
+  --floating-tag <tag>    Moving registry convenience tag. Default: dev-latest
   --repo <url>            Forgejo git remote. Default: http://192.168.88.50:3001/hiveforge/hivemap.git
   --image-repo <name>     Registry image repo. Default: 192.168.88.50:3001/hiveforge/hivemap
   --temp-root <path>      Parent temp dir. Default: /tmp/hivemap-hiveforge-dev-loop
@@ -174,7 +174,7 @@ cat > "${metadata_file}" <<EOF
   "projectId": "hivemap-development",
   "profile": "docker-swarm",
   "component": "stack",
-  "nextStep": "Trigger HiveForge deploy/update with gitRef ${branch}. If the runtime env is not already pinned to ${floating_image}, update HIVEMAP_IMAGE first."
+  "nextStep": "Set HiveForge runtime env HIVEMAP_IMAGE to ${immutable_image}, then trigger deploy/update with gitRef ${branch}."
 }
 EOF
 
@@ -191,7 +191,7 @@ echo "  projectId: hivemap-development"
 echo "  profile: docker-swarm"
 echo "  component: stack"
 echo "  gitRef: ${branch}"
-echo "  HIVEMAP_IMAGE: ${floating_image}"
+echo "  HIVEMAP_IMAGE: ${immutable_image}"
 echo
-echo "If HiveForge still points at an older tag, update runtime env once to ${floating_image},"
-echo "then run deploy/update for gitRef ${branch}."
+echo "Set HiveForge runtime env HIVEMAP_IMAGE to ${immutable_image},"
+echo "then run deploy/update for gitRef ${branch}. The floating tag is not a deployment identity."

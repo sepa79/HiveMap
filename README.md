@@ -97,7 +97,7 @@ For the current Forgejo-backed development loop on `192.168.88.50`, the repo als
 npm run dev:hiveforge
 ```
 
-That command snapshots the current working tree into a temporary clone, force-pushes the stable Forgejo branch `hivemap-dev-loop`, and pushes both a moving `dev-latest` image tag and an immutable timestamped tag to the local registry. It prepares the exact `gitRef` and image values needed for the next HiveForge deploy/update step on the shared `swarm` environment.
+That command snapshots the current working tree into a temporary clone, force-pushes the stable Forgejo branch `hivemap-dev-loop` with an explicit remote-SHA lease, and pushes both a moving `dev-latest` convenience tag and an immutable timestamped tag to the local registry. It prints the exact `gitRef` and immutable `HIVEMAP_IMAGE` value required for the next HiveForge deploy/update step on the shared `swarm` environment. Deployments use the immutable tag because Portainer/Swarm may retain the previously resolved digest when the same moving tag is reused.
 
 For the `docker-swarm` profile, provision the external Docker secret
 `hivemap-auth-token` in the HiveForge target environment, then set:

@@ -98,7 +98,7 @@ Upgrade HiveMap from the local-first SQLite alpha shape to a container-friendly 
 - [x] Close ruleset-v2 deployment findings: declare `hivemap-auth-token` as an
   external HiveForge/Docker secret, keep its value out of rendered Compose, and
   prove graceful API plus bundled-Postgres shutdown under container SIGTERM.
-- [ ] Run the intended loop: change -> build -> deploy -> e2e -> change.
+- [x] Run the intended loop: change -> build -> deploy -> e2e -> change.
 
 Current state:
 - Local HiveForge adapter smoke passes for both `docker-single` and `docker-swarm` by rendering Compose through Ansible and validating each result with `docker compose config`.
@@ -106,13 +106,25 @@ Current state:
 - HiveMap now deploys to the shared `swarm` environment as `hivemap-development` through the `docker-swarm` profile.
 - The swarm profile requires an explicit HiveMap-owned node-local Postgres bind source and matching placement constraint; repository examples use `/opt/hivemap/postgres` and do not treat unrelated test-stack paths as product persistence.
 - On August 28, 2026 the real development loop pushed `hivemap-dev-loop` plus
-  `dev-latest` and immutable image `closeout-841e8e0-leasefix` to the shared
-  Forgejo/registry. HiveForge inspected the updated ref successfully, but
-  requirement validation stopped before deployment because the external Docker
-  secret `hivemap-auth-token` is not currently present on the swarm. The existing
-  pre-secret deployment remains healthy at `1/1`; the loop checkbox stays open
-  until the secret is provisioned and the new image passes remote e2e.
-- Remaining HiveForge work is about tightening the local development loop and adding stronger e2e coverage, not proving first deploy viability.
+  `dev-latest` and immutable images to the shared Forgejo/registry, provisioned
+  the external test secret, and completed HiveForge updates through the
+  `portainer-stack` executor. The final verified image is
+  `phase6-e2e-complete` at digest
+  `sha256:9b5c88f92a3ca25fb0af3dd72638e9e3f61f1810cae7a6120ade51ab5e75ba47`.
+- The first update with the unchanged moving tag retained its previous digest;
+  pinning `HIVEMAP_IMAGE` to the immutable tag deployed the expected digest.
+  The development-loop contract now requires that immutable image for each
+  deploy/update.
+- The old test volume contained an unrecoverable schema-15 custom scan profile,
+  so the fail-fast schema-16 migration correctly refused startup. The 67 MB data
+  directory was preserved as `data.pre-schema16-20260828T2136Z`, a fresh
+  HiveMap-owned Postgres directory was initialized, and the service stabilized
+  at `1/1`.
+- Remote e2e passed public health/UI, REST and MCP `401` behavior, authenticated
+  MCP mutation observed through REST, exact deployed image digest, and state
+  persistence across a forced Swarm service restart.
+- Phase 6 is complete; future HiveForge work may automate the already-proven MCP
+  operator steps but is not part of this base milestone.
 
 ## Phase 7 — Protected Streamable HTTP MCP
 
