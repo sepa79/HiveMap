@@ -110,6 +110,10 @@ describeIfPostgres("PostgresHiveMapStore", () => {
     await introspectionPool.end();
   });
 
+  it("completes a live connection probe", async () => {
+    await expect(store.checkConnection()).resolves.toBeUndefined();
+  });
+
   it("persists and loads workspace state", async () => {
     const workspaceId = `pg-${randomUUID()}`;
     const state = createState(workspaceId);
@@ -117,6 +121,24 @@ describeIfPostgres("PostgresHiveMapStore", () => {
     await store.saveWorkspaceState(state);
     await expect(store.loadWorkspaceState(workspaceId)).resolves.toEqual(state);
     await store.deleteWorkspace(workspaceId);
+  });
+
+  it("rejects unsupported stored scan profile recipe fields instead of overriding core profile fields", async () => {
+    const workspaceId = `pg-${randomUUID()}`;
+    await store.saveWorkspaceState(createState(workspaceId));
+
+    try {
+      await introspectionPool.query(
+        "UPDATE scan_profiles SET profile_recipe = profile_recipe || $1::jsonb WHERE workspace_id = $2 AND id = $3",
+        [JSON.stringify({ id: "overridden-profile-id" }), workspaceId, "documentation-conflicts"],
+      );
+
+      await expect(store.loadWorkspaceState(workspaceId)).rejects.toThrow(
+        "Stored scan profile recipe contains an unsupported field: id",
+      );
+    } finally {
+      await store.deleteWorkspace(workspaceId);
+    }
   });
 
   it("round-trips completed scan boundary-map artifacts", async () => {
@@ -137,6 +159,8 @@ describeIfPostgres("PostgresHiveMapStore", () => {
           scope: { include: ["services/**"], exclude: ["node_modules/**"] },
           sourceTypes: ["code", "test"],
           criteria: [{ id: "duplicate-responsibility", description: "Multiple services own the same runtime policy behavior." }],
+          duplicateResponsibilityTopLevelSymbolKinds: ["class", "interface", "enum", "record", "function"],
+          duplicateResponsibilityIgnorePathGlobs: ["**/generated/**", "**/fixtures/**", "**/*.mock.*"],
           ssotOrder: ["AGENTS.md", "docs/specs/**", "services/**"],
           requiredOutputs: ["findings", "boundary-map"],
         },

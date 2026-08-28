@@ -91,6 +91,14 @@ function createState(): WorkspaceState {
 }
 
 describe("InMemoryHiveMapStore", () => {
+  it("reports its transient adapter connection as available", async () => {
+    const store = new InMemoryHiveMapStore();
+    await store.initialize();
+
+    await expect(store.checkConnection()).resolves.toBeUndefined();
+    await store.close();
+  });
+
   it("persists and loads workspace state", async () => {
     const store = new InMemoryHiveMapStore();
     await store.initialize();

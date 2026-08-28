@@ -58,6 +58,8 @@ Draft MCP surface for agents. MCP is the primary HiveMap agent interface for alp
 
 The MCP app exposes tool handlers over the shared HiveMap runtime. Transport-specific MCP server wiring must stay thin and must not reimplement graph, category, projection, feedback, or proposal behavior.
 
+The installed/container runtime exposes stateless Streamable HTTP MCP at `/mcp` in the same HTTP process and port as REST. It creates transport/server wiring per request while sharing the process-owned `HiveMapRuntime` and Postgres store with REST. The endpoint requires the same exact bearer token as REST through `Authorization: Bearer <HIVEMAP_AUTH_TOKEN>`. The legacy stdio entrypoint remains available only for explicit local development and is not part of the installed runtime contract.
+
 For repository-backed scans, transport and agent UX should expose one explicit calibration checkpoint between `scan_start` and final findings. The caller should be asked to confirm that the effective profile, derived coverage, and preliminary evidence shape make sense before the workflow proceeds to durable findings or `scan_complete`.
 
 ## Workspace Discovery Flow

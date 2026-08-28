@@ -45,15 +45,3 @@
     that:
       - hivemap_postgres_port | length > 0
     fail_msg: "HIVEMAP_POSTGRES_PORT must resolve to a non-empty value."
-
-- name: Require supported HiveMap Ollama bundling mode
-  ansible.builtin.assert:
-    that:
-      - hivemap_ollama_enabled in ['0', '1']
-    fail_msg: "HIVEMAP_OLLAMA_ENABLED must be 0 or 1."
-
-- name: Prevent external Ollama URL when bundled Ollama is enabled
-  ansible.builtin.assert:
-    that:
-      - hivemap_ollama_enabled != '1' or hivemap_ollama_base_url | length == 0
-    fail_msg: "Unset HIVEMAP_OLLAMA_BASE_URL when HIVEMAP_OLLAMA_ENABLED=1 so the container uses its bundled local Ollama."

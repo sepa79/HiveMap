@@ -1,3 +1,8 @@
+/**
+ * Responsibility: Define and validate shared REST/MCP application request and response contracts.
+ * Must not: Execute runtime commands, persist state, or implement transport lifecycle.
+ * Contract: Untyped boundary input is validated once into canonical explicit HiveMap operation shapes.
+ */
 import {
   validateFeedbackEvent,
   validateGraphProposal,
@@ -124,54 +129,6 @@ export type UpsertConceptEmbeddingResponse = {
     contentDigest: string;
     updatedAt: string;
   };
-};
-
-export type RefreshConceptEmbeddingRequest = {
-  workspaceId: string;
-  nodeId: string;
-  model: string;
-  force?: boolean;
-};
-
-export type RefreshConceptEmbeddingResponse = {
-  embedding: {
-    workspaceId: string;
-    nodeId: string;
-    model: string;
-    dimensions: number;
-    contentDigest: string;
-    updatedAt: string;
-  };
-  provider: string;
-  status: "refreshed" | "unchanged";
-};
-
-export type BackfillConceptEmbeddingsRequest = {
-  workspaceId: string;
-  model: string;
-  nodeIds?: string[];
-  limit?: number;
-  force?: boolean;
-};
-
-export type BackfillConceptEmbeddingsResponse = {
-  workspaceId: string;
-  model: string;
-  provider: string;
-  summary: {
-    totalConcepts: number;
-    selectedConcepts: number;
-    refreshed: number;
-    unchanged: number;
-  };
-  results: Array<{
-    nodeId: string;
-    label: string;
-    status: "refreshed" | "unchanged";
-    dimensions: number;
-    contentDigest: string;
-    updatedAt: string;
-  }>;
 };
 
 export type ListSimilarConceptsRequest = {
@@ -690,8 +647,6 @@ export type McpToolName =
   | "scan_profile_overlay_help"
   | "scan_profile_overlay_suggest"
   | "concept_embedding_upsert"
-  | "concept_embedding_refresh"
-  | "concept_embedding_backfill"
   | "concept_similar_list"
   | "graph_command"
   | "category_assign"
@@ -730,8 +685,6 @@ export type McpToolRequestMap = {
   scan_profile_overlay_help: GetScanProfileOverlayHelpRequest;
   scan_profile_overlay_suggest: SuggestScanProfileOverlayRequest;
   concept_embedding_upsert: UpsertConceptEmbeddingRequest;
-  concept_embedding_refresh: RefreshConceptEmbeddingRequest;
-  concept_embedding_backfill: BackfillConceptEmbeddingsRequest;
   concept_similar_list: ListSimilarConceptsRequest;
   graph_command: ApplyGraphCommandsRequest;
   category_assign: AssignCategoryRequest;
@@ -911,34 +864,6 @@ export function validateUpsertConceptEmbeddingRequest(request: UpsertConceptEmbe
   for (const value of request.embedding.values) {
     if (!Number.isFinite(value)) {
       throw new ApiContractValidationError("embedding.values must contain only finite numbers");
-    }
-  }
-}
-
-export function validateRefreshConceptEmbeddingRequest(request: RefreshConceptEmbeddingRequest): void {
-  assertNonEmpty("workspaceId", request.workspaceId);
-  assertNonEmpty("nodeId", request.nodeId);
-  assertNonEmpty("model", request.model);
-  if (request.force !== undefined && typeof request.force !== "boolean") {
-    throw new ApiContractValidationError("force must be a boolean when provided");
-  }
-}
-
-export function validateBackfillConceptEmbeddingsRequest(request: BackfillConceptEmbeddingsRequest): void {
-  assertNonEmpty("workspaceId", request.workspaceId);
-  assertNonEmpty("model", request.model);
-  if (request.limit !== undefined && (!Number.isInteger(request.limit) || request.limit < 1)) {
-    throw new ApiContractValidationError("limit must be a positive integer");
-  }
-  if (request.force !== undefined && typeof request.force !== "boolean") {
-    throw new ApiContractValidationError("force must be a boolean when provided");
-  }
-  if (request.nodeIds !== undefined) {
-    if (request.nodeIds.length === 0) {
-      throw new ApiContractValidationError("nodeIds must contain at least one node id when provided");
-    }
-    for (const nodeId of request.nodeIds) {
-      assertNonEmpty("nodeIds[]", nodeId);
     }
   }
 }

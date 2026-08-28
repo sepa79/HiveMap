@@ -1,3 +1,8 @@
+/**
+ * Responsibility: Register HiveMap tool contracts on one MCP SDK server instance.
+ * Must not: Own application state, implement tool semantics, or select a network transport.
+ * Contract: SDK schemas delegate each registered tool to the shared typed tool dispatcher.
+ */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod/v4";
@@ -33,8 +38,6 @@ const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   scan_profile_overlay_suggest:
     "Return the smallest repo-aware overlay YAML scaffold for one explicit calibration symptom, using the active effective profile and boundary-map config from the current in-progress scan.",
   concept_embedding_upsert: "Store or refresh one explicit concept embedding for a workspace node and model.",
-  concept_embedding_refresh: "Generate or refresh one concept embedding through a configured provider:model ref.",
-  concept_embedding_backfill: "Backfill explicit concept embeddings for selected or all concept nodes through a configured provider:model ref.",
   concept_similar_list: "Return bounded read-only similar-concept suggestions for one concept node and model.",
   graph_command: "Apply explicit typed commands to the canonical semantic graph.",
   category_assign: "Assign one validated semantic/visual category overlay.",
@@ -213,21 +216,6 @@ export function createHiveMapMcpServer(runtime: HiveMapRuntime): McpServer {
       values: z.array(z.number()),
       updatedAt: z.string(),
     }),
-  });
-
-  registerTool(server, runtime, "concept_embedding_refresh", {
-    workspaceId: z.string(),
-    nodeId: z.string(),
-    model: z.string(),
-    force: z.boolean().optional(),
-  });
-
-  registerTool(server, runtime, "concept_embedding_backfill", {
-    workspaceId: z.string(),
-    model: z.string(),
-    nodeIds: z.array(z.string()).optional(),
-    limit: z.number().int().positive().optional(),
-    force: z.boolean().optional(),
   });
 
   registerTool(server, runtime, "concept_similar_list", {

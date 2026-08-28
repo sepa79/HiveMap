@@ -25,18 +25,12 @@ This is the same test, typecheck, and build sequence used by GitHub Actions.
 These commands describe the current local Postgres-first runtime. A working single-image local Docker runtime now exists for the API, built web UI, and bundled Postgres.
 
 ```bash
-HIVEMAP_POSTGRES_URL='postgres://postgres:postgres@127.0.0.1:5432/hivemap' npm run dev:api -- --port 8787
+HIVEMAP_AUTH_TOKEN='replace-with-a-long-random-token' \
+HIVEMAP_POSTGRES_URL='postgres://postgres:postgres@127.0.0.1:5432/hivemap' \
+npm run dev:api -- --port 8787
 ```
 
 API: `http://127.0.0.1:8787`
-
-Optional provider-backed concept embeddings via local Ollama:
-
-```bash
-HIVEMAP_OLLAMA_BASE_URL='http://127.0.0.1:11434'
-```
-
-Use explicit `provider:model` refs such as `ollama:nomic-embed-text` through the REST or MCP embedding refresh/backfill commands. Graph writes do not silently regenerate embeddings.
 
 ```bash
 npm run dev:web
@@ -47,26 +41,19 @@ Web: `http://127.0.0.1:5175`
 Single-image container path:
 
 ```bash
-docker compose up --build
+HIVEMAP_AUTH_TOKEN='replace-with-a-long-random-token' docker compose up --build
 ```
 
-That container path is validated for workspace create, graph mutation, projection create/read, and ZIP export/import. Plugin bundling remains follow-up work on the same container track.
+That container path exposes protected REST and stateless Streamable HTTP MCP at `/mcp` through the same port and runtime. It is validated for workspace create, graph mutation, projection create/read, and ZIP export/import. It includes HiveMap's built-in repository indexing and scan handlers; there is no separate runtime plugin or bundled model-serving dependency. Postgres data is mounted at `./.local/hivemap-postgres` by the repository Compose file.
 
-Bundled local model serving can now be enabled explicitly in the same container:
+Installed MCP endpoint:
 
-```bash
-HIVEMAP_OLLAMA_ENABLED=1 docker compose up --build
+```text
+URL: http://127.0.0.1:8787/mcp
+Authorization: Bearer <HIVEMAP_AUTH_TOKEN>
 ```
 
-Optional startup model pulls stay explicit:
-
-```bash
-HIVEMAP_OLLAMA_ENABLED=1 \
-HIVEMAP_OLLAMA_PULL_MODELS=nomic-embed-text \
-docker compose up --build
-```
-
-Legacy local MCP adapter only when explicitly needed:
+Legacy local stdio adapter only when explicitly needed:
 
 ```bash
 npm run build -w @hivemap/mcp
@@ -75,7 +62,7 @@ npm exec -w @hivemap/mcp -- hivemap-mcp --postgres-url 'postgres://postgres:post
 
 For an MCP client configuration, run the already-built `apps/mcp/dist/stdio.js` entry point directly as documented in the root `README.md`. This avoids npm lifecycle output on the stdio transport. The stdio adapter is transitional and not the target local runtime shape.
 
-HiveForge scaffold smoke for the local adapter profiles:
+HiveForge scaffold smoke for the stack profiles:
 
 ```bash
 ANSIBLE_LOCAL_TEMP=/tmp/ansible-local \
@@ -92,10 +79,13 @@ Current HiveForge environment note:
 - Trusted-LAN Forgejo is `http://192.168.88.50:3001/`.
 - Shared HiveForge environment is `swarm`, so remote deploy validation should use the `docker-swarm` project profile, not `docker-single`.
 - The shared stack playbooks now accept both `docker-single` and `docker-swarm`.
-- For `docker-swarm`, require `HIVEMAP_DATA_BIND_SOURCE` as the exact local persistence path on the swarm node, for example `/opt/pockethive-data/hivemap/state`.
+- For `docker-swarm`, require `HIVEMAP_DATA_BIND_SOURCE` as the exact HiveMap-owned local Postgres data path on the swarm node, for example `/opt/hivemap/postgres`.
 - For `docker-swarm`, also require `HIVEMAP_SWARM_PLACEMENT_CONSTRAINT`, for example `node.hostname == docker-swarm-mgr-1`, so HiveMap cannot move away from its node-local Postgres bind mount.
-- The current `.50` development setup intentionally reuses `/opt/pockethive-data/hivemap/state` as a temporary local path while HiveMap is still being iterated in the shared swarm. Treat that as disposable test infrastructure, not the final hosting contract.
-- The current `swarm` environment advertises non-NFS local bind roots under `/opt/pockethive-data/*`; if HiveMap uses its own dedicated local path such as `/opt/pockethive-data/hivemap/state`, that path must exist and be allowed by the HiveForge environment policy before deployment.
+- Local Compose requires `HIVEMAP_AUTH_TOKEN`. HiveForge requires the external
+  Docker secret `hivemap-auth-token`; the rendered stack passes only
+  `HIVEMAP_AUTH_TOKEN_FILE=/run/secrets/hivemap-auth-token` and protects both
+  REST and MCP.
+- Any temporary path used by another local test stack is disposable infrastructure, not HiveMap's persistence contract.
 
 Local Forgejo/HiveForge dev snapshot loop:
 

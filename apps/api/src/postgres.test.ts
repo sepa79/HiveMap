@@ -21,7 +21,7 @@ describeIfPostgres("api server on Postgres", () => {
   });
 
   beforeEach(async () => {
-    handleRequest = createApiRequestHandler({ store });
+    handleRequest = createApiRequestHandler({ store, authToken: "test-token" });
   });
 
   afterEach(async () => {
@@ -134,7 +134,12 @@ async function request(
     body?: Buffer | string;
   } = {},
 ): Promise<Response> {
-  const request = new MockRequest(init.method ?? "GET", pathname, init.body);
+  const request = new MockRequest(
+    init.method ?? "GET",
+    pathname,
+    { authorization: "Bearer test-token", ...init.headers },
+    init.body,
+  );
   const response = new MockResponse();
   handleRequest(request as never, response as never);
   await response.done;
@@ -148,13 +153,15 @@ function parseJson<T>(response: Response): T {
 class MockRequest extends Readable {
   readonly method: string;
   readonly url: string;
+  readonly headers: Record<string, string>;
   private bodySent = false;
   private readonly body: Buffer | string | undefined;
 
-  constructor(method: string, url: string, body?: Buffer | string) {
+  constructor(method: string, url: string, headers: Record<string, string>, body?: Buffer | string) {
     super();
     this.method = method;
     this.url = url;
+    this.headers = headers;
     this.body = body;
   }
 

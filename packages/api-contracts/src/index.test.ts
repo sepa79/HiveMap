@@ -8,7 +8,6 @@ import {
   validateApplyProposalRequest,
   validateApproveProposalRequest,
   validateAssignCategoryRequest,
-  validateBackfillConceptEmbeddingsRequest,
   validateBuildScanBoundaryMapRequest,
   validateCompleteScanRequest,
   validateCreateProposalRequest,
@@ -26,7 +25,6 @@ import {
   validateListWorkspaceSummariesRequest,
   validateRecordFeedbackRequest,
   validateRecordScanCalibrationDecisionRequest,
-  validateRefreshConceptEmbeddingRequest,
   validateResolveWorkspaceRequest,
   validateSearchRepositoryIndexRequest,
   validateStartRepositoryIndexRequest,
@@ -341,32 +339,6 @@ describe("api contracts", () => {
     expect(() => validateImportWorkspaceBundleRequest({ bytes: new Uint8Array(), mode: "new" })).toThrow(
       "bytes must contain a ZIP bundle",
     );
-  });
-
-  it("validates provider-backed embedding refresh and backfill requests", () => {
-    expect(() =>
-      validateRefreshConceptEmbeddingRequest({
-        workspaceId: "workspace-a",
-        nodeId: "node-a",
-        model: "ollama:nomic-embed-text",
-      }),
-    ).not.toThrow();
-    expect(() =>
-      validateBackfillConceptEmbeddingsRequest({
-        workspaceId: "workspace-a",
-        model: "ollama:nomic-embed-text",
-        nodeIds: ["node-a"],
-        limit: 10,
-        force: true,
-      }),
-    ).not.toThrow();
-    expect(() =>
-      validateBackfillConceptEmbeddingsRequest({
-        workspaceId: "workspace-a",
-        model: "ollama:nomic-embed-text",
-        nodeIds: [],
-      }),
-    ).toThrow("nodeIds must contain at least one node id");
   });
 
   it("keeps MCP tool request map tied to explicit tool names", () => {

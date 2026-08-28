@@ -104,7 +104,7 @@ Reasoning:
 - single supported backend instead of parallel SQLite/Postgres paths,
 - durable persistence for graph/projection/event tables,
 - compatible with HiveForge deployment goals,
-- compatible with later hosted MCP work.
+- compatible with the protected Streamable HTTP MCP transport now hosted by the shared runtime.
 
 Do not block the base runtime/container track on embedding-provider work, auth, or hosted deployment concerns. ZIP export/import remains the explicit migration and portability boundary.
 

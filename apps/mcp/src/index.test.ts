@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { type EmbeddingProvider, type RepositoryIndexExecutor, HiveMapRuntime } from "@hivemap/runtime";
+import { type RepositoryIndexExecutor, HiveMapRuntime } from "@hivemap/runtime";
 import { InMemoryHiveMapStore } from "@hivemap/storage";
 
 import { HIVEMAP_MCP_TOOL_NAMES, assertKnownMcpTool, handleMcpTool } from "./index.js";
@@ -12,7 +12,6 @@ beforeEach(async () => {
   await store.initialize();
   runtime = new HiveMapRuntime({
     store,
-    embeddingProviders: { test: createTestEmbeddingProvider() },
     repositoryIndexExecutor: createTestRepositoryIndexExecutor(),
   });
 });
@@ -35,8 +34,6 @@ describe("MCP tool adapter", () => {
       "scan_profile_overlay_help",
       "scan_profile_overlay_suggest",
       "concept_embedding_upsert",
-      "concept_embedding_refresh",
-      "concept_embedding_backfill",
       "concept_similar_list",
       "graph_command",
       "category_assign",
@@ -526,82 +523,6 @@ describe("MCP tool adapter", () => {
     });
   });
 
-  it("refreshes and backfills concept embeddings through MCP", async () => {
-    await createWorkspaceWithNode();
-    await handleMcpTool(runtime, "graph_command", {
-      workspaceId: "workspace-a",
-      commands: [
-        {
-          id: "cmd-b",
-          type: "node.create",
-          payload: { node: { id: "node-b", label: "Beta", notes: "near alpha", type: "concept" } },
-        },
-      ],
-    });
-
-    await expect(
-      handleMcpTool(runtime, "concept_embedding_refresh", {
-        workspaceId: "workspace-a",
-        nodeId: "node-a",
-        model: "test:nomic-embed-text",
-      }),
-    ).resolves.toEqual({
-      ok: true,
-      tool: "concept_embedding_refresh",
-      value: {
-        embedding: {
-          workspaceId: "workspace-a",
-          nodeId: "node-a",
-          model: "test:nomic-embed-text",
-          dimensions: 2,
-          contentDigest: expect.any(String),
-          updatedAt: expect.any(String),
-        },
-        provider: "test",
-        status: "refreshed",
-      },
-    });
-
-    await expect(
-      handleMcpTool(runtime, "concept_embedding_backfill", {
-        workspaceId: "workspace-a",
-        model: "test:nomic-embed-text",
-      }),
-    ).resolves.toEqual({
-      ok: true,
-      tool: "concept_embedding_backfill",
-      value: {
-        workspaceId: "workspace-a",
-        model: "test:nomic-embed-text",
-        provider: "test",
-        summary: {
-          totalConcepts: 2,
-          selectedConcepts: 2,
-          refreshed: 1,
-          unchanged: 1,
-        },
-        results: [
-          {
-            nodeId: "node-a",
-            label: "Alpha",
-            status: "unchanged",
-            dimensions: 2,
-            contentDigest: expect.any(String),
-            updatedAt: expect.any(String),
-          },
-          {
-            nodeId: "node-b",
-            label: "Beta",
-            status: "refreshed",
-            dimensions: 2,
-            contentDigest: expect.any(String),
-            updatedAt: expect.any(String),
-          },
-        ],
-      },
-    });
-  });
-
   it("returns visible tool errors without silent fallback", async () => {
     const result = await handleMcpTool(runtime, "graph_get", { workspaceId: "missing" });
 
@@ -817,15 +738,6 @@ async function createCompletedRepositoryIndex(): Promise<void> {
     workspaceId: "workspace-a",
     indexId: "repo-index-scan",
   });
-}
-
-function createTestEmbeddingProvider(): EmbeddingProvider {
-  return {
-    id: "test",
-    async embed(request) {
-      return request.inputs.map((input) => (input.includes("Alpha") ? [1, 0] : [0.9, 0.1]));
-    },
-  };
 }
 
 function createTestRepositoryIndexExecutor(): RepositoryIndexExecutor {

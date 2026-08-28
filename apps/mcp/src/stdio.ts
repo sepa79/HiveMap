@@ -1,16 +1,19 @@
 #!/usr/bin/env node
-import { HiveMapRuntime, createEmbeddingProvidersFromEnvironment } from "@hivemap/runtime";
-import { openHiveMapStore } from "@hivemap/storage";
+/**
+ * Responsibility: Compose the transitional local stdio MCP process over Postgres.
+ * Must not: Define installed HTTP behavior, implement tool semantics, or select fallback storage.
+ * Contract: Requires one explicit Postgres URL and connects one shared runtime to stdio.
+ */
+import { HiveMapRuntime } from "@hivemap/runtime";
+import { describePostgresTarget, openHiveMapStore } from "@hivemap/storage";
 
 import { connectHiveMapStdioServer } from "./sdk-server.js";
 
 const storeConfig = readStoreConfig(process.argv, process.env);
 const store = openHiveMapStore(storeConfig);
 await store.initialize();
-const embeddingProviders = createEmbeddingProvidersFromEnvironment(process.env);
-
-await connectHiveMapStdioServer(new HiveMapRuntime({ store, embeddingProviders }));
-console.error(`HiveMap MCP server running on stdio with ${describeStoreConfig(storeConfig)}`);
+await connectHiveMapStdioServer(new HiveMapRuntime({ store }));
+console.error(`HiveMap MCP server running on stdio with ${describePostgresTarget(storeConfig.connectionString)}`);
 
 function readStoreConfig(
   argv: readonly string[],
@@ -41,8 +44,4 @@ function readRequiredValue(
   }
 
   return envValue;
-}
-
-function describeStoreConfig(config: { backend: "postgres"; connectionString: string }): string {
-  return `Postgres ${config.connectionString}`;
 }

@@ -1,10 +1,10 @@
 # Postgres, Container, HiveForge Plan
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
 
 ## Goal
 
-Upgrade HiveMap from the current local-first SQLite alpha shape to a container-friendly runtime built on Postgres with `pgvector`, then use that runtime as the base for HiveForge deployment and later hosted MCP work.
+Upgrade HiveMap from the local-first SQLite alpha shape to a container-friendly runtime built on Postgres with `pgvector`, validate it through HiveForge, and expose protected Streamable HTTP MCP from that runtime.
 
 ## Locked Direction
 
@@ -14,7 +14,7 @@ Upgrade HiveMap from the current local-first SQLite alpha shape to a container-f
 - [x] Local Docker runtime comes before HiveForge integration.
 - [x] HiveForge integration comes before hosted Streamable HTTP MCP work.
 - [x] Embedding generation and vector-assisted product features were deferred from the base execution track and can be pulled forward afterward as a separate slice.
-- [x] Local packaging target is one self-contained container that bundles HiveMap, Postgres, plugins, and local model-serving dependencies.
+- [x] Local packaging target is one self-contained container that bundles the HiveMap API, built web assets, Postgres, and built-in repository indexing/scan handlers.
 - [x] Local runtime should not require user-supplied DB URLs or database file paths.
 - [x] ZIP export remains a normal download flow.
 - [x] Local `stdio` MCP is not part of the target runtime shape.
@@ -31,7 +31,7 @@ Upgrade HiveMap from the current local-first SQLite alpha shape to a container-f
 ## Current Execution Scope
 
 - [x] This tracked execution path covers Postgres runtime, containerization, local Docker validation, and HiveForge readiness.
-- [x] The base Postgres/container/HiveForge milestone did not block on embedding-provider work; provider-backed refresh/backfill is now a follow-on slice on top of that base.
+- [x] The base Postgres/container/HiveForge milestone does not include provider-backed embedding refresh/backfill or bundled model-serving. The removed experiment is archived as restorable evidence rather than active runtime scope.
 - [x] `pgvector` remains part of the target backend direction, but vector-powered behavior is not required to complete the base runtime/container milestone.
 - [x] Once the remaining Phase 4 and Phase 6 work is closed, the next deliberate feature track should help agents calibrate scans, understand unfamiliar repositories, and validate findings from repository-index structural facts rather than from PocketHive-specific heuristics.
 
@@ -67,8 +67,8 @@ Upgrade HiveMap from the current local-first SQLite alpha shape to a container-f
 ## Phase 4 — Local Container Runtime
 
 - [x] Add a production-oriented `Dockerfile` for HiveMap.
-- [ ] Build one self-contained local container image that runs HiveMap, Postgres, plugins, and local model-serving dependencies together.
-  Current progress: the local image now bundles the Ollama binary plus a shared `/var/lib/hivemap` state root for Postgres data and container-owned model storage; plugin bundling remains the missing part of the one-container target.
+- [x] Build one self-contained local container image that runs the HiveMap API, built web assets, Postgres, and built-in repository indexing/scan handlers together.
+  Current shape: Postgres data has the dedicated `/var/lib/hivemap/postgres` container path. There is no runtime plugin-loading contract and no bundled model-serving process.
 - [x] Make persistence optional through a mounted filesystem path for Postgres data.
 - [x] Keep local startup free of user-managed DB URLs or DB file paths.
 - [x] Add healthcheck behavior and explicit runtime env vars for the container-owned runtime only.
@@ -81,7 +81,7 @@ Upgrade HiveMap from the current local-first SQLite alpha shape to a container-f
 - [x] Define how embeddings are stored and indexed with `pgvector`.
 - [x] Document which entities get embeddings first and why.
 - [x] Add a first bounded similarity query for “similar concepts”.
-- [x] Add the first provider-backed explicit refresh/backfill flow for concept embeddings.
+- [ ] Restore or redesign provider-backed embedding generation only after an explicit use case and contract decision. The removed refresh/backfill and container model-serving experiment is preserved under `archive/deferred-ollama-embedding-provider/`.
 - [ ] Add duplicate or merge-candidate lookup for new or selected nodes.
 - [ ] Add related-concept lookup across projections or map areas.
 - [x] Decide whether similarity should be computed synchronously, asynchronously, or behind explicit refresh operations.
@@ -94,21 +94,26 @@ Upgrade HiveMap from the current local-first SQLite alpha shape to a container-f
 - [x] Add `deploy/hiveforge/*` assets for at least one profile.
 - [x] Start with a `docker-single` profile for local adapter smoke.
 - [x] Add a `docker-swarm` profile so the current HiveForge environment can run the same packaged runtime.
-- [ ] Validate the HiveForge runtime contract against the new containerized HiveMap shape.
+- [x] Validate the HiveForge runtime contract against the new containerized HiveMap shape.
+- [x] Close ruleset-v2 deployment findings: declare `hivemap-auth-token` as an
+  external HiveForge/Docker secret, keep its value out of rendered Compose, and
+  prove graceful API plus bundled-Postgres shutdown under container SIGTERM.
 - [ ] Run the intended loop: change -> build -> deploy -> e2e -> change.
 
 Current state:
 - Local HiveForge adapter smoke passes for `docker-single` by rendering Compose through Ansible and validating it with `docker compose config`.
 - HiveForge on August 19, 2026 is connected to trusted-LAN Forgejo at `http://192.168.88.50:3001/`.
 - HiveMap now deploys to the shared `swarm` environment as `hivemap-development` through the `docker-swarm` profile.
-- The temporary swarm dev path is pinned to `.50` with an explicit placement constraint because its HiveMap state bind source is node-local and currently lives under `/opt/pockethive-data/hivemap/state`.
+- The swarm profile requires an explicit HiveMap-owned node-local Postgres bind source and matching placement constraint; repository examples use `/opt/hivemap/postgres` and do not treat unrelated test-stack paths as product persistence.
 - Remaining HiveForge work is about tightening the local development loop and adding stronger e2e coverage, not proving first deploy viability.
 
-## Phase 7 — Hosted MCP Follow-Up
+## Phase 7 — Protected Streamable HTTP MCP
 
-- [ ] Decide whether Streamable HTTP MCP lives in the same runtime process as REST or a separate boundary.
-- [ ] Define the auth story before any non-local exposure.
-- [ ] Add hosted MCP only after the local container runtime and HiveForge path are stable.
+- [x] Keep stateless Streamable HTTP MCP in the same runtime process and port as REST.
+- [x] Require one explicit bearer token for REST and MCP; keep UI assets and health public.
+- [x] Expose `/mcp` from the installed container runtime while retaining stdio only as transitional local tooling.
+- [x] Keep the browser token tab-scoped in `sessionStorage`, provide an explicit
+  clear action, and retain interaction evidence for save/use/clear behavior.
 
 ## Next Feature Track After Base Runtime
 
@@ -122,7 +127,7 @@ Help an agent reach a correct working model of an unfamiliar repository before i
 
 - [ ] Keep the track product-agnostic: derive candidate boundaries, contracts, tests, and findings from repository-index structural facts rather than repository-specific hardcoding.
 - [ ] Keep PocketHive and HiveMap as proving repositories for the workflow, not as special-case contracts.
-- [ ] Keep hosted MCP as a separate follow-up after the runtime base is stable; it must not displace this track.
+- [x] Keep Streamable HTTP MCP as a bounded follow-up after the runtime base without displacing repository-understanding work.
 - [ ] Prefer externalized scan recipes and overlays over encoding repository-family assumptions in code.
 
 ### Phase A — Calibration Contract
@@ -179,4 +184,4 @@ Help an agent reach a correct working model of an unfamiliar repository before i
 - [x] HiveMap runs locally in Docker on `Postgres + pgvector`.
 - [x] ZIP export/import works correctly on the new backend.
 - [x] HiveForge can deploy the new runtime through an explicit contract.
-- [ ] Future hosted MCP work can build on a stable storage/runtime/deployment base instead of the old SQLite alpha shape.
+- [x] Protected Streamable HTTP MCP builds on the shared Postgres runtime instead of the old SQLite alpha shape.

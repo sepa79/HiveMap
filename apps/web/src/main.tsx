@@ -1,16 +1,18 @@
 import "@xyflow/react/dist/style.css";
 import "./styles.css";
 
+/**
+ * Responsibility: Compose the single-page HiveMap workspace screen and its feature panels.
+ * Must not: Persist credentials, implement REST/domain contracts, or become semantic graph authority.
+ * Contract: Renders server-owned workspace projections and emits typed client operations.
+ */
+
 import {
   ReactFlow,
   Background,
   Controls,
-  Handle,
-  Position,
   type Edge,
   type Node,
-  type NodeProps,
-  type NodeTypes,
   type ReactFlowInstance,
 } from "@xyflow/react";
 import {
@@ -59,7 +61,22 @@ import {
   type WorkspaceState,
   type WorkspaceRecord,
 } from "./api.js";
+import { AuthTokenPanel } from "./AuthTokenPanel.js";
+import { FINDING_PRIORITY_GROUPS } from "./finding-priorities.js";
+import { FINDINGS_OVERVIEW_NOTE, FLOW_NODE_TYPES, MAP_CARD_ROW_PITCH, type MapCardData } from "./MapCard.js";
+import { humanSeverity, nodeStyle, orientationNoteStyle, projectionGroupHeaderStyle } from "./projection-styles.js";
 import { slugifyNodeId } from "./ids.js";
+import {
+  clearProjectionLocation,
+  describeProjection,
+  isFindingsOverviewProjection,
+  pushProjectionLocation,
+  readHistoryDepth,
+  readProjectionLocation,
+  replaceProjectionLocation,
+  requireProjection,
+  selectInitialProjection,
+} from "./projection-navigation.js";
 
 const NODE_TYPES: Array<Exclude<GraphNodeType, "finding">> = [
   "concept",
@@ -74,48 +91,7 @@ const NODE_TYPES: Array<Exclude<GraphNodeType, "finding">> = [
 ];
 
 const FINDING_SEVERITIES = ["critical", "high", "normal", "low"] as const;
-const FINDING_PRIORITY_GROUPS: Array<{ id: string; label: string; severity: FindingMetadata["severity"] }> = [
-  { id: "severity-critical", label: "Critical", severity: "critical" },
-  { id: "severity-high", label: "High", severity: "high" },
-  { id: "severity-medium", label: "Medium", severity: "normal" },
-  { id: "severity-low", label: "Low", severity: "low" },
-];
-const FINDING_PRIORITY_GROUP_IDS = new Set(FINDING_PRIORITY_GROUPS.map((group) => group.id));
-const MAP_CARD_HEIGHT = 210;
-const MAP_CARD_ROW_PITCH = 235;
-type MapCardData = { title: string; tags: string[]; variant: "finding" | "concept" };
-type MapCardNode = Node<MapCardData, "map-card">;
-const FLOW_NODE_TYPES: NodeTypes = { "map-card": MapCard };
-const FINDINGS_OVERVIEW_NOTE: NonNullable<NonNullable<Projection["layout"]>["orientationNote"]> = {
-  title: "Documentation review map",
-  purpose: "Review documentation problems found by the repository scan and open the evidence needed to fix them.",
-  usage: [
-    "Start with the Critical and High priority columns.",
-    "Use the problem kind shown on each card to understand the type of cleanup.",
-    "Click a finding to open its deep dive.",
-    "Read source files, conflicting claims, and the recommended action in the sidebar.",
-    "Use Back to return to this review map.",
-  ],
-};
-
-function MapCard({ data }: NodeProps<MapCardNode>) {
-  return (
-    <div className={`map-card map-card-${data.variant}`}>
-      <Handle type="target" position={Position.Top} isConnectable={false} />
-      <div className="map-card-title">{data.title}</div>
-      <div className="map-card-tags">
-        {data.tags.map((tag) => (
-          <span className={`map-card-tag map-card-tag-${tag.replace(/[^a-z0-9]+/g, "-").toLowerCase()}`} key={tag}>
-            {tag}
-          </span>
-        ))}
-      </div>
-      <Handle type="source" position={Position.Bottom} isConnectable={false} />
-    </div>
-  );
-}
-
-function App() {
+export function App() {
   const [workspaceId, setWorkspaceId] = useState("");
   const [workspaceOptions, setWorkspaceOptions] = useState<WorkspaceRecord[]>([]);
   const [newWorkspaceId, setNewWorkspaceId] = useState("");
@@ -649,6 +625,32 @@ function App() {
     });
   }
 
+  function clearProtectedWorkspaceState(): void {
+    setWorkspaceId("");
+    setWorkspaceOptions([]);
+    setState(null);
+    setSelectedProjection(null);
+    setSelectedNodeId(null);
+    setEdgeFrom("");
+    setEdgeTo("");
+    setNavigationDepth(0);
+    setError(null);
+    clearProjectionLocation();
+  }
+
+  async function handleAuthTokenChanged(hasToken: boolean): Promise<void> {
+    if (!hasToken) {
+      clearProtectedWorkspaceState();
+      return;
+    }
+    await run(async () => {
+      await refreshWorkspaceOptions();
+      if (workspaceId !== "") {
+        await refresh(workspaceId);
+      }
+    });
+  }
+
   return (
     <main className="app-shell">
       <header className="top-bar">
@@ -670,6 +672,8 @@ function App() {
 
       <aside className="sidebar">
         <div className="nav-header">Workspace controls</div>
+
+        <AuthTokenPanel onTokenChanged={handleAuthTokenChanged} />
 
         <section className="panel workspace-panel">
           <label>
@@ -1109,149 +1113,6 @@ function App() {
       </section>
     </main>
   );
-}
-
-function nodeStyle(type: GraphNodeType, selected: boolean, findingSeverity?: "low" | "normal" | "high" | "critical") {
-  const colors: Record<GraphNodeType, { background: string; border: string }> = {
-    concept: { background: "rgba(51, 225, 255, 0.10)", border: "rgba(51, 225, 255, 0.45)" },
-    decision: { background: "rgba(86, 211, 145, 0.10)", border: "rgba(86, 211, 145, 0.42)" },
-    risk: { background: "rgba(255, 117, 117, 0.10)", border: "rgba(255, 117, 117, 0.45)" },
-    question: { background: "rgba(255, 200, 87, 0.10)", border: "rgba(255, 200, 87, 0.42)" },
-    evidence: { background: "rgba(255, 255, 255, 0.04)", border: "rgba(255, 255, 255, 0.18)" },
-    component: { background: "rgba(167, 139, 250, 0.10)", border: "rgba(167, 139, 250, 0.42)" },
-    system: { background: "rgba(96, 165, 250, 0.10)", border: "rgba(96, 165, 250, 0.42)" },
-    role: { background: "rgba(244, 114, 182, 0.10)", border: "rgba(244, 114, 182, 0.42)" },
-    pattern: { background: "rgba(45, 212, 191, 0.10)", border: "rgba(45, 212, 191, 0.42)" },
-    finding: { background: "rgba(255, 117, 117, 0.10)", border: "rgba(255, 117, 117, 0.55)" },
-  };
-
-  const findingColors = findingSeverity === "critical"
-    ? { background: "rgba(255, 80, 80, 0.18)", border: "rgba(255, 80, 80, 0.82)" }
-    : findingSeverity === "high"
-    ? { background: "rgba(255, 117, 117, 0.12)", border: "rgba(255, 117, 117, 0.62)" }
-    : findingSeverity === "normal"
-    ? { background: "rgba(255, 200, 87, 0.10)", border: "rgba(255, 200, 87, 0.48)" }
-    : colors[type];
-
-  return {
-    background: findingColors.background,
-    border: selected ? "2px solid #33e1ff" : `1px solid ${findingColors.border}`,
-    borderRadius: 10,
-    boxShadow: selected ? "0 0 20px rgba(51, 225, 255, 0.24)" : "0 12px 24px rgba(0, 0, 0, 0.22)",
-    color: "rgba(255, 255, 255, 0.94)",
-    padding: 12,
-    height: MAP_CARD_HEIGHT,
-    width: 180,
-  };
-}
-
-function orientationNoteStyle(groupCount: number) {
-  return {
-    background: "linear-gradient(135deg, rgba(51, 225, 255, 0.14), rgba(255, 193, 7, 0.08))",
-    border: "1px solid rgba(51, 225, 255, 0.52)",
-    borderRadius: 14,
-    boxShadow: "0 18px 42px rgba(0, 0, 0, 0.32)",
-    color: "rgba(255, 255, 255, 0.92)",
-    fontSize: 13,
-    lineHeight: 1.55,
-    minHeight: 160,
-    padding: 18,
-    textAlign: "left" as const,
-    whiteSpace: "pre-line" as const,
-    width: Math.max(620, groupCount * 260 - 20),
-  };
-}
-
-function humanSeverity(severity: FindingMetadata["severity"] | undefined): string {
-  if (severity === undefined) return "unknown";
-  return severity === "normal" ? "medium" : severity;
-}
-
-function projectionGroupHeaderStyle(groupId: string, width: number) {
-  const palette = groupId === "severity-critical"
-    ? { background: "rgba(255, 80, 80, 0.22)", border: "rgba(255, 80, 80, 0.86)", color: "#ffb0b0" }
-    : groupId === "severity-high"
-    ? { background: "rgba(255, 117, 117, 0.14)", border: "rgba(255, 117, 117, 0.64)", color: "#ffc2c2" }
-    : groupId === "severity-medium"
-    ? { background: "rgba(255, 200, 87, 0.12)", border: "rgba(255, 200, 87, 0.58)", color: "#ffdc91" }
-    : groupId === "severity-low"
-    ? { background: "rgba(86, 211, 145, 0.10)", border: "rgba(86, 211, 145, 0.48)", color: "#8be8b4" }
-    : { background: "rgba(51, 225, 255, 0.10)", border: "rgba(51, 225, 255, 0.45)", color: "#8cedff" };
-  return {
-    ...palette,
-    border: `1px solid ${palette.border}`,
-    borderRadius: 12,
-    fontSize: 16,
-    fontWeight: 900,
-    letterSpacing: 0.5,
-    lineHeight: 1.35,
-    minHeight: 64,
-    padding: 10,
-    textTransform: "uppercase" as const,
-    whiteSpace: "pre-line" as const,
-    width,
-  };
-}
-
-type ProjectionLocation = { workspaceId: string | null; projectionId: string | null };
-type HiveMapHistoryState = { hiveMap: true; depth: number };
-
-function readProjectionLocation(): ProjectionLocation {
-  const parameters = new URLSearchParams(window.location.search);
-  return {
-    workspaceId: parameters.get("workspace"),
-    projectionId: parameters.get("projection"),
-  };
-}
-
-function pushProjectionLocation(workspaceId: string, projection: Projection | null, depth: number): void {
-  window.history.pushState({ hiveMap: true, depth } satisfies HiveMapHistoryState, "", projectionUrl(workspaceId, projection));
-}
-
-function replaceProjectionLocation(workspaceId: string, projection: Projection | null, depth: number): void {
-  window.history.replaceState({ hiveMap: true, depth } satisfies HiveMapHistoryState, "", projectionUrl(workspaceId, projection));
-}
-
-function projectionUrl(workspaceId: string, projection: Projection | null): string {
-  const url = new URL(window.location.href);
-  url.searchParams.set("workspace", workspaceId);
-  if (projection === null) url.searchParams.delete("projection");
-  else url.searchParams.set("projection", projection.id);
-  return `${url.pathname}${url.search}${url.hash}`;
-}
-
-function readHistoryDepth(value: unknown): number {
-  if (typeof value !== "object" || value === null || !("hiveMap" in value) || value.hiveMap !== true || !("depth" in value)) return 0;
-  const depth = value.depth;
-  if (!Number.isInteger(depth) || (depth as number) < 0) return 0;
-  return depth as number;
-}
-
-function requireProjection(state: WorkspaceState, projectionId: string): Projection {
-  const projection = state.projections.find((candidate) => candidate.id === projectionId);
-  if (projection === undefined) throw new Error(`Workspace ${state.workspace.id} does not contain projection ${projectionId}`);
-  return projection;
-}
-
-function selectInitialProjection(state: WorkspaceState): Projection | null {
-  const findingsOverview = [...state.projections].reverse().find(isFindingsOverviewProjection);
-  return findingsOverview ?? state.projections.at(-1) ?? null;
-}
-
-function isFindingsOverviewProjection(projection: Projection): boolean {
-  return projection.type === "project-map" &&
-    projection.groups !== undefined &&
-    projection.groups.length > 0 &&
-    projection.groups.every((group) => FINDING_PRIORITY_GROUP_IDS.has(group.id));
-}
-
-function describeProjection(projection: Projection | null): string {
-  if (projection === null) return "Semantic graph source";
-  if (projection.type === "dive-in") return "Finding deep dive · affected concepts on the map · evidence in the sidebar";
-  if (isFindingsOverviewProjection(projection)) {
-    return "Documentation review queue · priority columns · click a finding to open its evidence";
-  }
-  return projection.type;
 }
 
 createRoot(document.getElementById("root")!).render(<App />);

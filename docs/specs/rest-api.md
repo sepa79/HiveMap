@@ -12,10 +12,51 @@ MCP is the primary agent interface. REST must call the same command handlers as 
 - Feedback events must not mutate the graph directly.
 - Proposal creation and proposal application are separate operations.
 - REST request/response contracts should share types with MCP contracts where possible.
+- Exactly one direct (`HIVEMAP_AUTH_TOKEN`/`--auth-token`) or file-backed
+  (`HIVEMAP_AUTH_TOKEN_FILE`/`--auth-token-file`) token source is required when
+  the HTTP runtime starts.
+- Every REST route requires the exact `Authorization: Bearer <token>` header.
+- `GET /health`, the built UI entry point, and built static assets are public so operators can check readiness and load the token prompt.
+- `GET /health` is a live runtime-readiness check. It returns `200` with
+  `{ "status": "ok" }` only when the configured store can complete a live
+  connection probe. Store unavailability returns `503` with the stable
+  `STORAGE_UNAVAILABLE` error envelope and never exposes driver, connection,
+  host, port, or credential details. Container health uses this endpoint, so a
+  running HTTP process with unavailable Postgres is unhealthy.
+- `OPTIONS` is public for CORS preflight; allowed headers include `authorization` and MCP protocol headers.
+
+The same token protects the Streamable HTTP MCP endpoint at `/mcp`. A missing or incorrect token returns `401` before REST or MCP dispatch. Authentication is intentionally one shared operator token; users, roles, and per-workspace authorization are not part of this alpha contract.
+
+### Token provisioning and lifecycle
+
+- Direct development and the repository-local Compose profile accept the token
+  through `HIVEMAP_AUTH_TOKEN`.
+- Installed HiveForge deployments declare the Docker secret
+  `hivemap-auth-token` in `requirements.secrets`. The container receives only
+  `HIVEMAP_AUTH_TOKEN_FILE=/run/secrets/hivemap-auth-token`; the secret value
+  must not be rendered into Compose, Ansible output, process arguments, logs,
+  docs, or deployment metadata.
+- Exactly one token source is allowed. Supplying both
+  `HIVEMAP_AUTH_TOKEN` and `HIVEMAP_AUTH_TOKEN_FILE`, an empty secret file, or
+  an unreadable secret file is a startup error.
+- The browser keeps the operator token in `sessionStorage`, scoped to the
+  current browser tab. The token is attached only as an `Authorization` header,
+  is never placed in URLs, and can be explicitly cleared from the UI. Closing
+  the tab ends the stored-token lifecycle.
+- Clearing the browser token immediately removes all server-provided workspace
+  records, graph/projection state, selected semantic ids, and workspace or
+  projection query parameters from the rendered UI. Clearing is local and must
+  not issue an unauthenticated refresh request.
+- Browser storage does not protect against script execution in the same origin.
+  The public UI must therefore remain free of third-party scripts, and a future
+  multi-user runtime requires a different authentication/session contract.
 
 ## Endpoints
 
 ```text
+GET  /health
+POST /mcp
+
 GET  /workspaces
 GET  /workspaces/:workspaceId
 POST /workspaces
@@ -28,8 +69,6 @@ POST /workspaces/:workspaceId/repository-indexes/:indexId/execute
 GET  /workspaces/:workspaceId/repository-indexes/:indexId/search?query=...&limit=...
 GET  /workspaces/:workspaceId/repository-indexes/:indexId/evidence-candidates?profileId=...&profileVersion=...&criterionId=...&limit=...
 POST /workspaces/:workspaceId/concepts/:nodeId/embedding
-POST /workspaces/:workspaceId/concepts/:nodeId/embedding-refresh
-POST /workspaces/:workspaceId/concept-embeddings/backfill
 GET  /workspaces/:workspaceId/concepts/:nodeId/similar
 POST /workspaces/:workspaceId/commands
 
@@ -71,9 +110,9 @@ POST /workspace-import-bundles?mode=new|replace
 Embedding routes are explicit and read-model-oriented:
 
 - `POST /workspaces/:workspaceId/concepts/:nodeId/embedding` stores a caller-supplied vector directly.
-- `POST /workspaces/:workspaceId/concepts/:nodeId/embedding-refresh` generates or refreshes one concept embedding through a configured provider-backed `model` ref such as `ollama:nomic-embed-text`.
-- `POST /workspaces/:workspaceId/concept-embeddings/backfill` refreshes missing or stale concept embeddings for a selected set or all concept nodes in one workspace.
 - `GET /workspaces/:workspaceId/concepts/:nodeId/similar?model=...&limit=...&minScore=...` returns bounded read-only similarity suggestions only.
+
+The active REST contract does not generate embeddings or manage a model provider. A caller that owns generation may store an explicit vector through the upsert route; graph mutations never regenerate vectors implicitly.
 
 Repository indexing routes begin with persisted job records only:
 

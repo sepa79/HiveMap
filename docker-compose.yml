@@ -8,14 +8,10 @@ services:
     environment:
       HIVEMAP_API_HOST: "0.0.0.0"
       HIVEMAP_API_PORT: "8787"
-      HIVEMAP_STATE_DIR: "/var/lib/hivemap"
+      HIVEMAP_AUTH_TOKEN: "${HIVEMAP_AUTH_TOKEN:?Set HIVEMAP_AUTH_TOKEN before starting HiveMap}"
       HIVEMAP_POSTGRES_DB: "hivemap"
       HIVEMAP_POSTGRES_PORT: "5432"
       HIVEMAP_DATA_DIR: "/var/lib/hivemap/postgres"
-      HIVEMAP_OLLAMA_ENABLED: "${HIVEMAP_OLLAMA_ENABLED:-0}"
-      HIVEMAP_OLLAMA_HOST: "127.0.0.1:11434"
-      HIVEMAP_OLLAMA_MODELS_DIR: "/var/lib/hivemap/ollama"
-      HIVEMAP_OLLAMA_PULL_MODELS: "${HIVEMAP_OLLAMA_PULL_MODELS:-}"
       HIVEMAP_WEB_DIST: "/app/apps/web/dist"
     volumes:
-      - ./.local/hivemap-state:/var/lib/hivemap
+      - ./.local/hivemap-postgres:/var/lib/hivemap/postgres

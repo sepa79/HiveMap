@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { InMemoryHiveMapStore } from "@hivemap/storage";
 import { CODE_QUALITY_PROFILE, DOCUMENTATION_CONFLICTS_PROFILE } from "@hivemap/scans";
 
-import { type EmbeddingProvider, type RepositoryIndexExecutor, HiveMapRuntime, RepositoryIndexExecutionError } from "./index.js";
+import { type RepositoryIndexExecutor, HiveMapRuntime, RepositoryIndexExecutionError } from "./index.js";
 
 let store: InMemoryHiveMapStore;
 let runtime: HiveMapRuntime;
@@ -16,7 +16,6 @@ beforeEach(async () => {
   await store.initialize();
   runtime = new HiveMapRuntime({
     store,
-    embeddingProviders: { test: createTestEmbeddingProvider() },
     repositoryIndexExecutor: createTestRepositoryIndexExecutor(),
     now: () => "2026-08-19T23:00:00.000Z",
   });
@@ -325,7 +324,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const evidenceRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryEvidenceIndexResult(workspaceId, indexId),
       now: () => "2026-08-19T23:00:00.000Z",
     });
@@ -469,7 +467,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const structuralRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryStructuralEvidenceIndexResult(workspaceId, indexId),
       now: () => "2026-08-20T18:00:00.000Z",
     });
@@ -528,7 +525,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const structuralRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: async ({ workspaceId, indexId }) =>
         createRepositoryStructuralPrecisionIndexResult(workspaceId, indexId),
       now: () => "2026-08-20T18:15:00.000Z",
@@ -580,7 +576,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const structuralRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: async ({ workspaceId, indexId }) =>
         createRepositoryStructuralPrecisionOverlayIndexResult(workspaceId, indexId),
       now: () => "2026-08-25T17:20:00.000Z",
@@ -628,7 +623,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const structuralRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryStructuralTopologyIndexResult(workspaceId, indexId),
       now: () => "2026-08-20T18:30:00.000Z",
     });
@@ -680,7 +674,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const structuralRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryStructuralTopologyIndexResult(workspaceId, indexId),
       now: () => "2026-08-20T18:45:00.000Z",
     });
@@ -912,7 +905,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const overlayRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryOverlayEvidenceIndexResult(workspaceId, indexId),
       now: () => "2026-08-20T19:05:00.000Z",
     });
@@ -981,7 +973,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const overlayRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryBoundaryMapUnmappedRootIndexResult(workspaceId, indexId),
       now: () => "2026-08-20T19:10:00.000Z",
     });
@@ -1033,7 +1024,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const overlayRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: async ({ workspaceId, indexId }) =>
         createRepositoryBoundaryMapUnknownTestFamilyIndexResult(workspaceId, indexId),
       now: () => "2026-08-20T19:12:00.000Z",
@@ -1106,7 +1096,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const overlayRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: async ({ workspaceId, indexId }) =>
         createRepositoryBoundaryMapCustomMarkerOverlayIndexResult(workspaceId, indexId),
       now: () => "2026-08-20T19:14:00.000Z",
@@ -1199,7 +1188,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const overlayRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryOverlayEvidenceIndexResult(workspaceId, indexId),
       now: () => "2026-08-20T19:00:00.000Z",
     });
@@ -1305,7 +1293,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const structuralRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryStructuralEvidenceIndexResult(workspaceId, indexId),
       now: () => "2026-08-25T11:00:00.000Z",
     });
@@ -1359,7 +1346,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const structuralRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryStructuralEvidenceIndexResult(workspaceId, indexId),
       now: () => "2026-08-25T11:10:00.000Z",
     });
@@ -1447,7 +1433,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const overlayRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryInvalidOverlayIndexResult(workspaceId, indexId),
       now: () => "2026-08-20T19:00:00.000Z",
     });
@@ -1491,7 +1476,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const precisionRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryEvidenceNoiseResult(workspaceId, indexId),
       now: () => "2026-08-19T23:00:00.000Z",
     });
@@ -1568,7 +1552,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const invariantRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryEvidenceSemanticInvariantResult(workspaceId, indexId),
       now: () => "2026-08-19T23:00:00.000Z",
     });
@@ -1611,7 +1594,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const invariantRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryEvidenceSemanticInvariantOverlayResult(workspaceId, indexId),
       now: () => "2026-08-19T23:00:00.000Z",
     });
@@ -1662,7 +1644,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const staleRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryEvidenceStaleResult(workspaceId, indexId),
       now: () => "2026-08-19T23:00:00.000Z",
     });
@@ -1715,7 +1696,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const staleRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryEvidenceLegacyAuthorityResult(workspaceId, indexId),
       now: () => "2026-08-19T23:00:00.000Z",
     });
@@ -1758,7 +1738,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const staleRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryEvidenceLegacyAuthorityOverlayResult(workspaceId, indexId),
       now: () => "2026-08-19T23:00:00.000Z",
     });
@@ -1809,7 +1788,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const unicodeRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryEvidenceUnicodeHeadingResult(workspaceId, indexId),
       now: () => "2026-08-19T23:00:00.000Z",
     });
@@ -1852,7 +1830,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const rootLinkRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryEvidenceRootLinkResult(workspaceId, indexId),
       now: () => "2026-08-19T23:00:00.000Z",
     });
@@ -1895,7 +1872,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const ownershipRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryEvidenceOwnershipScopeResult(workspaceId, indexId),
       now: () => "2026-08-19T23:00:00.000Z",
     });
@@ -1938,7 +1914,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const ownershipRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryEvidenceOwnershipScopeOverlayResult(workspaceId, indexId),
       now: () => "2026-08-19T23:00:00.000Z",
     });
@@ -1990,7 +1965,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const rerunRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: createSequenceRepositoryIndexExecutor([
         createRepositoryIndexResult("1111111111111111111111111111111111111111", "Original ownership evidence."),
         new RepositoryIndexExecutionError("GIT_COMMAND_FAILED", "checkout failed"),
@@ -2132,123 +2106,6 @@ describe("HiveMapRuntime", () => {
         },
       ],
     });
-    await expect(runtime.getGraph({ workspaceId: "workspace-a" })).resolves.toEqual(graphBefore);
-  });
-
-  it("refreshes and backfills concept embeddings through a configured provider without mutating graph semantics", async () => {
-    await seedWorkspaceFixture();
-    await runtime.applyGraphCommands({
-      workspaceId: "workspace-a",
-      commands: [
-        {
-          id: "cmd-a",
-          type: "node.create",
-          payload: { node: { id: "node-a", label: "Alpha", notes: "roadmap planning", type: "concept" } },
-        },
-        {
-          id: "cmd-b",
-          type: "node.create",
-          payload: { node: { id: "node-b", label: "Beta", notes: "roadmap execution", type: "concept" } },
-        },
-        {
-          id: "cmd-c",
-          type: "node.create",
-          payload: { node: { id: "node-c", label: "Gamma", notes: "kitchen inventory", type: "concept" } },
-        },
-      ],
-    });
-
-    const graphBefore = await runtime.getGraph({ workspaceId: "workspace-a" });
-
-    await expect(
-      runtime.refreshConceptEmbedding({
-        workspaceId: "workspace-a",
-        nodeId: "node-a",
-        model: "test:nomic-embed-text",
-      }),
-    ).resolves.toEqual({
-      embedding: {
-        workspaceId: "workspace-a",
-        nodeId: "node-a",
-        model: "test:nomic-embed-text",
-        dimensions: 2,
-        contentDigest: expect.any(String),
-        updatedAt: "2026-08-19T23:00:00.000Z",
-      },
-      provider: "test",
-      status: "refreshed",
-    });
-
-    await expect(
-      runtime.backfillConceptEmbeddings({
-        workspaceId: "workspace-a",
-        model: "test:nomic-embed-text",
-      }),
-    ).resolves.toEqual({
-      workspaceId: "workspace-a",
-      model: "test:nomic-embed-text",
-      provider: "test",
-      summary: {
-        totalConcepts: 3,
-        selectedConcepts: 3,
-        refreshed: 2,
-        unchanged: 1,
-      },
-      results: [
-        {
-          nodeId: "node-a",
-          label: "Alpha",
-          status: "unchanged",
-          dimensions: 2,
-          contentDigest: expect.any(String),
-          updatedAt: "2026-08-19T23:00:00.000Z",
-        },
-        {
-          nodeId: "node-b",
-          label: "Beta",
-          status: "refreshed",
-          dimensions: 2,
-          contentDigest: expect.any(String),
-          updatedAt: "2026-08-19T23:00:00.000Z",
-        },
-        {
-          nodeId: "node-c",
-          label: "Gamma",
-          status: "refreshed",
-          dimensions: 2,
-          contentDigest: expect.any(String),
-          updatedAt: "2026-08-19T23:00:00.000Z",
-        },
-      ],
-    });
-
-    await expect(
-      runtime.listSimilarConcepts({
-        workspaceId: "workspace-a",
-        nodeId: "node-a",
-        model: "test:nomic-embed-text",
-        limit: 2,
-        minScore: 0,
-      }),
-    ).resolves.toEqual({
-      sourceNodeId: "node-a",
-      model: "test:nomic-embed-text",
-      matches: [
-        {
-          nodeId: "node-b",
-          label: "Beta",
-          score: expect.any(Number),
-          updatedAt: "2026-08-19T23:00:00.000Z",
-        },
-        {
-          nodeId: "node-c",
-          label: "Gamma",
-          score: expect.any(Number),
-          updatedAt: "2026-08-19T23:00:00.000Z",
-        },
-      ],
-    });
-
     await expect(runtime.getGraph({ workspaceId: "workspace-a" })).resolves.toEqual(graphBefore);
   });
 
@@ -2522,7 +2379,6 @@ describe("HiveMapRuntime", () => {
     await seedWorkspaceFixture();
     const overlayRuntime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: async ({ workspaceId, indexId }) =>
         createRepositoryEvidenceSemanticInvariantOverlayResult(workspaceId, indexId),
       now: () => "2026-08-25T10:05:00.000Z",
@@ -2656,24 +2512,6 @@ async function completeDocumentationScan(id: string): Promise<void> {
     appliedCriteria: DOCUMENTATION_CONFLICTS_PROFILE.criteria.map((criterion) => criterion.id),
     declaredOutputs: [...DOCUMENTATION_CONFLICTS_PROFILE.requiredOutputs],
   });
-}
-
-function createTestEmbeddingProvider(): EmbeddingProvider {
-  return {
-    id: "test",
-    maxBatchSize: 2,
-    async embed(request) {
-      return request.inputs.map((input) => {
-        if (input.includes("Alpha")) {
-          return [1, 0];
-        }
-        if (input.includes("Beta")) {
-          return [0.9, 0.1];
-        }
-        return [0, 1];
-      });
-    },
-  };
 }
 
 function createTestRepositoryIndexExecutor(): RepositoryIndexExecutor {

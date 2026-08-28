@@ -6,10 +6,14 @@ The `poc/` directory is a delivered proof of concept. It is evidence, not the ar
 
 ## Non-Negotiable Rules
 
+- Read before changing.
+- Update the owning docs and typed contracts before or in the same change as durable behavior or architecture.
 - No defensive coding.
 - No silent fallbacks.
 - No duplicate sources of truth.
 - Fail fast on invalid input, invalid state, and missing required data.
+- Keep strict module separation: one class per file, one clear responsibility per file, and no kitchen-sink production modules.
+- Add the responsibility header required by `docs/ENGINEERING_RULES.md` to every new or materially changed coordinator, adapter, boundary parser/validator, projection builder, or subsystem controller.
 - Keep side effects at module boundaries.
 - Keep APIs explicit and typed.
 - Keep semantic graph data separate from visual projections.
@@ -31,6 +35,7 @@ The `poc/` directory is a delivered proof of concept. It is evidence, not the ar
 - Product direction: `docs/product/vision.md`
 - Architecture direction: `docs/architecture.md`
 - Project rules and workflow: `AGENTS.md`
+- Implementation engineering rules: `docs/ENGINEERING_RULES.md`
 - AI operating docs: `docs/ai/*`
 - Contracts and schemas: `docs/specs/*`
 - POC evidence and demo snapshots: `poc/`
@@ -38,11 +43,12 @@ The `poc/` directory is a delivered proof of concept. It is evidence, not the ar
 If a source conflicts, this order wins:
 
 1. `AGENTS.md`
-2. `docs/specs/*`
-3. `docs/architecture.md`
-4. `docs/product/vision.md`
-5. implementation evidence
-6. POC artifacts
+2. `docs/ENGINEERING_RULES.md`
+3. `docs/specs/*`
+4. `docs/architecture.md`
+5. `docs/product/vision.md`
+6. implementation evidence
+7. POC artifacts
 
 ## Intended Repository Layout
 
@@ -125,21 +131,22 @@ Do not store:
 Minimum workflow when HiveMind is available:
 
 1. Resolve the project first. Do not guess the HiveMind project id when `project_resolve` can confirm it.
-2. Read the active HiveMind project rules and bounded project brief near the start of meaningful work.
+2. Read the active HiveMind project rules near the start of meaningful work.
 3. Open a HiveMind session near the start of meaningful work.
 4. Open a feature-scoped context token for the current work unit.
-5. Check recent learnings or entries when touching storage, runtime, projections, scans, or MCP/API boundaries.
-6. Record at least the durable decision, progress, feedback, or risk that would otherwise be lost after the session.
-7. Link the relevant repo files when they anchor the memory.
-8. Close the active context token after the work unit. Do not leave routine work with dangling active contexts.
+5. Read the bounded project brief through that context token.
+6. Check recent learnings or entries when touching storage, runtime, projections, scans, or MCP/API boundaries.
+7. Record at least the durable decision, progress, feedback, or risk that would otherwise be lost after the session.
+8. Link the relevant repo files when they anchor the memory.
+9. Close the active context token after the work unit. Do not leave routine work with dangling active contexts.
 
 Required operational flow for meaningful work:
 
 1. `project_resolve`
 2. `rules_get`
-3. `context_get_project_brief`
-4. `session_start`
-5. `context_open`
+3. `session_start`
+4. `context_open`
+5. `context_get_project_brief`
 6. `learning_get_recent` and/or `entry_search`
 7. implementation work
 8. `learning_capture` and/or another durable entry write
@@ -148,6 +155,8 @@ Required operational flow for meaningful work:
 Do not reduce HiveMind usage to `learning_get_recent` plus `learning_capture` on a long-lived token. That loses project rules, current open threads, and session hygiene.
 
 HiveMap remains the semantic graph system of record for concept maps and projections. HiveMind remains the durable project memory for development workflow, decisions, and learnings. Do not collapse one into the other.
+
+Durable product, architecture, and public-contract decisions must also be written to their canonical repository docs. HiveMind records decision history, evidence, risks, and learnings; it does not replace the repository SSOT.
 
 ## Near-Term Delivery Direction
 
@@ -176,10 +185,11 @@ These maps are navigation and semantic correlation layers. They must preserve th
 
 1. Read this file.
 2. Read `docs/README.md`.
-3. If the task is meaningful HiveMap work and HiveMind is available, run the required HiveMind operational flow in this file before making substantive changes.
-4. Read the relevant docs/specs.
-5. Inspect existing code or POC evidence before changing behavior.
-6. Identify the affected SSOT.
+3. Read `docs/ENGINEERING_RULES.md` for production implementation work.
+4. If the task is meaningful HiveMap work and HiveMind is available, run the required HiveMind operational flow in this file before making substantive changes.
+5. Read the relevant docs/specs.
+6. Inspect existing code or POC evidence before changing behavior.
+7. Identify the affected SSOT and module responsibility before editing.
 
 ## Repository Scans
 
@@ -190,6 +200,7 @@ Operational scan execution must also follow `docs/ai/REPOSITORY_SCAN_WORKFLOW.md
 ## Before Final Response Or Commit
 
 - Run relevant checks from `docs/ai/COMMANDS.md`.
+- Apply `docs/ENGINEERING_RULES.md` to every materially changed production file.
 - Apply `docs/ai/REVIEW_CHECKS.md`.
 - Apply `docs/ai/JESTER_CHECKS.md` for architecture, storage, API, async, or agent-mediated flows.
 - Update docs/specs with behavior or contract changes.

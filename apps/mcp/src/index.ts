@@ -1,7 +1,11 @@
+/**
+ * Responsibility: Validate MCP tool names/arguments and dispatch them to typed runtime commands.
+ * Must not: Own transport lifecycle, persist state, or reimplement graph and scan semantics.
+ * Contract: Every declared tool returns one explicit success/failure envelope from the shared runtime.
+ */
 import type {
   McpToolName,
   McpToolRequestMap,
-  BackfillConceptEmbeddingsResponse,
   BuildScanBoundaryMapResponse,
   ExecuteRepositoryIndexResponse,
   GetScanProfileOverlayHelpResponse,
@@ -32,7 +36,6 @@ import type {
   ListScanRunsResponse,
   RecordScanCalibrationDecisionResponse,
   RecordScanCoverageResponse,
-  RefreshConceptEmbeddingResponse,
   StartScanResponse,
   UpdateFindingResponse,
   UpsertConceptEmbeddingResponse,
@@ -40,6 +43,9 @@ import type {
 } from "@hivemap/api-contracts";
 import { HiveMapRuntime, RuntimeError } from "@hivemap/runtime";
 import { StorageError } from "@hivemap/storage";
+import { McpToolValidationError } from "./tool-validation-error.js";
+
+export { McpToolValidationError } from "./tool-validation-error.js";
 
 export type { McpToolName } from "@hivemap/api-contracts";
 
@@ -59,8 +65,6 @@ export const HIVEMAP_MCP_TOOL_NAMES: readonly McpToolName[] = [
   "scan_profile_overlay_help",
   "scan_profile_overlay_suggest",
   "concept_embedding_upsert",
-  "concept_embedding_refresh",
-  "concept_embedding_backfill",
   "concept_similar_list",
   "graph_command",
   "category_assign",
@@ -100,8 +104,6 @@ export type McpToolResponseMap = {
   scan_profile_overlay_help: GetScanProfileOverlayHelpResponse;
   scan_profile_overlay_suggest: SuggestScanProfileOverlayResponse;
   concept_embedding_upsert: UpsertConceptEmbeddingResponse;
-  concept_embedding_refresh: RefreshConceptEmbeddingResponse;
-  concept_embedding_backfill: BackfillConceptEmbeddingsResponse;
   concept_similar_list: ListSimilarConceptsResponse;
   graph_command: ApplyGraphCommandsResponse;
   category_assign: AssignCategoryResponse;
@@ -142,13 +144,6 @@ export type McpToolFailure = {
 };
 
 export type McpToolResult<T extends McpToolName> = McpToolSuccess<T> | McpToolFailure;
-
-export class McpToolValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "McpToolValidationError";
-  }
-}
 
 export async function handleMcpTool<T extends McpToolName>(
   runtime: HiveMapRuntime,
@@ -215,10 +210,6 @@ async function dispatchMcpTool<T extends McpToolName>(
       )) as McpToolResponseMap[T];
     case "concept_embedding_upsert":
       return (await runtime.upsertConceptEmbedding(request as McpToolRequestMap["concept_embedding_upsert"])) as McpToolResponseMap[T];
-    case "concept_embedding_refresh":
-      return (await runtime.refreshConceptEmbedding(request as McpToolRequestMap["concept_embedding_refresh"])) as McpToolResponseMap[T];
-    case "concept_embedding_backfill":
-      return (await runtime.backfillConceptEmbeddings(request as McpToolRequestMap["concept_embedding_backfill"])) as McpToolResponseMap[T];
     case "concept_similar_list":
       return (await runtime.listSimilarConcepts(request as McpToolRequestMap["concept_similar_list"])) as McpToolResponseMap[T];
     case "graph_command":

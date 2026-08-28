@@ -16,5 +16,7 @@ deployment:
     upgrade:
       playbook: ansible/upgrade.yml
 requirements:
+  secrets:
+    - hivemap-auth-token
   environment:
     - HIVEMAP_IMAGE

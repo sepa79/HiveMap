@@ -74,16 +74,16 @@ No implicit coupling.
 
 Near-term engineering direction is:
 
-1. move the runtime backend to Postgres,
-2. prove one self-contained local runtime container in Docker,
+1. run the runtime backend on Postgres,
+2. package one self-contained local runtime container,
 3. validate that runtime through HiveForge,
-4. only then add hosted MCP follow-up work.
+4. expose protected stateless Streamable HTTP MCP from the same HTTP runtime.
 
 ZIP export/import remains the canonical migration and portability boundary between runtime backends. HiveMap should not carry SQLite forward as a supported 1.0 runtime backend.
 
 `pgvector` remains part of the target backend direction, but embedding generation and vector-powered product behavior are a deferred workstream rather than a blocker for the base runtime/container slice.
 
-For local operation, the intended user experience is one container that bundles HiveMap, Postgres, plugins, and local model-serving dependencies. Optional persistence may come from a mounted filesystem path for Postgres data, but the default local workflow should not require separate database URLs, database file paths, or multi-service manual wiring.
+For local operation, the intended user experience is one container that bundles the HiveMap REST API, stateless Streamable HTTP MCP endpoint, built web assets, Postgres, and the built-in repository indexing and scan handlers. REST and MCP share one process-owned runtime/store and one required bearer token. UI assets and health are public; semantic operations are protected. Those handlers are application capabilities, not a runtime plugin system. Optional persistence may come from a mounted filesystem path for Postgres data, but the default local workflow should not require separate database URLs, database file paths, or multi-service manual wiring. Model-serving and provider-backed embedding generation are deferred from this base runtime.
 
 ZIP export should remain a normal download flow.
 
@@ -92,7 +92,6 @@ Local `stdio` MCP is not part of the target runtime shape for this slice.
 ## Open Architecture Questions
 
 - How should the Postgres runtime handle whole-workspace read/modify/write semantics without hidden concurrency loss?
-- Should hosted MCP live inside the main HTTP runtime or behind a separate boundary after the containerized slice is proven?
 - How should category assignment provenance be represented?
 - What is the minimal projection schema for overview and dive-in views?
 - How should agent proposals be reviewed before graph mutation?

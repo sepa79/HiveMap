@@ -46,6 +46,11 @@ The SQL below is the target Postgres schema contract. The current SQLite alpha i
 - No hidden migration/fallback paths.
 - SQLite is not a parallel supported runtime backend for 1.0.
 - Storage initialization must create the schema explicitly.
+- Every runtime store adapter exposes an explicit live connection probe. The
+  Postgres adapter executes a real query; an idle pooled-connection failure is
+  retained for the readiness boundary instead of terminating the HTTP process.
+  The next successful probe restores readiness without switching backends or
+  inventing state.
 - Unknown schema versions are invalid.
 - Snapshots are not part of the current HiveMap runtime contract.
 - Use portable ZIP export/import for frozen evidence until a separate read-only clone contract exists.
@@ -62,16 +67,18 @@ The SQL below is the target Postgres schema contract. The current SQLite alpha i
 - `pgvector` is part of the runtime schema for vector-assisted read models.
 - Embeddings are runtime-derived suggestion state, not semantic source of truth.
 - The first vector slice stores explicit `concept` embeddings only.
-- Embedding refresh is explicit. HiveMap does not silently regenerate embeddings on graph mutation in this slice.
+- Embedding writes require an explicit caller-supplied vector. HiveMap does not generate or silently regenerate embeddings on graph mutation in this slice.
 - ZIP export/import does not include embeddings in this slice; they are regenerable runtime state.
 - The semantic graph remains the source of truth for findings. A finding is stored as a graph node with `type = 'finding'`, plus validated finding metadata inside `nodes.metadata`.
 - Scan comparisons are derived from completed scan runs and finding evidence. They do not get a dedicated runtime table.
 
 ## Target Postgres Schema Version
 
-The target Postgres runtime schema version is `13`.
+The target Postgres runtime schema version is `16`.
 
 The current SQLite alpha implementation uses schema version `4` and remains legacy import evidence only, not the ZIP compatibility contract for the Postgres runtime.
+
+`scan_profiles.profile_recipe` stores only the allowlisted, typed, profile-specific evidence recipe arrays defined by `ScanProfile` (for example duplicate-authority and missing-owner patterns). Reads reject unknown keys before hydrating a profile, so JSON data cannot override core identity, scope, criteria, ordering, or required outputs from their explicit columns. Schema 16 closes the prior Postgres round-trip gap where those recipe fields were discarded and a freshly created workspace then failed validation on its first mutation.
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -330,6 +337,7 @@ CREATE TABLE scan_profiles (
   scope_exclude TEXT[] NOT NULL,
   source_types TEXT[] NOT NULL,
   criteria JSONB NOT NULL,
+  profile_recipe JSONB NOT NULL,
   ssot_order TEXT[] NOT NULL,
   required_outputs scan_required_output[] NOT NULL,
   PRIMARY KEY (workspace_id, id, version),
@@ -344,7 +352,8 @@ CREATE TABLE scan_profiles (
   CHECK (cardinality(scope_include) > 0),
   CHECK (cardinality(source_types) > 0),
   CHECK (cardinality(required_outputs) > 0),
-  CHECK (jsonb_typeof(criteria) = 'array')
+  CHECK (jsonb_typeof(criteria) = 'array'),
+  CHECK (jsonb_typeof(profile_recipe) = 'object')
 );
 
 CREATE TABLE scan_runs (
@@ -667,11 +676,10 @@ The implementation target for that slice is:
 
 - `node_embeddings` stores one explicit embedding row per `workspace_id`, `node_id`, and `model`.
 - The first vector slice is bounded to `concept` nodes only.
-- Provider-backed refresh/backfill operations use canonical `model` refs in `provider:model` form such as `ollama:nomic-embed-text`.
-- Low-level manual embedding upsert remains available for tests or controlled import/reference flows, but provider-backed generation is the intended runtime path.
+- Caller-supplied embedding upsert is the only active vector write path. `model` is an opaque, stable identifier chosen by the caller and must match between the source vector and a similarity query.
 - `content_digest` tracks the exact node text shape the embedding was computed from so stale embeddings can be rejected explicitly.
-- The runtime computes concept embedding text from semantic concept content only; provider-backed generation must not read projection/layout state.
-- Explicit refresh and backfill fail clearly when the requested provider prefix is not configured in the running process.
+- The runtime computes the digest from semantic concept content only; projection and layout state do not affect vector freshness.
+- Provider-backed generation and workspace backfill are deferred. The removed experiment is archived under `archive/deferred-ollama-embedding-provider/` and is not part of this contract.
 - The first similarity query is bounded to one workspace, one source concept node, and one model.
 - The first similarity query uses exact cosine similarity ordering and returns read-only suggestions only.
 - Approximate nearest-neighbor indexing is intentionally deferred until model and dimension strategy are stable enough to justify model-specific partial indexes.
@@ -680,7 +688,7 @@ The implementation target for that slice is:
 - Repository file/chunk/symbol retrieval tables are also intentionally omitted from the canonical ZIP portability contract in this slice.
 - A future completed-index portability slice may include bounded retrieval-ready embedding payloads or may regenerate them on import, but that decision is still open.
 
-This keeps vector suggestions useful without making them semantic truth or coupling the portability contract to one embedding provider.
+This keeps vector suggestions useful without making them semantic truth or coupling the runtime or portability contract to embedding generation.
 
 ## Portable ZIP
 

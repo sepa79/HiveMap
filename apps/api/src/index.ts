@@ -1,10 +1,12 @@
-import { readFile } from "node:fs/promises";
+/**
+ * Responsibility: Route authenticated REST and MCP requests into one shared HiveMapRuntime.
+ * Must not: Reimplement domain semantics, persist state directly, or own process configuration.
+ * Contract: All protected transports delegate to the same runtime instance and explicit boundary helpers.
+ */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { extname, join, normalize, resolve } from "node:path";
 
 import {
   type ApplyGraphCommandsRequest,
-  type BackfillConceptEmbeddingsRequest,
   type ListSimilarConceptsRequest,
   type CreateProjectionRequest,
   type CreateProposalRequest,
@@ -12,7 +14,6 @@ import {
   type ExecuteRepositoryIndexRequest,
   type GetRepositoryIndexRequest,
   type RecordFeedbackRequest,
-  type RefreshConceptEmbeddingRequest,
   type CompleteScanRequest,
   type CreateScanFindingRequest,
   type ExportWorkspaceRequest,
@@ -28,13 +29,33 @@ import {
   type UpdateFindingRequest,
   type ValidateScanFindingRequest,
 } from "@hivemap/api-contracts";
-import { HiveMapRuntime, RuntimeError, type EmbeddingProviderRegistry, type RepositoryIndexExecutor } from "@hivemap/runtime";
-import { StorageError, type HiveMapStore } from "@hivemap/storage";
+import { handleHiveMapMcpHttpRequest } from "@hivemap/mcp/http";
+import { HiveMapRuntime, type RepositoryIndexExecutor } from "@hivemap/runtime";
+import type { HiveMapStore } from "@hivemap/storage";
+
+import {
+  ApiHttpError,
+  parseOptionalNumber,
+  parseOptionalPositiveInteger,
+  parseRequiredPositiveInteger,
+  parseUrl,
+  readBytes,
+  readJson,
+  requireQueryParam,
+  safeFilename,
+  writeEmpty,
+  writeError,
+  writeJson,
+  writeStatic,
+  writeZip,
+} from "./http-boundary.js";
+import { readStorageReadiness } from "./storage-readiness.js";
+import { isPublicUiRequest, readStaticFile } from "./static-assets.js";
 
 export type ApiServerOptions = {
   store: HiveMapStore;
+  authToken: string;
   staticRoot?: string;
-  embeddingProviders?: EmbeddingProviderRegistry;
   repositoryIndexExecutor?: RepositoryIndexExecutor;
 };
 
@@ -45,18 +66,22 @@ export function createApiServer(options: ApiServerOptions): Server {
 }
 
 export function createApiRequestHandler(options: ApiServerOptions): ApiRequestHandler {
+  if (options.authToken.trim().length === 0) {
+    throw new Error("HiveMap API requires a non-empty auth token");
+  }
   const runtime = new HiveMapRuntime({
     store: options.store,
-    ...(options.embeddingProviders === undefined ? {} : { embeddingProviders: options.embeddingProviders }),
     ...(options.repositoryIndexExecutor === undefined ? {} : { repositoryIndexExecutor: options.repositoryIndexExecutor }),
   });
   return (request, response) => {
-    void handleRequest(runtime, options.staticRoot, request, response);
+    void handleRequest(runtime, options.store, options.authToken, options.staticRoot, request, response);
   };
 }
 
 async function handleRequest(
   runtime: HiveMapRuntime,
+  store: HiveMapStore,
+  authToken: string,
   staticRoot: string | undefined,
   request: IncomingMessage,
   response: ServerResponse,
@@ -69,6 +94,28 @@ async function handleRequest(
 
     if (method === "OPTIONS") {
       writeEmpty(response, 204);
+      return;
+    }
+
+    if (method === "GET" && pathname === "/health") {
+      const readiness = await readStorageReadiness(store);
+      if (readiness.status === "unavailable") {
+        writeStorageUnavailable(response);
+        return;
+      }
+      writeJson(response, 200, readiness);
+      return;
+    }
+
+    if (!isPublicUiRequest(method, pathname) && request.headers.authorization !== `Bearer ${authToken}`) {
+      writeJson(response, 401, { error: { code: "UNAUTHORIZED", message: "Unauthorized" } });
+      return;
+    }
+
+    if (pathname === "/mcp") {
+      response.setHeader("access-control-allow-origin", "*");
+      response.setHeader("access-control-expose-headers", "mcp-session-id");
+      await handleHiveMapMcpHttpRequest(runtime, request, response);
       return;
     }
 
@@ -213,24 +260,6 @@ async function handleRequest(
     ) {
       const body = await readJson<{ embedding: UpsertConceptEmbeddingRequest["embedding"] }>(request);
       writeJson(response, 201, await runtime.upsertConceptEmbedding({ workspaceId, nodeId: segments[3], embedding: body.embedding }));
-      return;
-    }
-
-    if (
-      method === "POST" &&
-      segments[2] === "concepts" &&
-      segments[3] !== undefined &&
-      segments[4] === "embedding-refresh" &&
-      segments.length === 5
-    ) {
-      const body = await readJson<Omit<RefreshConceptEmbeddingRequest, "workspaceId" | "nodeId">>(request);
-      writeJson(response, 200, await runtime.refreshConceptEmbedding({ workspaceId, nodeId: segments[3], ...body }));
-      return;
-    }
-
-    if (method === "POST" && segments[2] === "concept-embeddings" && segments[3] === "backfill" && segments.length === 4) {
-      const body = await readJson<Omit<BackfillConceptEmbeddingsRequest, "workspaceId">>(request);
-      writeJson(response, 200, await runtime.backfillConceptEmbeddings({ workspaceId, ...body }));
       return;
     }
 
@@ -475,262 +504,20 @@ async function handleRequest(
 
     throw new ApiHttpError(404, "ROUTE_NOT_FOUND", `Unknown route: ${method ?? "UNKNOWN"} ${pathname}`);
   } catch (error) {
+    const readiness = await readStorageReadiness(store);
+    if (readiness.status === "unavailable") {
+      writeStorageUnavailable(response);
+      return;
+    }
     writeError(response, error);
   }
 }
 
-async function readStaticFile(
-  staticRoot: string,
-  pathname: string,
-): Promise<{ contentType: string; bytes: Uint8Array } | undefined> {
-  const normalizedPath = pathname === "/" ? "/index.html" : pathname;
-  const candidatePath = resolveStaticPath(staticRoot, normalizedPath);
-  if (candidatePath === undefined) {
-    throw new ApiHttpError(400, "INVALID_STATIC_PATH", `Unsafe static path: ${pathname}`);
-  }
-
-  const directFile = await tryReadFile(candidatePath);
-  if (directFile !== undefined) {
-    return { contentType: contentTypeForPath(candidatePath), bytes: directFile };
-  }
-
-  if (!hasFileExtension(normalizedPath)) {
-    const indexPath = resolve(staticRoot, "index.html");
-    const indexFile = await tryReadFile(indexPath);
-    if (indexFile !== undefined) {
-      return { contentType: "text/html; charset=utf-8", bytes: indexFile };
-    }
-  }
-
-  return undefined;
-}
-
-function resolveStaticPath(staticRoot: string, pathname: string): string | undefined {
-  const safePath = pathname.replace(/^\/+/, "");
-  const candidate = resolve(staticRoot, normalize(safePath));
-  const root = resolve(staticRoot);
-  if (candidate === root || candidate.startsWith(`${root}/`)) {
-    return candidate;
-  }
-  return undefined;
-}
-
-async function tryReadFile(path: string): Promise<Uint8Array | undefined> {
-  try {
-    return await readFile(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return undefined;
-    }
-    throw error;
-  }
-}
-
-function hasFileExtension(path: string): boolean {
-  return extname(path).length > 0;
-}
-
-function contentTypeForPath(path: string): string {
-  switch (extname(path)) {
-    case ".html":
-      return "text/html; charset=utf-8";
-    case ".js":
-      return "application/javascript; charset=utf-8";
-    case ".css":
-      return "text/css; charset=utf-8";
-    case ".json":
-      return "application/json; charset=utf-8";
-    case ".svg":
-      return "image/svg+xml";
-    case ".png":
-      return "image/png";
-    case ".jpg":
-    case ".jpeg":
-      return "image/jpeg";
-    case ".ico":
-      return "image/x-icon";
-    default:
-      return "application/octet-stream";
-  }
-}
-
-function parseUrl(request: IncomingMessage): URL {
-  if (request.url === undefined) {
-    throw new ApiHttpError(400, "MISSING_URL", "Request URL is required");
-  }
-
-  return new URL(request.url, "http://localhost");
-}
-
-function requireQueryParam(url: URL, key: string): string {
-  const value = url.searchParams.get(key);
-  if (value === null || value.trim().length === 0) {
-    throw new ApiHttpError(400, "MISSING_QUERY_PARAM", `Query parameter is required: ${key}`);
-  }
-  return value;
-}
-
-function parseOptionalPositiveInteger(value: string | null, fieldName: string): number | undefined {
-  if (value === null) {
-    return undefined;
-  }
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new ApiHttpError(400, "INVALID_QUERY_PARAM", `${fieldName} must be a positive integer`);
-  }
-  return parsed;
-}
-
-function parseRequiredPositiveInteger(value: string | null, fieldName: string): number {
-  if (value === null) {
-    throw new ApiHttpError(400, "MISSING_QUERY_PARAM", `Query parameter is required: ${fieldName}`);
-  }
-  return parseOptionalPositiveInteger(value, fieldName) as number;
-}
-
-function parseOptionalNumber(value: string | null, fieldName: string): number | undefined {
-  if (value === null) {
-    return undefined;
-  }
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) {
-    throw new ApiHttpError(400, "INVALID_QUERY_PARAM", `${fieldName} must be a finite number`);
-  }
-  return parsed;
-}
-
-async function readBytes(request: IncomingMessage): Promise<Uint8Array> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  const bytes = Buffer.concat(chunks);
-  if (bytes.byteLength === 0) throw new ApiHttpError(400, "EMPTY_BODY", "ZIP request body is required");
-  return bytes;
-}
-
-async function readJson<T>(request: IncomingMessage): Promise<T> {
-  const chunks: Buffer[] = [];
-
-  for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-
-  const text = Buffer.concat(chunks).toString("utf8");
-  if (text.trim().length === 0) {
-    throw new ApiHttpError(400, "EMPTY_BODY", "JSON request body is required");
-  }
-
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    throw new ApiHttpError(400, "INVALID_JSON", "Request body must be valid JSON");
-  }
-}
-
-function writeJson(response: ServerResponse, statusCode: number, body: unknown): void {
-  response.writeHead(statusCode, {
-    "access-control-allow-headers": "content-type",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-origin": "*",
-    "content-type": "application/json",
+function writeStorageUnavailable(response: ServerResponse): void {
+  writeJson(response, 503, {
+    error: {
+      code: "STORAGE_UNAVAILABLE",
+      message: "HiveMap storage is unavailable",
+    },
   });
-  response.end(JSON.stringify(body));
-}
-
-function writeEmpty(response: ServerResponse, statusCode: number): void {
-  response.writeHead(statusCode, {
-    "access-control-allow-headers": "content-type",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-origin": "*",
-  });
-  response.end();
-}
-
-function writeZip(response: ServerResponse, bytes: Uint8Array, filename: string): void {
-  response.writeHead(200, {
-    "access-control-allow-origin": "*",
-    "content-disposition": `attachment; filename="${filename}"`,
-    "content-length": bytes.byteLength,
-    "content-type": "application/zip",
-  });
-  response.end(Buffer.from(bytes));
-}
-
-function writeStatic(response: ServerResponse, contentType: string, bytes: Uint8Array): void {
-  response.writeHead(200, {
-    "access-control-allow-origin": "*",
-    "content-length": bytes.byteLength,
-    "content-type": contentType,
-  });
-  response.end(Buffer.from(bytes));
-}
-
-function safeFilename(value: string): string {
-  return value.replace(/[^a-zA-Z0-9._-]/g, "-");
-}
-
-function writeError(response: ServerResponse, error: unknown): void {
-  if (error instanceof ApiHttpError) {
-    writeJson(response, error.statusCode, { error: { code: error.code, message: error.message } });
-    return;
-  }
-
-  if (error instanceof StorageError) {
-    writeJson(response, 404, { error: { code: "STORAGE_ERROR", message: error.message } });
-    return;
-  }
-
-  if (error instanceof RuntimeError) {
-    writeJson(response, mapRuntimeErrorStatus(error), { error: { code: error.code, message: error.message, details: error.details } });
-    return;
-  }
-
-  if (error instanceof Error) {
-    writeJson(response, 400, { error: { code: error.name, message: error.message } });
-    return;
-  }
-
-  writeJson(response, 500, { error: { code: "UNKNOWN_ERROR", message: "Unknown API error" } });
-}
-
-function mapRuntimeErrorStatus(error: RuntimeError): number {
-  switch (error.code) {
-    case "NODE_NOT_FOUND":
-    case "SIMILARITY_NODE_NOT_FOUND":
-    case "EMBEDDING_CONCEPT_NODE_NOT_FOUND":
-    case "SCAN_CRITERION_NOT_FOUND":
-    case "CONCEPT_EMBEDDING_MISSING":
-      return 404;
-    case "REPOSITORY_INDEX_EXISTS":
-    case "REPOSITORY_INDEX_ALREADY_RUNNING":
-    case "REPOSITORY_INDEX_NOT_COMPLETED":
-    case "SCAN_CALIBRATION_DECISION_REQUIRED":
-    case "SCAN_CALIBRATION_NOT_READY":
-    case "SCAN_COVERAGE_REQUIRED":
-    case "SCAN_REPOSITORY_INDEX_REQUIRED":
-    case "CONCEPT_EMBEDDING_STALE":
-      return 409;
-    case "REPOSITORY_INDEX_MODE_UNAVAILABLE":
-    case "EMBEDDING_MODEL_REF_INVALID":
-    case "OLLAMA_BASE_URL_INVALID":
-    case "OLLAMA_MODEL_INVALID":
-    case "OLLAMA_INPUTS_EMPTY":
-    case "SCAN_PROFILE_OVERLAY_INVALID":
-    case "UNSUPPORTED_EMBEDDING_NODE_TYPE":
-    case "UNSUPPORTED_SIMILARITY_NODE_TYPE":
-      return 400;
-    default:
-      return 500;
-  }
-}
-
-class ApiHttpError extends Error {
-  readonly statusCode: number;
-  readonly code: string;
-
-  constructor(statusCode: number, code: string, message: string) {
-    super(message);
-    this.name = "ApiHttpError";
-    this.statusCode = statusCode;
-    this.code = code;
-  }
 }

@@ -35,17 +35,38 @@ When HiveMind is available, treat it as required workflow support for meaningful
 ## Workflow
 
 1. Resolve the HiveMind project first. Do not guess the project id when `project_resolve` can confirm it.
-2. Read `rules_get` and `context_get_project_brief` before substantive work so project rules, recent decisions, and open threads are visible.
+2. Read `rules_get` before substantive work so the active enforceable rules are visible.
 3. Open `session_start` for the work unit and `context_open` for the active feature.
-4. Search recent learnings or entries when touching capture, projection, categories, storage, runtime, scans, or MCP/API.
-5. Record durable outcomes with the right entry type:
+4. Read `context_get_project_brief` through the feature-scoped context token.
+5. Search recent learnings or entries when touching capture, projection, categories, storage, runtime, scans, or MCP/API.
+6. Record durable outcomes with the right entry type:
    - `decision` for settled direction,
    - `progress` for meaningful completed milestones,
    - `feedback` for user/testing friction,
    - `risk` for unresolved concerns,
    - `tooling_note` for workflow behavior worth repeating or avoiding.
-6. Link relevant repo files, specs, commands, or exported workspace artifacts.
-7. Close the active context after the work unit. Do not rely on long-lived dangling context tokens.
+7. Link relevant repo files, specs, commands, or exported workspace artifacts.
+8. Close the active context after the work unit. Do not rely on long-lived dangling context tokens.
+
+## Active Project Ruleset
+
+The active HiveMind ruleset is the short, enforceable projection of repository
+governance. The canonical implementation detail remains in `AGENTS.md` and
+`docs/ENGINEERING_RULES.md`.
+
+The ruleset must retain checks for:
+
+- correct HiveMind bootstrap and context hygiene,
+- a durable HiveMind outcome for meaningful work,
+- docs and typed contracts updated with durable behavior,
+- strict module separation and required responsibility headers,
+- semantic graph authority preserved across projections, UI, transports, and storage,
+- explicit inward dependency direction and boundary-owned side effects,
+- verification evidence that exercises the changed surface.
+
+Do not copy the full engineering checklist into HiveMind. Keep stable,
+project-wide invariants in the ruleset and contextual review detail in
+`docs/ENGINEERING_RULES.md` plus `docs/ai/REVIEW_CHECKS.md`.
 
 ## Required Tool Sequence
 
@@ -53,9 +74,9 @@ For meaningful HiveMap development work, the default sequence is:
 
 1. `project_resolve`
 2. `rules_get`
-3. `context_get_project_brief`
-4. `session_start`
-5. `context_open`
+3. `session_start`
+4. `context_open`
+5. `context_get_project_brief`
 6. `learning_get_recent` and/or `entry_search`
 7. implementation work
 8. durable HiveMind write

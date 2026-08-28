@@ -25,12 +25,12 @@ HiveMap turns intentional human/agent collaboration into a persistent semantic g
 
 ## System overview
 
-The runtime shape is local-first:
+The installed runtime shape is single-process at the HTTP boundary:
 
 ```text
-human -> web UI or built web served by API -> REST API \
-                                             -> shared runtime -> Postgres store -> ZIP export/import
-agent -> temporary MCP stdio adapter ------/
+human -> built web served by API -> bearer-protected REST API \
+agent -> bearer-protected Streamable HTTP MCP ----------------> shared runtime -> Postgres store -> ZIP export/import
+agent -> transitional local MCP stdio adapter ----------------/
 
 shared runtime -> graph core
 shared runtime -> projections
@@ -42,11 +42,11 @@ shared runtime -> scan validation/evidence
 
 | Component | Responsibility | Notes |
 |---|---|---|
-| `apps/web` | Render projections and collect feedback/proposal intent | React/React Flow UI |
-| `apps/api` | Local browser/test boundary | Uses the same runtime handlers as MCP |
-| `apps/mcp` | Agent-facing tool boundary | Transitional stdio adapter during runtime migration |
-| `packages/runtime` | Shared service layer | Owns orchestration, not transport |
-| `packages/storage` | Postgres runtime store, test in-memory store, and ZIP bundle persistence | Runtime persistence is Postgres-only |
+| `apps/web` | Render projections and collect feedback/proposal intent | Auth-token lifecycle, projection navigation/styles, and the workspace screen have separate owners |
+| `apps/api` | Local browser/test boundary | Routing, boundary parsing, static assets, process config, and shutdown are separate modules over the same runtime as MCP |
+| `apps/mcp` | Agent-facing tool boundary | Tool dispatch, SDK registration, Streamable HTTP, and transitional stdio are separate adapters |
+| `packages/runtime` | Shared service layer | Command orchestration delegates scan-profile coordination and evidence selection to focused modules |
+| `packages/storage` | Postgres runtime store, test in-memory store, and ZIP bundle persistence | Contracts, adapters, shared validation, SQL, and public exports have separate owners; runtime persistence is Postgres-only |
 | `packages/scans` | Versioned scan profiles, evidence, findings, comparisons | Agent-executed workflow validation |
 
 ## Boundaries
@@ -84,14 +84,14 @@ Canonical contracts live under `docs/specs/`. The most important ones today are:
 
 ## Runtime / deployment
 
-Current runtime direction in code is local single-user Node.js on Postgres:
+Current runtime direction in code is single-operator Node.js on Postgres:
 
-- API on `127.0.0.1:8787`
-- web dev server on `127.0.0.1:5175`, or built web assets served by the API on the same port
-- MCP stdio only as a temporary adapter
-- one shared Postgres database selected through `HIVEMAP_POSTGRES_URL`
+- direct development API on `127.0.0.1:8787`; container profiles publish port `8787`
+- built web assets and public health on the same HTTP process
+- bearer-protected REST plus stateless Streamable HTTP MCP at `/mcp`
+- one shared Postgres store; stdio remains only a temporary adapter
 
-Hosted/containerized and Streamable HTTP MCP shapes are still future work, but the repository no longer treats SQLite as the primary runtime path.
+The container owns its internal Postgres connection and requires `HIVEMAP_AUTH_TOKEN` before startup.
 
 ## Observability
 
@@ -100,17 +100,15 @@ Hosted/containerized and Streamable HTTP MCP shapes are still future work, but t
 - scan completion validates coverage, criteria, and declared outputs
 - exported bundles preserve evidence and repeat-scan instructions
 
-There is no mature metrics/auth/ops stack yet.
+There is no mature metrics, identity, role, or multi-tenant ops stack yet.
 
 ## Failure modes
 
-- API and MCP pointing at different Postgres databases creates apparent state drift.
-- Exposing the current API beyond localhost is unsafe because auth is absent.
+- REST and installed MCP share one runtime/store; the legacy stdio adapter can still create apparent state drift if pointed at another database.
+- Treating the shared bearer token as multi-user authorization would overstate the security boundary.
 - Incomplete scan coverage or missing declared outputs must fail completion.
 - Treating POC artifacts as 1.0 SSOT creates architectural drift.
 
 ## Open architecture questions
 
-- which post-SQLite storage backend should support hosted/containerized deployments
-- whether Streamable HTTP MCP should be embedded into one runtime process or split from REST
 - how to link HiveMind decisions/learnings to HiveMap workspaces without implicit coupling

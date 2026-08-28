@@ -26,6 +26,7 @@ Design HiveMap 1.0 around:
 ## Canonical Docs
 
 - `../AGENTS.md`: contributor rules and SSOT order.
+- `ENGINEERING_RULES.md`: mandatory implementation boundaries, file shape, responsibility headers, and verification rules.
 - `architecture.md`: system shape and module boundaries.
 - `product/vision.md`: product intent and capture model.
 - `design/first-pass-design.md`: first-pass design based on POC learnings.
@@ -34,6 +35,7 @@ Design HiveMap 1.0 around:
 - `design/mvp-slice.md`: first implementation slice.
 - `design/postgres-container-hiveforge-plan.md`: tracked delivery plan for the Postgres, container, and HiveForge upgrade path.
 - `specs/`: contracts that implementation must follow.
+- `evidence/`: bounded visual and interaction-review artifacts for changed UI behavior.
 - `ai/`: command, review, Jester, and HiveMind workflow rules.
 - `ai/KNOWLEDGE_MAP_WORKFLOW.md`: repeatable workflow for correlating concepts with docs, code, tests, assets, and HiveMind.
 - `specs/repository-scan.md`: repeatable agent scans, finding evidence, before/after comparison, and portable ZIP bundles.

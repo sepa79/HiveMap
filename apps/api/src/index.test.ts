@@ -1,14 +1,13 @@
-import { mkdtempSync, rmSync } from "node:fs";
 import type { IncomingHttpHeaders, ServerResponse } from "node:http";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { Readable } from "node:stream";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { type EmbeddingProvider, type RepositoryIndexExecutor } from "@hivemap/runtime";
+import { type RepositoryIndexExecutor } from "@hivemap/runtime";
 import { InMemoryHiveMapStore } from "@hivemap/storage";
 
-import { createApiRequestHandler, type ApiRequestHandler } from "./index.js";
+import { createApiRequestHandler, createApiServer, type ApiRequestHandler } from "./index.js";
 
 let store: InMemoryHiveMapStore;
 let handleRequest: ApiRequestHandler;
@@ -18,16 +17,150 @@ beforeEach(async () => {
   await store.initialize();
   handleRequest = createApiRequestHandler({
     store,
-    embeddingProviders: { test: createTestEmbeddingProvider() },
+    authToken: "test-token",
     repositoryIndexExecutor: createTestRepositoryIndexExecutor(),
   });
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await store.close();
 });
 
 describe("api server", () => {
+  it("keeps health public and protects REST and MCP with the same bearer token", async () => {
+    const connectionProbe = vi.spyOn(store, "checkConnection");
+    const healthResponse = await request(handleRequest, "/health", { headers: { authorization: "" } });
+    expect(healthResponse.status).toBe(200);
+    expect(parseJson(healthResponse)).toEqual({ status: "ok" });
+    expect(connectionProbe).toHaveBeenCalledOnce();
+
+    const restResponse = await request(handleRequest, "/workspaces", { headers: { authorization: "" } });
+    expect(restResponse.status).toBe(401);
+    expect(parseJson(restResponse)).toEqual({ error: { code: "UNAUTHORIZED", message: "Unauthorized" } });
+
+    const mcpResponse = await request(handleRequest, "/mcp", {
+      method: "POST",
+      headers: { authorization: "Bearer wrong-token", "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
+    });
+    expect(mcpResponse.status).toBe(401);
+  });
+
+  it("returns a sanitized 503 when storage is unavailable", async () => {
+    const infrastructureError = new Error("connect ECONNREFUSED postgres://operator:secret@database:5432/hivemap");
+    vi.spyOn(store, "checkConnection").mockRejectedValue(infrastructureError);
+    vi.spyOn(store, "listWorkspaces").mockRejectedValue(infrastructureError);
+
+    const healthResponse = await request(handleRequest, "/health", { headers: { authorization: "" } });
+    expect(healthResponse.status).toBe(503);
+    expect(parseJson(healthResponse)).toEqual({
+      error: {
+        code: "STORAGE_UNAVAILABLE",
+        message: "HiveMap storage is unavailable",
+      },
+    });
+    expect(healthResponse.body.toString("utf8")).not.toContain("ECONNREFUSED");
+    expect(healthResponse.body.toString("utf8")).not.toContain("secret");
+
+    const workspaceResponse = await request(handleRequest, "/workspaces");
+    expect(workspaceResponse.status).toBe(503);
+    expect(parseJson(workspaceResponse)).toEqual({
+      error: {
+        code: "STORAGE_UNAVAILABLE",
+        message: "HiveMap storage is unavailable",
+      },
+    });
+    expect(workspaceResponse.body.toString("utf8")).not.toContain("ECONNREFUSED");
+    expect(workspaceResponse.body.toString("utf8")).not.toContain("secret");
+  });
+
+  it("fails fast when the auth token is empty", () => {
+    expect(() => createApiRequestHandler({ store, authToken: "" })).toThrow("HiveMap API requires a non-empty auth token");
+  });
+
+  it("routes an authorized MCP initialization request through Streamable HTTP", async () => {
+    const server = createApiServer({ store, authToken: "test-token" });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") {
+      throw new Error("Expected an allocated TCP port for the API test server");
+    }
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${address.port}/mcp`, {
+        method: "POST",
+        headers: {
+          accept: "application/json, text/event-stream",
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: {
+            protocolVersion: "2025-03-26",
+            capabilities: {},
+            clientInfo: { name: "hivemap-api-test", version: "0.1.0" },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain("hivemap");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => error === undefined ? resolve() : reject(error));
+      });
+    }
+  });
+
+  it("applies an authorized MCP tool call to the state read by REST", async () => {
+    const server = createApiServer({ store, authToken: "test-token" });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") {
+      throw new Error("Expected an allocated TCP port for the API test server");
+    }
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const client = new Client({ name: "hivemap-shared-state-test", version: "0.1.0" });
+    const transport = new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`), {
+      requestInit: { headers: { authorization: "Bearer test-token" } },
+    });
+
+    try {
+      await client.connect(transport as unknown as Parameters<typeof client.connect>[0]);
+      const result = await client.callTool({
+        name: "project_create",
+        arguments: {
+          workspace: {
+            id: "mcp-workspace",
+            name: "Created over MCP",
+            createdAt: "2026-08-26T12:00:00.000Z",
+          },
+        },
+      });
+      expect(result.isError).not.toBe(true);
+
+      const response = await fetch(`${baseUrl}/workspaces/mcp-workspace`, {
+        headers: { authorization: "Bearer test-token" },
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        state: {
+          workspace: { id: "mcp-workspace", name: "Created over MCP" },
+          graph: { nodes: [], edges: [] },
+        },
+      });
+    } finally {
+      await client.close();
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => error === undefined ? resolve() : reject(error));
+      });
+    }
+  });
+
   it("creates a workspace and returns its empty graph", async () => {
     const createResponse = await postJson("/workspaces", {
       workspace: {
@@ -533,71 +666,6 @@ describe("api server", () => {
     });
   });
 
-  it("refreshes and backfills concept embeddings through REST", async () => {
-    await createWorkspaceWithNode();
-
-    await postJson("/workspaces/workspace-a/commands", {
-      commands: [
-        {
-          id: "cmd-b",
-          type: "node.create",
-          payload: { node: { id: "node-b", label: "Beta", notes: "near alpha", type: "concept" } },
-        },
-      ],
-    });
-
-    const refreshResponse = await postJson("/workspaces/workspace-a/concepts/node-a/embedding-refresh", {
-      model: "test:nomic-embed-text",
-    });
-    expect(refreshResponse.status).toBe(200);
-    expect(parseJson(refreshResponse)).toEqual({
-      embedding: {
-        workspaceId: "workspace-a",
-        nodeId: "node-a",
-        model: "test:nomic-embed-text",
-        dimensions: 2,
-        contentDigest: expect.any(String),
-        updatedAt: expect.any(String),
-      },
-      provider: "test",
-      status: "refreshed",
-    });
-
-    const backfillResponse = await postJson("/workspaces/workspace-a/concept-embeddings/backfill", {
-      model: "test:nomic-embed-text",
-    });
-    expect(backfillResponse.status).toBe(200);
-    expect(parseJson(backfillResponse)).toEqual({
-      workspaceId: "workspace-a",
-      model: "test:nomic-embed-text",
-      provider: "test",
-      summary: {
-        totalConcepts: 2,
-        selectedConcepts: 2,
-        refreshed: 1,
-        unchanged: 1,
-      },
-      results: [
-        {
-          nodeId: "node-a",
-          label: "Alpha",
-          status: "unchanged",
-          dimensions: 2,
-          contentDigest: expect.any(String),
-          updatedAt: expect.any(String),
-        },
-        {
-          nodeId: "node-b",
-          label: "Beta",
-          status: "refreshed",
-          dimensions: 2,
-          contentDigest: expect.any(String),
-          updatedAt: expect.any(String),
-        },
-      ],
-    });
-  });
-
   it("fails clearly for invalid graph commands", async () => {
     await createWorkspace();
 
@@ -851,15 +919,6 @@ async function createCompletedRepositoryIndex(): Promise<void> {
   expect(executeResponse.status).toBe(200);
 }
 
-function createTestEmbeddingProvider(): EmbeddingProvider {
-  return {
-    id: "test",
-    async embed(request) {
-      return request.inputs.map((input) => (input.includes("Alpha") ? [1, 0] : [0.9, 0.1]));
-    },
-  };
-}
-
 function createTestRepositoryIndexExecutor(): RepositoryIndexExecutor {
   return async ({ workspaceId, indexId }) => ({
     resolvedCommit: "0123456789abcdef0123456789abcdef01234567",
@@ -949,7 +1008,12 @@ async function request(
     body?: Buffer | string;
   } = {},
 ): Promise<Response> {
-  const request = new MockRequest(init.method ?? "GET", pathname, init.body);
+  const request = new MockRequest(
+    init.method ?? "GET",
+    pathname,
+    { authorization: "Bearer test-token", ...init.headers },
+    init.body,
+  );
   const response = new MockResponse();
   handleRequest(request as never, response as never);
   await response.done;
@@ -963,13 +1027,15 @@ function parseJson<T>(response: Response): T {
 class MockRequest extends Readable {
   readonly method: string;
   readonly url: string;
+  readonly headers: Record<string, string>;
   private bodySent = false;
   private readonly body: Buffer | string | undefined;
 
-  constructor(method: string, url: string, body?: Buffer | string) {
+  constructor(method: string, url: string, headers: Record<string, string>, body?: Buffer | string) {
     super();
     this.method = method;
     this.url = url;
+    this.headers = headers;
     this.body = body;
   }
 

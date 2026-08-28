@@ -1,4 +1,12 @@
-const API_BASE_URL = import.meta.env.VITE_HIVEMAP_API_URL ?? "http://127.0.0.1:8787";
+/**
+ * Responsibility: Expose the typed browser client for HiveMap REST operations.
+ * Must not: Render UI, own semantic state, or persist authentication credentials.
+ * Contract: Sends explicit REST requests and returns validated transport response shapes.
+ */
+import { getAuthToken } from "./auth-token.js";
+
+const API_BASE_URL = import.meta.env.VITE_HIVEMAP_API_URL
+  ?? (import.meta.env.DEV ? "http://127.0.0.1:8787" : window.location.origin);
 
 export type GraphNodeType =
   | "concept"
@@ -208,7 +216,7 @@ export async function getWorkspace(workspaceId: string): Promise<WorkspaceState>
 export async function downloadWorkspaceBundle(workspaceId: string, exportedAt: string): Promise<Blob> {
   const response = await fetch(`${API_BASE_URL}/workspaces/${encodeURIComponent(workspaceId)}/export-bundle`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: requestHeaders({ "content-type": "application/json" }),
     body: JSON.stringify({ exportedAt }),
   });
   if (!response.ok) throw await responseError(response);
@@ -221,7 +229,7 @@ export async function importWorkspaceBundle(
 ): Promise<WorkspaceRecord> {
   const response = await fetch(`${API_BASE_URL}/workspace-import-bundles?mode=${mode}`, {
     method: "POST",
-    headers: { "content-type": "application/zip" },
+    headers: requestHeaders({ "content-type": "application/zip" }),
     body: file,
   });
   if (!response.ok) throw await responseError(response);
@@ -368,10 +376,11 @@ export async function rejectProposal(workspaceId: string, proposalId: string): P
 async function request<T>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
   const init: RequestInit = {
     method: options.method ?? "GET",
+    headers: requestHeaders(),
   };
 
   if (options.body !== undefined) {
-    init.headers = { "content-type": "application/json" };
+    init.headers = requestHeaders({ "content-type": "application/json" });
     init.body = JSON.stringify(options.body);
   }
 
@@ -384,6 +393,13 @@ async function request<T>(path: string, options: { method?: string; body?: unkno
   }
 
   return body as T;
+}
+
+function requestHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const authToken = getAuthToken();
+  return authToken.length === 0
+    ? extra
+    : { ...extra, authorization: `Bearer ${authToken}` };
 }
 
 async function responseError(response: Response): Promise<Error> {

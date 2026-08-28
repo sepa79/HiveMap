@@ -196,8 +196,7 @@ The safe base image should provide:
 - Tree-sitter or ast-grep for robust multi-language syntax extraction;
 - a Markdown parser for headings, links, code references, and bounded chunks;
 - a local link checker for deterministic broken-reference evidence;
-- optional Semgrep execution with HiveMap-owned local rules;
-- an Ollama-compatible provider for local chunk embeddings.
+- optional Semgrep execution with HiveMap-owned local rules.
 
 This layer works without project dependency installation and provides useful partial results even when source files are incomplete or do not compile.
 
@@ -601,9 +600,9 @@ The embedding service is internal-only. During model evaluation it may support a
 - decide whether embeddings are regenerated on import or included as an optional payload;
 - preserve the boundary that job execution state is not itself the portable artifact.
 
-### Phase 5: Retrieval And Local Embeddings
+### Phase 5: Retrieval And Deferred Embeddings
 
-- reuse the existing Ollama-compatible provider;
+- select an embedding provider only through a later explicit runtime and provenance contract;
 - add content-addressed embedding reuse;
 - widen repository search beyond path/text retrieval where deterministic evidence needs it;
 - validate Java, TypeScript, and mixed-language repositories;

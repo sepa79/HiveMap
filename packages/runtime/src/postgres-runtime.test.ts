@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { PostgresHiveMapStore } from "@hivemap/storage";
 
-import { type EmbeddingProvider, HiveMapRuntime } from "./index.js";
+import { HiveMapRuntime } from "./index.js";
 
 const POSTGRES_TEST_URL = process.env.HIVEMAP_TEST_POSTGRES_URL;
 const describeIfPostgres = POSTGRES_TEST_URL === undefined ? describe.skip : describe;
@@ -18,7 +18,6 @@ describeIfPostgres("HiveMapRuntime on Postgres", () => {
     await store.initialize();
     runtime = new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       now: () => "2026-08-19T23:10:00.000Z",
     });
   });
@@ -215,99 +214,4 @@ describeIfPostgres("HiveMapRuntime on Postgres", () => {
     }
   });
 
-  it("refreshes and backfills provider-generated concept embeddings on Postgres", async () => {
-    const workspaceId = `pg-runtime-${randomUUID()}`;
-    const workspace = {
-      id: workspaceId,
-      slug: `${workspaceId}-slug`,
-      name: `Postgres Runtime Backfill ${workspaceId}`,
-      createdAt: "2026-08-19T23:05:00.000Z",
-      updatedAt: "2026-08-19T23:05:00.000Z",
-    };
-
-    try {
-      await runtime.createWorkspace({ workspace });
-      await runtime.applyGraphCommands({
-        workspaceId: workspace.id,
-        commands: [
-          {
-            id: "cmd-alpha",
-            type: "node.create",
-            payload: { node: { id: "alpha", label: "Alpha", notes: "roadmap planning", type: "concept" } },
-          },
-          {
-            id: "cmd-beta",
-            type: "node.create",
-            payload: { node: { id: "beta", label: "Beta", notes: "roadmap execution", type: "concept" } },
-          },
-        ],
-      });
-
-      await expect(
-        runtime.refreshConceptEmbedding({
-          workspaceId: workspace.id,
-          nodeId: "alpha",
-          model: "test:nomic-embed-text",
-        }),
-      ).resolves.toMatchObject({
-        provider: "test",
-        status: "refreshed",
-        embedding: {
-          workspaceId: workspace.id,
-          nodeId: "alpha",
-          model: "test:nomic-embed-text",
-          dimensions: 2,
-          updatedAt: "2026-08-19T23:10:00.000Z",
-        },
-      });
-
-      await expect(
-        runtime.backfillConceptEmbeddings({
-          workspaceId: workspace.id,
-          model: "test:nomic-embed-text",
-        }),
-      ).resolves.toEqual({
-        workspaceId: workspace.id,
-        model: "test:nomic-embed-text",
-        provider: "test",
-        summary: {
-          totalConcepts: 2,
-          selectedConcepts: 2,
-          refreshed: 1,
-          unchanged: 1,
-        },
-        results: [
-          {
-            nodeId: "alpha",
-            label: "Alpha",
-            status: "unchanged",
-            dimensions: 2,
-            contentDigest: expect.any(String),
-            updatedAt: "2026-08-19T23:10:00.000Z",
-          },
-          {
-            nodeId: "beta",
-            label: "Beta",
-            status: "refreshed",
-            dimensions: 2,
-            contentDigest: expect.any(String),
-            updatedAt: "2026-08-19T23:10:00.000Z",
-          },
-        ],
-      });
-    } finally {
-      if (await store.workspaceExists(workspace.id)) {
-        await store.deleteWorkspace(workspace.id);
-      }
-    }
-  });
 });
-
-function createTestEmbeddingProvider(): EmbeddingProvider {
-  return {
-    id: "test",
-    async embed(request) {
-      return request.inputs.map((input) => (input.includes("Alpha") ? [1, 0] : [0.9, 0.1]));
-    },
-  };
-}

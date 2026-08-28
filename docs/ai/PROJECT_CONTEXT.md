@@ -11,7 +11,7 @@ HiveMap stores a canonical semantic graph and derives readable overview, dive-in
 ## What this project does not do
 
 - It is not a hosted multi-user service today.
-- It does not expose authentication or authorization.
+- It does not provide users, roles, or per-workspace authorization; the installed HTTP runtime uses one required operator bearer token.
 - It does not silently crawl repositories; scans are agent-executed.
 - It does not treat UI layout state as semantic truth.
 - It does not use `poc/` file formats or server structure as 1.0 SSOT.
@@ -28,7 +28,7 @@ HiveMap stores a canonical semantic graph and derives readable overview, dive-in
 |---|---|---|
 | `apps/web` | Browser UI for overview, dive-in, project-map, and scan review flows | Uses React and React Flow. |
 | `apps/api` | Local REST boundary for the UI and tests | Must share runtime semantics with MCP. |
-| `apps/mcp` | Agent-facing MCP boundary | Current local transport is a legacy stdio adapter, not the target runtime shape. |
+| `apps/mcp` | Agent-facing MCP boundary | Streamable HTTP is installed with the runtime; stdio remains transitional local tooling. |
 | `packages/runtime` | Shared application service layer | Orchestrates graph, categories, capture, projections, scans, and storage. |
 | `packages/graph-core` | Canonical semantic graph types, validation, and command application | Pure domain logic. |
 | `packages/projections` | View derivation for overview, dive-in, and project maps | Must not mutate graph semantics. |
@@ -39,11 +39,11 @@ HiveMap stores a canonical semantic graph and derives readable overview, dive-in
 
 ## Runtime model
 
-HiveMap currently runs as a local single-user Node.js workspace on Postgres. The web UI talks to the REST API, and any legacy local MCP client must point at the same Postgres database if it is used during development. The MCP adapter remains a separate process and delegates to the same runtime package, but it is not part of the target local runtime contract. The UI is built with Vite and expects the API on `127.0.0.1`. The current alpha intentionally fails instead of silently switching ports or transport behavior.
+HiveMap currently runs as a single-operator Node.js runtime on Postgres. The installed HTTP process serves built UI assets, protected REST, and protected stateless Streamable HTTP MCP from one runtime/store. The UI uses the serving origin in production and stores the operator-entered bearer token in browser local storage. The legacy stdio adapter remains a separate explicit development path.
 
 ## Deployment model
 
-The supported model today is local development and local evaluation only. The repo now includes a working single-image Docker runtime for the API, built web UI, and bundled Postgres, but HiveForge deployment and hosted Streamable HTTP MCP are still future work rather than current repository behavior.
+The repo includes a single-image Docker runtime for protected REST, Streamable HTTP MCP, the built web UI, built-in indexing/scan handlers, and bundled Postgres, plus HiveForge deployment profiles for the same image.
 
 ## Data/storage model
 
@@ -65,8 +65,8 @@ The supported model today is local development and local evaluation only. The re
 
 ## Important risks
 
-- API and any legacy local MCP adapter must point at the same Postgres database or the UI and agent will appear to drift.
-- The current runtime has no auth/authz and must not be exposed directly to a network.
+- REST and Streamable HTTP MCP must share one runtime/store or the UI and agent will appear to drift; the installed process enforces this shape.
+- The shared bearer token is coarse operator authentication, not multi-user authorization.
 - Review and scan workflows depend on agent quality; HiveMap validates outputs but does not replace agent judgment.
 - Drift between `docs/architecture.md`, `docs/specs/*`, and implementation would directly weaken the product's SSOT model.
 - There is a real risk of turning HiveMap into a generic diagram editor if graph/projection boundaries slip.
@@ -77,4 +77,4 @@ The supported model today is local development and local evaluation only. The re
 - Never treat UI layout or manual node motion as semantic truth.
 - Never treat `poc/` as 1.0 architecture without an explicit decision.
 - Never infer missing categories, scan outputs, or repository coverage silently.
-- Never expose or host the current alpha as if it were a secured service.
+- Never present the shared bearer token as user/role authorization or a multi-tenant security boundary.

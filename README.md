@@ -57,7 +57,9 @@ npm run build
 Start the API in the first terminal:
 
 ```bash
-HIVEMAP_POSTGRES_URL='postgres://postgres:postgres@127.0.0.1:5432/hivemap' npm run dev:api -- --port 8787
+HIVEMAP_AUTH_TOKEN='replace-with-a-long-random-token' \
+HIVEMAP_POSTGRES_URL='postgres://postgres:postgres@127.0.0.1:5432/hivemap' \
+npm run dev:api -- --port 8787
 ```
 
 Start the web UI in the second terminal:
@@ -72,7 +74,9 @@ If you want one HTTP process to serve both API and built frontend, build the web
 
 ```bash
 npm run build -w @hivemap/web
-HIVEMAP_POSTGRES_URL='postgres://postgres:postgres@127.0.0.1:5432/hivemap' npm run dev:api -- --port 8787
+HIVEMAP_AUTH_TOKEN='replace-with-a-long-random-token' \
+HIVEMAP_POSTGRES_URL='postgres://postgres:postgres@127.0.0.1:5432/hivemap' \
+npm run dev:api -- --port 8787
 ```
 
 With `apps/web/dist` present, the API now auto-serves that build on the same port.
@@ -80,24 +84,10 @@ With `apps/web/dist` present, the API now auto-serves that build on the same por
 A working single-image Docker path exists as well:
 
 ```bash
-docker compose up --build
+HIVEMAP_AUTH_TOKEN='replace-with-a-long-random-token' docker compose up --build
 ```
 
-That path bundles Postgres with the API and built web assets in one container, with optional persistence mounted at `./.local/hivemap-state`. Local Docker smoke coverage has been exercised for workspace create, graph mutation, projection read/write, and ZIP download/import. Plugin bundling remains a follow-up inside the same container track.
-
-To start bundled local model serving in that same container, enable Ollama explicitly:
-
-```bash
-HIVEMAP_OLLAMA_ENABLED=1 docker compose up --build
-```
-
-If you also want the container to pre-pull one or more models on startup, set:
-
-```bash
-HIVEMAP_OLLAMA_ENABLED=1 \
-HIVEMAP_OLLAMA_PULL_MODELS=nomic-embed-text \
-docker compose up --build
-```
+That path bundles Postgres with the REST API, stateless Streamable HTTP MCP endpoint, built web assets, and HiveMap's built-in repository indexing and scan handlers in one container, with optional Postgres persistence mounted at `./.local/hivemap-postgres`. Open `http://127.0.0.1:8787/` and enter the same token in the UI. The UI keeps it only for the current tab in `sessionStorage` and offers an explicit clear action. REST and MCP use `Authorization: Bearer <token>`; the public surface is limited to the UI assets and `GET /health`. The MCP endpoint is `http://127.0.0.1:8787/mcp`.
 
 For the current Forgejo-backed development loop on `192.168.88.50`, the repo also carries:
 
@@ -107,26 +97,23 @@ npm run dev:hiveforge
 
 That command snapshots the current working tree into a temporary clone, force-pushes the stable Forgejo branch `hivemap-dev-loop`, and pushes both a moving `dev-latest` image tag and an immutable timestamped tag to the local registry. It prepares the exact `gitRef` and image values needed for the next HiveForge deploy/update step on the shared `swarm` environment.
 
-For the `docker-swarm` profile, set both:
+For the `docker-swarm` profile, provision the external Docker secret
+`hivemap-auth-token` in the HiveForge target environment, then set:
 
 ```bash
-HIVEMAP_DATA_BIND_SOURCE=/opt/pockethive-data/hivemap/state
+HIVEMAP_DATA_BIND_SOURCE=/opt/hivemap/postgres
 HIVEMAP_SWARM_PLACEMENT_CONSTRAINT='node.hostname == docker-swarm-mgr-1'
 ```
 
-The bind source is the exact local HiveMap state path on the swarm node. The placement constraint is required because that path is node-local; without it, Swarm can reschedule HiveMap onto a different node and break persistence. This `.50` + `/opt/pockethive-data/hivemap/state` setup is temporary development infrastructure only.
+The bind source is an explicit HiveMap-owned Postgres data path on the swarm node. The placement constraint is required because that path is node-local; without it, Swarm can reschedule HiveMap onto a different node and break persistence. Paths used by unrelated local test stacks are not part of the HiveMap deployment contract.
 
-The server binds to `127.0.0.1` intentionally. Do not expose this alpha directly to a network: it has no authentication or authorization layer.
+Direct development binds to `127.0.0.1` by default. Container profiles bind to all container interfaces and require the shared bearer token before startup. This is coarse single-operator protection, not multi-user authorization.
 
-Provider-backed concept embeddings are now available as explicit runtime operations. If you run a local Ollama server, set:
+HiveForge declares `hivemap-auth-token` through `requirements.secrets` and
+mounts it read-only at `/run/secrets/hivemap-auth-token`. The rendered Compose
+file contains only that external secret reference, never the credential value.
 
-```bash
-HIVEMAP_OLLAMA_BASE_URL=http://127.0.0.1:11434
-```
-
-Then use model refs such as `ollama:nomic-embed-text` through REST or MCP for one-node refresh and workspace backfill. These operations are explicit and synchronous in the current slice; graph mutations do not silently regenerate embeddings.
-
-If `HIVEMAP_OLLAMA_ENABLED=1` is set on the bundled Docker runtime or HiveForge stack, do not also set `HIVEMAP_OLLAMA_BASE_URL`; HiveMap fails fast unless that base URL matches the container-owned local Ollama endpoint.
+The active vector slice accepts explicit caller-supplied concept embeddings and supports bounded read-only similarity queries. HiveMap does not generate embeddings or bundle model-serving in the base runtime. The removed provider experiment is preserved as inactive, restorable evidence under `archive/deferred-ollama-embedding-provider/`.
 
 ## Legacy Local MCP Adapter
 
@@ -148,6 +135,8 @@ The repo still carries a legacy local stdio MCP adapter for development workflow
 ```
 
 Restart or reconnect the agent after changing its MCP configuration. The MCP adapter and REST API must point at the same Postgres database if you want agent changes to appear in the open UI.
+
+New container/client integrations should use the protected Streamable HTTP endpoint at `/mcp`; the stdio adapter remains only for explicit local development cases.
 
 HiveMap does not scan files by itself. The connected agent reads the target repository, follows the selected HiveMap scan profile, and submits explicit coverage, graph, projection, and finding operations through MCP.
 
@@ -242,7 +231,7 @@ GitHub offers a structured **HiveMap alpha test report** issue form with these f
 |---|---|
 | `npm ci` | Install exactly the locked dependencies |
 | `npm run verify` | Run tests, typecheck, and production builds |
-| `HIVEMAP_POSTGRES_URL=... npm run dev:api -- --port 8787` | Build and start the local REST API |
+| `HIVEMAP_AUTH_TOKEN=... HIVEMAP_POSTGRES_URL=... npm run dev:api -- --port 8787` | Build and start protected REST plus Streamable HTTP MCP |
 | `npm run dev:web` | Start the UI on `127.0.0.1:5175` |
 | `npm run dev:hiveforge` | Snapshot the current tree to local Forgejo and push dev image tags for HiveForge |
 
@@ -257,8 +246,8 @@ npm exec -w @hivemap/mcp -- hivemap-mcp --postgres-url 'postgres://postgres:post
 
 ## Project Structure
 
-- `apps/api/`: local REST boundary used by the UI;
-- `apps/mcp/`: legacy local stdio MCP adapter kept only as transitional development tooling;
+- `apps/api/`: HTTP host for the UI, protected REST API, and `/mcp` transport;
+- `apps/mcp/`: shared MCP tool server plus Streamable HTTP and legacy stdio transport wiring;
 - `apps/web/`: React/React Flow review UI;
 - `packages/graph-core/`: semantic graph and invariants;
 - `packages/projections/`: overview and deep-dive view derivation;
@@ -277,7 +266,7 @@ HiveMap is licensed under `GPL-3.0-or-later`, matching PocketHive. See [LICENSE]
 ## Alpha Boundaries
 
 - local single-user runtime only;
-- no authentication or authorization;
+- one required shared bearer token for REST and MCP, without users or roles;
 - no built-in repository crawler: scanning is agent-executed;
 - no silent merge during ZIP import;
 - manual graph editing is emergency tooling, not the primary workflow;
@@ -287,9 +276,9 @@ HiveMap is licensed under `GPL-3.0-or-later`, matching PocketHive. See [LICENSE]
 
 Planned next steps for the runtime are:
 
-1. extend the one-container local runtime to include the remaining bundled dependencies such as plugins,
-2. integrate that runtime shape with HiveForge,
-3. revisit hosted MCP after the storage/runtime/deployment base is stable.
+1. finish validating the Postgres-backed container and its built-in repository indexing/scan handlers through HiveForge,
+2. complete repeated deploy and end-to-end scan loops against that runtime,
+3. exercise protected REST and Streamable HTTP MCP through repeated deploy and end-to-end scan loops.
 
 Embeddings and vector-assisted features are intentionally deferred from that base runtime track.
 

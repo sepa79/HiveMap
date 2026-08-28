@@ -2,7 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { type EmbeddingProvider, type RepositoryIndexExecutor, HiveMapRuntime } from "@hivemap/runtime";
+import { type RepositoryIndexExecutor, HiveMapRuntime } from "@hivemap/runtime";
 import { InMemoryHiveMapStore } from "@hivemap/storage";
 
 import { createHiveMapMcpServer } from "./sdk-server.js";
@@ -17,7 +17,6 @@ beforeEach(async () => {
   server = createHiveMapMcpServer(
     new HiveMapRuntime({
       store,
-      embeddingProviders: { test: createTestEmbeddingProvider() },
       repositoryIndexExecutor: createTestRepositoryIndexExecutor(),
     }),
   );
@@ -52,8 +51,6 @@ describe("HiveMap MCP SDK server", () => {
       "scan_profile_overlay_help",
       "scan_profile_overlay_suggest",
       "concept_embedding_upsert",
-      "concept_embedding_refresh",
-      "concept_embedding_backfill",
       "concept_similar_list",
       "graph_command",
       "category_assign",
@@ -438,41 +435,8 @@ describe("HiveMap MCP SDK server", () => {
       },
     });
 
-    const refreshResult = await client.callTool({
-      name: "concept_embedding_refresh",
-      arguments: {
-        workspaceId: "workspace-a",
-        nodeId: "node-a",
-        model: "test:nomic-embed-text",
-      },
-    });
-    expect(refreshResult.structuredContent).toEqual({
-      ok: true,
-      tool: "concept_embedding_refresh",
-      value: {
-        embedding: {
-          workspaceId: "workspace-a",
-          nodeId: "node-a",
-          model: "test:nomic-embed-text",
-          dimensions: 2,
-          contentDigest: expect.any(String),
-          updatedAt: expect.any(String),
-        },
-        provider: "test",
-        status: "refreshed",
-      },
-    });
   });
 });
-
-function createTestEmbeddingProvider(): EmbeddingProvider {
-  return {
-    id: "test",
-    async embed(request) {
-      return request.inputs.map((input) => (input.includes("Alpha") ? [1, 0] : [0.9, 0.1]));
-    },
-  };
-}
 
 function createTestRepositoryIndexExecutor(): RepositoryIndexExecutor {
   return async ({ workspaceId, indexId }) => ({

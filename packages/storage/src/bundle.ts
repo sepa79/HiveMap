@@ -1,3 +1,8 @@
+/**
+ * Responsibility: Serialize and validate portable HiveMap workspace ZIP bundles.
+ * Must not: Select a runtime backend, mutate graph semantics, or repair invalid bundle state.
+ * Contract: Reads and writes the canonical manifest plus validated WorkspaceState bundle format.
+ */
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 
@@ -5,7 +10,8 @@ import { strFromU8, strToU8, unzipSync, zipSync, type Zippable } from "fflate";
 
 import { compareCompletedScans, toFindingEvidence, type CompletedScanRun, type ScanComparison, type ScanProfile, type ScanRun } from "@hivemap/scans";
 
-import { validateWorkspaceState, type WorkspaceState } from "./index.js";
+import type { WorkspaceState } from "./contracts.js";
+import { validateWorkspaceState } from "./store-support.js";
 import { STORAGE_SCHEMA_VERSION } from "./schema.js";
 
 export const HIVEMAP_BUNDLE_FORMAT_VERSION = 2;

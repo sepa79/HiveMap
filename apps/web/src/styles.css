@@ -261,6 +261,16 @@ label {
   gap: 12px;
 }
 
+.auth-panel {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.auth-panel small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .workspace-divider {
   border-top: 1px solid var(--border2);
   height: 0;
