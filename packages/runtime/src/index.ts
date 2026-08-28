@@ -183,16 +183,18 @@ import { buildBoundaryMapArtifact } from "./repository-boundary-map.js";
 import { RepositoryIndexExecutionError, executeSafeRepositoryIndex, type RepositoryIndexExecutor } from "./repository-indexing.js";
 import { RuntimeError } from "./runtime-error.js";
 import {
-  createScanProfileOverlayHelp,
   createScanCoverageWarnings,
-  createSuggestedOverlayFields,
   deriveScanCoverage,
-  findOverlaySymptomHint,
-  resolveBoundaryMapBuildConfig,
-  resolveScanProfileContext,
-  serializeSuggestedOverlayPatch,
   summarizeRecordedCoverage,
-} from "./scan-profile-coordinator.js";
+} from "./scan-coverage.js";
+import { resolveBoundaryMapBuildConfig } from "./scan-boundary-map-config.js";
+import { resolveScanProfileContext } from "./scan-profile-context.js";
+import {
+  createScanProfileOverlayHelp,
+  createSuggestedOverlayFields,
+  findOverlaySymptomHint,
+  serializeSuggestedOverlayPatch,
+} from "./scan-profile-guidance.js";
 import { createRepositoryEvidenceCandidates } from "./repository-evidence-candidates.js";
 import { matchesAnyGlob, normalizeRepositoryPath } from "./repository-path.js";
 

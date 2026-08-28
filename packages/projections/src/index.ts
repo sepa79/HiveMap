@@ -12,13 +12,17 @@ export type Projection = {
   visibleNodeIds: string[];
   visibleEdgeIds: string[];
   groups?: ProjectionGroup[];
-  layout?: Record<string, unknown>;
+  layout?: ProjectionLayout;
 };
 
 export type ProjectionOrientationNote = {
   title: string;
   purpose: string;
   usage: string[];
+};
+
+export type ProjectionLayout = Record<string, unknown> & {
+  orientationNote?: ProjectionOrientationNote;
 };
 
 export type ProjectionGroup = {

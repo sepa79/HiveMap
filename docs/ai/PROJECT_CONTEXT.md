@@ -39,7 +39,7 @@ HiveMap stores a canonical semantic graph and derives readable overview, dive-in
 
 ## Runtime model
 
-HiveMap currently runs as a single-operator Node.js runtime on Postgres. The installed HTTP process serves built UI assets, protected REST, and protected stateless Streamable HTTP MCP from one runtime/store. The UI uses the serving origin in production and stores the operator-entered bearer token in browser local storage. The legacy stdio adapter remains a separate explicit development path.
+HiveMap currently runs as a single-operator Node.js runtime on Postgres. The installed HTTP process serves built UI assets, protected REST, and protected stateless Streamable HTTP MCP from one runtime/store. The UI uses the serving origin in production and stores the operator-entered bearer token in tab-scoped `sessionStorage`. The HTTP runtime requires exactly one token source: direct `HIVEMAP_AUTH_TOKEN`/`--auth-token` for local operation or file-backed `HIVEMAP_AUTH_TOKEN_FILE`/`--auth-token-file` for installed secret mounts. The legacy stdio adapter remains a separate explicit development path.
 
 ## Deployment model
 

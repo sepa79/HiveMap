@@ -1,6 +1,6 @@
 # Postgres, Container, HiveForge Plan
 
-Last updated: 2026-08-26
+Last updated: 2026-08-28
 
 ## Goal
 
@@ -38,8 +38,8 @@ Upgrade HiveMap from the local-first SQLite alpha shape to a container-friendly 
 ## Phase 0 — Workflow Baseline
 
 - [x] Commit the updated development rules in `AGENTS.md` and `docs/ai/HIVEMIND_RULES.md`.
-- [ ] Keep HiveMind entries up to date for decisions, risks, and meaningful implementation progress during this plan.
-- [ ] Use this file as the task tracker and update checkboxes as milestones move.
+- [x] Keep HiveMind entries up to date for decisions, risks, and meaningful implementation progress during this plan.
+- [x] Use this file as the task tracker and update checkboxes as milestones move.
 
 ## Phase 1 — ADR And SSOT Updates
 
@@ -101,7 +101,7 @@ Upgrade HiveMap from the local-first SQLite alpha shape to a container-friendly 
 - [ ] Run the intended loop: change -> build -> deploy -> e2e -> change.
 
 Current state:
-- Local HiveForge adapter smoke passes for `docker-single` by rendering Compose through Ansible and validating it with `docker compose config`.
+- Local HiveForge adapter smoke passes for both `docker-single` and `docker-swarm` by rendering Compose through Ansible and validating each result with `docker compose config`.
 - HiveForge on August 19, 2026 is connected to trusted-LAN Forgejo at `http://192.168.88.50:3001/`.
 - HiveMap now deploys to the shared `swarm` environment as `hivemap-development` through the `docker-swarm` profile.
 - The swarm profile requires an explicit HiveMap-owned node-local Postgres bind source and matching placement constraint; repository examples use `/opt/hivemap/postgres` and do not treat unrelated test-stack paths as product persistence.
@@ -185,3 +185,4 @@ Help an agent reach a correct working model of an unfamiliar repository before i
 - [x] ZIP export/import works correctly on the new backend.
 - [x] HiveForge can deploy the new runtime through an explicit contract.
 - [x] Protected Streamable HTTP MCP builds on the shared Postgres runtime instead of the old SQLite alpha shape.
+- [x] The local closeout matrix passes `npm run verify`, all real-Postgres suites, UI token save/use/clear, both HiveForge profile renders, and a built-image smoke covering REST, MCP, persistence, restart, SIGTERM, and Postgres outage/recovery.

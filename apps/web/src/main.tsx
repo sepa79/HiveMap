@@ -63,6 +63,7 @@ import {
 } from "./api.js";
 import { AuthTokenPanel } from "./AuthTokenPanel.js";
 import { FINDING_PRIORITY_GROUPS } from "./finding-priorities.js";
+import { readFindingMetadata } from "./finding-metadata.js";
 import { FINDINGS_OVERVIEW_NOTE, FLOW_NODE_TYPES, MAP_CARD_ROW_PITCH, type MapCardData } from "./MapCard.js";
 import { humanSeverity, nodeStyle, orientationNoteStyle, projectionGroupHeaderStyle } from "./projection-styles.js";
 import { slugifyNodeId } from "./ids.js";
@@ -175,19 +176,19 @@ export function App() {
     [selectedNodeId, state],
   );
 
-  const selectedFinding = selectedNode?.type === "finding" ? selectedNode.metadata?.finding ?? null : null;
+  const selectedFinding = selectedNode?.type === "finding" ? readFindingMetadata(selectedNode) ?? null : null;
   const findingNodes = useMemo(() => {
     const rank = new Map(FINDING_SEVERITIES.map((severity, index) => [severity, index]));
     return [...(state?.graph.nodes.filter((node) => node.type === "finding") ?? [])].sort((left, right) => {
-      const leftRank = rank.get(left.metadata?.finding?.severity ?? "low") ?? FINDING_SEVERITIES.length;
-      const rightRank = rank.get(right.metadata?.finding?.severity ?? "low") ?? FINDING_SEVERITIES.length;
+      const leftRank = rank.get(readFindingMetadata(left)?.severity ?? "low") ?? FINDING_SEVERITIES.length;
+      const rightRank = rank.get(readFindingMetadata(right)?.severity ?? "low") ?? FINDING_SEVERITIES.length;
       return leftRank - rightRank || left.label.localeCompare(right.label);
     });
   }, [state]);
 
   const findingGroups = useMemo<ProjectionGroup[]>(() => FINDING_PRIORITY_GROUPS.map((priority) => {
     const nodeIds = findingNodes
-      .filter((node) => node.metadata?.finding?.severity === priority.severity)
+      .filter((node) => readFindingMetadata(node)?.severity === priority.severity)
       .map((node) => node.id);
     return { id: priority.id, label: priority.label, nodeIds };
   }), [findingNodes]);
@@ -223,7 +224,7 @@ export function App() {
             data: {
               title: node.label,
               tags: node.type === "finding"
-                ? [node.metadata?.finding?.kind ?? "finding", humanSeverity(node.metadata?.finding?.severity)]
+                ? [readFindingMetadata(node)?.kind ?? "finding", humanSeverity(readFindingMetadata(node)?.severity)]
                 : [node.type],
               variant: node.type === "finding" ? "finding" : "concept",
             } satisfies MapCardData,
@@ -235,7 +236,7 @@ export function App() {
         })(),
         id: node.id,
         type: "map-card",
-        style: nodeStyle(node.type, selectedNodeId === node.id, node.metadata?.finding?.severity),
+        style: nodeStyle(node.type, selectedNodeId === node.id, readFindingMetadata(node)?.severity),
       }));
 
     const groupHeaderNodes: Node[] = (selectedProjection?.groups ?? []).map((group) => ({
@@ -489,7 +490,7 @@ export function App() {
     void run(async () => {
       const projection = await createProjectMap(
         workspaceId,
-        findingNodes.filter((node) => node.metadata?.finding?.severity === "critical").map((node) => node.id),
+        findingNodes.filter((node) => readFindingMetadata(node)?.severity === "critical").map((node) => node.id),
         findingNodes.map((node) => node.id),
         { name: "Findings Overview", groups: findingGroups, layout: { orientationNote: FINDINGS_OVERVIEW_NOTE } },
       );
@@ -888,7 +889,7 @@ export function App() {
                 </div>
                 {group.nodeIds.map((nodeId) => {
                   const node = findingNodes.find((candidate) => candidate.id === nodeId)!;
-                  const finding = node.metadata?.finding;
+                  const finding = readFindingMetadata(node);
                   return (
                     <button
                       className={selectedNodeId === node.id ? "finding-button finding-button-active" : "finding-button"}

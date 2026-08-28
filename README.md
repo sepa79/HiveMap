@@ -89,6 +89,8 @@ HIVEMAP_AUTH_TOKEN='replace-with-a-long-random-token' docker compose up --build
 
 That path bundles Postgres with the REST API, stateless Streamable HTTP MCP endpoint, built web assets, and HiveMap's built-in repository indexing and scan handlers in one container, with optional Postgres persistence mounted at `./.local/hivemap-postgres`. Open `http://127.0.0.1:8787/` and enter the same token in the UI. The UI keeps it only for the current tab in `sessionStorage` and offers an explicit clear action. REST and MCP use `Authorization: Bearer <token>`; the public surface is limited to the UI assets and `GET /health`. The MCP endpoint is `http://127.0.0.1:8787/mcp`.
 
+The HTTP runtime accepts exactly one bearer-token source. Local commands and repository Compose use direct `HIVEMAP_AUTH_TOKEN` (or `--auth-token`); installed secret mounts use `HIVEMAP_AUTH_TOKEN_FILE` (or `--auth-token-file`). Supplying both sources, or an unreadable or empty token file, fails startup.
+
 For the current Forgejo-backed development loop on `192.168.88.50`, the repo also carries:
 
 ```bash
