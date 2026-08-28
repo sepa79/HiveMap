@@ -133,7 +133,21 @@ else
   git remote add forgejo "${forgejo_repo}"
 fi
 
-git push --force-with-lease forgejo "${branch}" >/dev/null
+remote_branch_ref="refs/heads/${branch}"
+remote_branch_record="$(git ls-remote --heads forgejo "${remote_branch_ref}")"
+if [[ -z "${remote_branch_record}" ]]; then
+  git push forgejo "${branch}:${remote_branch_ref}" >/dev/null
+else
+  read -r remote_commit resolved_remote_ref <<<"${remote_branch_record}"
+  if [[ "${resolved_remote_ref}" != "${remote_branch_ref}" ]]; then
+    echo "Forgejo resolved an unexpected branch ref: ${resolved_remote_ref}" >&2
+    exit 1
+  fi
+  git push \
+    --force-with-lease="${remote_branch_ref}:${remote_commit}" \
+    forgejo \
+    "${branch}:${remote_branch_ref}" >/dev/null
+fi
 
 floating_image="${image_repo}:${floating_tag}"
 immutable_image="${image_repo}:${image_tag}"

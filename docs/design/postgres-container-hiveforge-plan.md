@@ -105,6 +105,13 @@ Current state:
 - HiveForge on August 19, 2026 is connected to trusted-LAN Forgejo at `http://192.168.88.50:3001/`.
 - HiveMap now deploys to the shared `swarm` environment as `hivemap-development` through the `docker-swarm` profile.
 - The swarm profile requires an explicit HiveMap-owned node-local Postgres bind source and matching placement constraint; repository examples use `/opt/hivemap/postgres` and do not treat unrelated test-stack paths as product persistence.
+- On August 28, 2026 the real development loop pushed `hivemap-dev-loop` plus
+  `dev-latest` and immutable image `closeout-841e8e0-leasefix` to the shared
+  Forgejo/registry. HiveForge inspected the updated ref successfully, but
+  requirement validation stopped before deployment because the external Docker
+  secret `hivemap-auth-token` is not currently present on the swarm. The existing
+  pre-secret deployment remains healthy at `1/1`; the loop checkbox stays open
+  until the secret is provisioned and the new image passes remote e2e.
 - Remaining HiveForge work is about tightening the local development loop and adding stronger e2e coverage, not proving first deploy viability.
 
 ## Phase 7 — Protected Streamable HTTP MCP

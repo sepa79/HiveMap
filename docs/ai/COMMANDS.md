@@ -96,7 +96,9 @@ npm run dev:hiveforge
 That command:
 
 - snapshots the current working tree into a temporary clone under `/tmp/hivemap-hiveforge-dev-loop`,
-- force-pushes the stable Forgejo branch `hivemap-dev-loop`,
+- reads the current remote SHA and force-pushes the stable Forgejo branch
+  `hivemap-dev-loop` with an explicit lease, so a concurrent remote update fails
+  instead of being overwritten,
 - builds and pushes both `192.168.88.50:3001/hiveforge/hivemap:dev-latest` and an immutable timestamped tag,
 - prints the exact `gitRef` and image values to feed into the next HiveForge deploy/update action.
 
