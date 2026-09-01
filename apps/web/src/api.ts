@@ -12,7 +12,6 @@ import type {
   CreateProposalResponse,
   CreateWorkspaceRequest,
   GetWorkspaceResponse,
-  ImportWorkspaceBundleResponse,
   ListWorkspacesResponse,
   RecordFeedbackResponse,
   RejectProposalResponse,
@@ -68,29 +67,6 @@ export async function createWorkspace(workspace: CreateWorkspaceRequest["workspa
 export async function getWorkspace(workspaceId: string): Promise<WorkspaceState> {
   const response = await request<GetWorkspaceResponse>(`/workspaces/${workspaceId}`);
   return response.state;
-}
-
-export async function downloadWorkspaceBundle(workspaceId: string, exportedAt: string): Promise<Blob> {
-  const response = await fetch(`${API_BASE_URL}/workspaces/${encodeURIComponent(workspaceId)}/export-bundle`, {
-    method: "POST",
-    headers: requestHeaders({ "content-type": "application/json" }),
-    body: JSON.stringify({ exportedAt }),
-  });
-  if (!response.ok) throw await responseError(response);
-  return response.blob();
-}
-
-export async function importWorkspaceBundle(
-  file: File,
-  mode: "new" | "replace",
-): Promise<WorkspaceRecord> {
-  const response = await fetch(`${API_BASE_URL}/workspace-import-bundles?mode=${mode}`, {
-    method: "POST",
-    headers: requestHeaders({ "content-type": "application/zip" }),
-    body: file,
-  });
-  if (!response.ok) throw await responseError(response);
-  return ((await response.json()) as ImportWorkspaceBundleResponse).workspace;
 }
 
 export async function createNode(workspaceId: string, node: GraphNode): Promise<SemanticGraph> {

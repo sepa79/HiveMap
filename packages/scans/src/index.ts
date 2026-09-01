@@ -5,6 +5,17 @@ import {
   type SemanticGraph,
 } from "@hivemap/graph-core";
 
+import {
+  assertCanonicalRepositoryLocation,
+  RepositoryLocationValidationError,
+} from "./repository-location.js";
+
+export {
+  assertCanonicalRepositoryLocation,
+  normalizeRepositoryLocation,
+  RepositoryLocationValidationError,
+} from "./repository-location.js";
+
 export const SCAN_REQUIRED_OUTPUT_VALUES = ["document-inventory", "concept-map", "findings", "coverage-report", "boundary-map"] as const;
 export type ScanRequiredOutput = (typeof SCAN_REQUIRED_OUTPUT_VALUES)[number];
 
@@ -1204,7 +1215,16 @@ function severityRank(severity: FindingSeverity): number {
 function validateRepository(repository: ScanRepository): void {
   assertOptionalNonEmpty("repository.repositoryIndexId", repository.repositoryIndexId);
   assertNonEmpty("repository.root", repository.root);
-  assertOptionalNonEmpty("repository.repositoryUrl", repository.repositoryUrl);
+  if (repository.repositoryUrl !== undefined) {
+    try {
+      assertCanonicalRepositoryLocation(repository.repositoryUrl, "repository.repositoryUrl");
+    } catch (error) {
+      if (error instanceof RepositoryLocationValidationError) {
+        throw new ScanValidationError(error.message);
+      }
+      throw error;
+    }
+  }
   assertNonEmpty("repository.branch", repository.branch);
   assertNonEmpty("repository.revision", repository.revision);
   assertOptionalNonEmpty("repository.worktreeDigest", repository.worktreeDigest);

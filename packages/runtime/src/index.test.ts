@@ -1,6 +1,3 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { InMemoryHiveMapStore } from "@hivemap/storage";
@@ -109,6 +106,75 @@ describe("HiveMapRuntime", () => {
     expect(projection.projection.visibleNodeIds).toEqual(["node-a"]);
   });
 
+  it("serializes concurrent whole-workspace mutations by workspace id", async () => {
+    await seedWorkspaceFixture();
+
+    await Promise.all([
+      runtime.applyGraphCommands({
+        workspaceId: "workspace-a",
+        commands: [{ id: "cmd-a", type: "node.create", payload: { node: { id: "node-a", label: "Alpha", type: "concept" } } }],
+      }),
+      runtime.applyGraphCommands({
+        workspaceId: "workspace-a",
+        commands: [{ id: "cmd-b", type: "node.create", payload: { node: { id: "node-b", label: "Beta", type: "concept" } } }],
+      }),
+    ]);
+
+    expect((await runtime.getGraph({ workspaceId: "workspace-a" })).graph.nodes.map((node) => node.id)).toEqual(["node-a", "node-b"]);
+  });
+
+  it("serializes embedding writes with whole-workspace mutations", async () => {
+    await seedWorkspaceFixture();
+    await runtime.applyGraphCommands({
+      workspaceId: "workspace-a",
+      commands: [{ id: "cmd-a", type: "node.create", payload: { node: { id: "node-a", label: "Alpha", type: "concept" } } }],
+    });
+
+    const originalSaveWorkspaceState = store.saveWorkspaceState.bind(store);
+    const originalUpsertConceptEmbedding = store.upsertConceptEmbedding.bind(store);
+    let releaseWorkspaceSave!: () => void;
+    let reportWorkspaceSaveStarted!: () => void;
+    let embeddingWriteStarted = false;
+    const workspaceSaveStarted = new Promise<void>((resolve) => {
+      reportWorkspaceSaveStarted = resolve;
+    });
+    const workspaceSaveReleased = new Promise<void>((resolve) => {
+      releaseWorkspaceSave = resolve;
+    });
+    store.saveWorkspaceState = async (state) => {
+      if (state.graph.nodes.some((node) => node.id === "node-b")) {
+        reportWorkspaceSaveStarted();
+        await workspaceSaveReleased;
+      }
+      await originalSaveWorkspaceState(state);
+    };
+    store.upsertConceptEmbedding = async (record) => {
+      embeddingWriteStarted = true;
+      await originalUpsertConceptEmbedding(record);
+    };
+
+    const graphMutation = runtime.applyGraphCommands({
+      workspaceId: "workspace-a",
+      commands: [{ id: "cmd-b", type: "node.create", payload: { node: { id: "node-b", label: "Beta", type: "concept" } } }],
+    });
+    await workspaceSaveStarted;
+    const embeddingMutation = runtime.upsertConceptEmbedding({
+      workspaceId: "workspace-a",
+      nodeId: "node-a",
+      embedding: {
+        model: "nomic-embed-text",
+        values: [1, 0],
+        updatedAt: "2026-08-19T22:40:00.000Z",
+      },
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(embeddingWriteStarted).toBe(false);
+    releaseWorkspaceSave();
+    await Promise.all([graphMutation, embeddingMutation]);
+    expect(embeddingWriteStarted).toBe(true);
+  });
+
   it("creates a project map projection through the shared runtime", async () => {
     await seedWorkspaceFixture();
     await runtime.applyGraphCommands({
@@ -162,7 +228,7 @@ describe("HiveMapRuntime", () => {
         workspaceId: "workspace-a",
         index: {
           id: "repo-index-a",
-          repositoryUrl: "https://example.com/org/repo.git",
+          repositoryUrl: " HTTPS://EXAMPLE.COM/org/repo.git ",
           requestedRef: "main",
           mode: "safe",
           requestedAt: "2026-08-20T12:00:00.000Z",
@@ -254,7 +320,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-a",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-20T12:00:00.000Z",
@@ -320,6 +386,154 @@ describe("HiveMapRuntime", () => {
     ]);
   });
 
+  it("rejects a concurrent execution of the same repository index", async () => {
+    await seedWorkspaceFixture();
+    let releaseExecution!: () => void;
+    let markStarted!: () => void;
+    const executionGate = new Promise<void>((resolve) => {
+      releaseExecution = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let executionCount = 0;
+    const exclusiveRuntime = new HiveMapRuntime({
+      store,
+      repositoryIndexExecutor: async ({ workspaceId, indexId }) => {
+        executionCount += 1;
+        markStarted();
+        await executionGate;
+        return createRepositoryIndexResult(
+          "0123456789abcdef0123456789abcdef01234567",
+          "Bounded repository evidence.",
+          workspaceId,
+          indexId,
+        );
+      },
+      now: () => "2026-08-20T12:00:00.000Z",
+    });
+    await exclusiveRuntime.startRepositoryIndex({
+      workspaceId: "workspace-a",
+      index: {
+        id: "repo-index-exclusive",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
+        mode: "safe",
+        requestedAt: "2026-08-20T12:00:00.000Z",
+        actor: { agentId: "codex", tool: "test" },
+      },
+    });
+
+    const firstExecution = exclusiveRuntime.executeRepositoryIndex({ workspaceId: "workspace-a", indexId: "repo-index-exclusive" });
+    await started;
+    await expect(
+      exclusiveRuntime.executeRepositoryIndex({ workspaceId: "workspace-a", indexId: "repo-index-exclusive" }),
+    ).rejects.toMatchObject({ code: "REPOSITORY_INDEX_ALREADY_RUNNING" });
+    releaseExecution();
+    await expect(firstExecution).resolves.toMatchObject({ index: { stage: "completed" } });
+    expect(executionCount).toBe(1);
+  });
+
+  it("executes only one repository index at a time across workspaces", async () => {
+    await seedWorkspaceFixture({ id: "workspace-a", name: "Alpha" });
+    await seedWorkspaceFixture({ id: "workspace-b", name: "Beta" });
+    let releaseFirstExecution!: () => void;
+    let markFirstExecutionStarted!: () => void;
+    const firstExecutionGate = new Promise<void>((resolve) => {
+      releaseFirstExecution = resolve;
+    });
+    const firstExecutionStarted = new Promise<void>((resolve) => {
+      markFirstExecutionStarted = resolve;
+    });
+    const executionOrder: string[] = [];
+    const serialRuntime = new HiveMapRuntime({
+      store,
+      repositoryIndexExecutor: async ({ workspaceId, indexId }) => {
+        executionOrder.push(indexId);
+        if (indexId === "repo-index-a") {
+          markFirstExecutionStarted();
+          await firstExecutionGate;
+        }
+        return createRepositoryIndexResult(
+          "0123456789abcdef0123456789abcdef01234567",
+          `Evidence for ${workspaceId}.`,
+          workspaceId,
+          indexId,
+        );
+      },
+      now: () => "2026-08-20T12:00:00.000Z",
+    });
+    await serialRuntime.startRepositoryIndex({
+      workspaceId: "workspace-a",
+      index: {
+        id: "repo-index-a",
+        repositoryUrl: "https://example.com/a.git",
+        mode: "safe",
+        requestedAt: "2026-08-20T12:00:00.000Z",
+        actor: { agentId: "codex", tool: "test" },
+      },
+    });
+    await serialRuntime.startRepositoryIndex({
+      workspaceId: "workspace-b",
+      index: {
+        id: "repo-index-b",
+        repositoryUrl: "https://example.com/b.git",
+        mode: "safe",
+        requestedAt: "2026-08-20T12:00:00.000Z",
+        actor: { agentId: "codex", tool: "test" },
+      },
+    });
+
+    const first = serialRuntime.executeRepositoryIndex({ workspaceId: "workspace-a", indexId: "repo-index-a" });
+    await firstExecutionStarted;
+    const second = serialRuntime.executeRepositoryIndex({ workspaceId: "workspace-b", indexId: "repo-index-b" });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(executionOrder).toEqual(["repo-index-a"]);
+
+    releaseFirstExecution();
+    await Promise.all([first, second]);
+    expect(executionOrder).toEqual(["repo-index-a", "repo-index-b"]);
+  });
+
+  it("restarts an index left active by a prior runtime process", async () => {
+    await seedWorkspaceFixture();
+    await runtime.startRepositoryIndex({
+      workspaceId: "workspace-a",
+      index: {
+        id: "repo-index-interrupted",
+        repositoryUrl: "https://example.com/interrupted.git",
+        mode: "safe",
+        requestedAt: "2026-08-20T12:00:00.000Z",
+        actor: { agentId: "codex", tool: "test" },
+      },
+    });
+    const requested = await store.getRepositoryIndex("workspace-a", "repo-index-interrupted");
+    await store.upsertRepositoryIndex({
+      ...requested,
+      stage: "checking_out",
+      updatedAt: "2026-08-20T12:01:00.000Z",
+    });
+
+    let executionCount = 0;
+    const restartedRuntime = new HiveMapRuntime({
+      store,
+      repositoryIndexExecutor: async ({ workspaceId, indexId }) => {
+        executionCount += 1;
+        return createRepositoryIndexResult(
+          "0123456789abcdef0123456789abcdef01234567",
+          "Recovered evidence.",
+          workspaceId,
+          indexId,
+        );
+      },
+      now: () => "2026-08-20T12:02:00.000Z",
+    });
+
+    await expect(
+      restartedRuntime.executeRepositoryIndex({ workspaceId: "workspace-a", indexId: "repo-index-interrupted" }),
+    ).resolves.toMatchObject({ index: { stage: "completed" } });
+    expect(executionCount).toBe(1);
+  });
+
   it("builds bounded repository evidence candidates for documentation scan criteria", async () => {
     await seedWorkspaceFixture();
     const evidenceRuntime = new HiveMapRuntime({
@@ -332,7 +546,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-evidence",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-20T12:00:00.000Z",
@@ -475,7 +689,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-structural",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-20T18:00:00.000Z",
@@ -534,7 +748,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-structural-precision",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-20T18:15:00.000Z",
@@ -585,7 +799,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-structural-precision-overlay",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-25T17:20:00.000Z",
@@ -631,7 +845,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-structural-topology",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-20T18:30:00.000Z",
@@ -682,7 +896,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-boundary-map",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-20T18:45:00.000Z",
@@ -913,7 +1127,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-overlay-boundary-map",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-20T19:05:00.000Z",
@@ -981,7 +1195,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-unmapped-boundary-map",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-20T19:10:00.000Z",
@@ -1033,7 +1247,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-unclassified-qa-surface",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-20T19:12:00.000Z",
@@ -1105,7 +1319,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-custom-boundary-markers",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-20T19:14:00.000Z",
@@ -1196,7 +1410,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-overlay",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-20T19:00:00.000Z",
@@ -1301,7 +1515,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-validate-ambiguous",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-25T11:00:00.000Z",
@@ -1354,7 +1568,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-validate-real",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-25T11:10:00.000Z",
@@ -1441,7 +1655,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-invalid-overlay",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-20T19:00:00.000Z",
@@ -1484,7 +1698,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-precision",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-20T12:00:00.000Z",
@@ -1560,7 +1774,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-semantic-invariants",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-20T12:00:00.000Z",
@@ -1602,7 +1816,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-semantic-invariants-overlay",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-20T12:00:00.000Z",
@@ -1652,7 +1866,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-stale",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-20T12:00:00.000Z",
@@ -1704,7 +1918,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-legacy-authority",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-20T12:00:00.000Z",
@@ -1746,7 +1960,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-legacy-authority-overlay",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-20T12:00:00.000Z",
@@ -1796,7 +2010,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-unicode-heading",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-20T12:00:00.000Z",
@@ -1838,7 +2052,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-root-link",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-20T12:00:00.000Z",
@@ -1880,7 +2094,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-ownership-scope",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-20T12:00:00.000Z",
@@ -1922,7 +2136,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-ownership-scope-overlay",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-20T12:00:00.000Z",
@@ -1977,7 +2191,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-a",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-20T12:00:00.000Z",
@@ -2205,38 +2419,6 @@ describe("HiveMapRuntime", () => {
     const comparison = (await runtime.compareScans({ workspaceId: "workspace-a", beforeScanId: "scan-before", afterScanId: "scan-after" })).comparison;
     expect(comparison.verdict).toBe("pass");
     expect(comparison.items).toEqual([expect.objectContaining({ fingerprint: "ownership-conflict", status: "resolved" })]);
-
-    const directory = mkdtempSync(join(tmpdir(), "hivemap-verification-"));
-    try {
-      const exported = await runtime.exportWorkspace({
-        workspaceId: "workspace-a",
-        targetPath: join(directory, "verification.hivemap.zip"),
-        exportedAt: "2026-07-17T10:10:00.000Z",
-      });
-      expect(exported.manifest.files.map((file) => file.path)).toContain("comparisons/scan-before--scan-after.json");
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-    }
-  });
-
-  it("exports and imports a complete workspace ZIP without semantic drift", async () => {
-    await seedWorkspaceFixture();
-    const directory = mkdtempSync(join(tmpdir(), "hivemap-runtime-"));
-    const bundlePath = join(directory, "workspace.hivemap.zip");
-    try {
-      await runtime.exportWorkspace({ workspaceId: "workspace-a", targetPath: bundlePath, exportedAt: "2026-07-17T11:00:00.000Z" });
-      const importedStore = new InMemoryHiveMapStore();
-      await importedStore.initialize();
-      const importedRuntime = new HiveMapRuntime({ store: importedStore });
-
-      await importedRuntime.importWorkspace({ sourcePath: bundlePath, mode: "new" });
-
-      await expect(importedRuntime.getWorkspace("workspace-a")).resolves.toEqual(await runtime.getWorkspace("workspace-a"));
-      await expect(importedRuntime.importWorkspace({ sourcePath: bundlePath, mode: "new" })).rejects.toThrow("already exists");
-      await importedStore.close();
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-    }
   });
 
   it("does not bypass non-delegated capture when an agent creates a finding", async () => {
@@ -2388,7 +2570,7 @@ describe("HiveMapRuntime", () => {
       workspaceId: "workspace-a",
       index: {
         id: "repo-index-overlay-suggest-docs",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-25T10:05:00.000Z",
@@ -2484,7 +2666,7 @@ async function ensureCompletedRepositoryIndex(indexId: string): Promise<void> {
     workspaceId: "workspace-a",
     index: {
       id: indexId,
-      repositoryUrl: "/fixtures/repo",
+      repositoryUrl: "https://example.com/fixtures/repo.git",
       requestedRef: "main",
       mode: "safe",
       requestedAt: "2026-08-20T12:00:00.000Z",

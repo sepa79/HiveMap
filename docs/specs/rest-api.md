@@ -24,6 +24,8 @@ MCP is the primary agent interface. REST must call the same command handlers as 
   host, port, or credential details. Container health uses this endpoint, so a
   running HTTP process with unavailable Postgres is unhealthy.
 - `OPTIONS` is public for CORS preflight; allowed headers include `authorization` and MCP protocol headers.
+- JSON and MCP request bodies are limited to 2 MiB.
+- Repository indexing over REST accepts remote HTTPS or SSH Git sources only. HTTP(S) userinfo, every URL password, query parameters, fragments, ASCII control characters, and backticks are rejected; the SSH username required by SSH Git transports remains valid. Accepted locations are normalized before persistence. Server-local paths and `file://` sources are not part of the network API authority.
 
 The same token protects the Streamable HTTP MCP endpoint at `/mcp`. A missing or incorrect token returns `401` before REST or MCP dispatch. Authentication is intentionally one shared operator token; users, roles, and per-workspace authorization are not part of this alpha contract.
 
@@ -100,11 +102,6 @@ POST /workspaces/:workspaceId/scans/:scanId/complete
 POST /workspaces/:workspaceId/scan-comparisons
 POST /workspaces/:workspaceId/findings/:findingNodeId/update
 
-POST /workspaces/:workspaceId/exports
-POST /workspace-imports
-
-POST /workspaces/:workspaceId/export-bundle
-POST /workspace-import-bundles?mode=new|replace
 ```
 
 Embedding routes are explicit and read-model-oriented:
@@ -135,7 +132,7 @@ Scan routes now start from one explicit completed repository index:
 
 `GET /workspaces` returns lightweight workspace records for browser selection without loading every semantic graph. Records may include optional discovery metadata such as `slug`, `archived`, and `updatedAt`.
 
-The `exports` and `workspace-imports` endpoints use explicit server filesystem paths and remain suitable for local automation. The `export-bundle` and `workspace-import-bundles` endpoints transfer `application/zip` bytes directly for browser download and file upload. Browser import still requires an explicit `new` or `replace` mode; it never silently merges workspaces.
+The current HTTP boundary exposes no workspace or project import/export routes. The deferred portability direction is a versioned streaming NDJSON full-project snapshot, but no transport contract is defined or implemented for it in this phase.
 
 ## Request / Response Direction
 

@@ -30,8 +30,6 @@ import type {
   CompareScansResponse,
   CompleteScanResponse,
   CreateScanFindingResponse,
-  ExportWorkspaceResponse,
-  ImportWorkspaceResponse,
   ListScanProfilesResponse,
   ListScanRunsResponse,
   RecordScanCalibrationDecisionResponse,
@@ -84,8 +82,6 @@ export const HIVEMAP_MCP_TOOL_NAMES: readonly McpToolName[] = [
   "finding_update",
   "scan_complete",
   "scan_compare",
-  "workspace_export_zip",
-  "workspace_import_zip",
 ] as const;
 
 export type McpToolResponseMap = {
@@ -123,8 +119,6 @@ export type McpToolResponseMap = {
   finding_update: UpdateFindingResponse;
   scan_complete: CompleteScanResponse;
   scan_compare: CompareScansResponse;
-  workspace_export_zip: ExportWorkspaceResponse;
-  workspace_import_zip: ImportWorkspaceResponse;
 };
 
 export type McpToolSuccess<T extends McpToolName> = {
@@ -250,10 +244,6 @@ async function dispatchMcpTool<T extends McpToolName>(
       return (await runtime.completeScan(request as McpToolRequestMap["scan_complete"])) as McpToolResponseMap[T];
     case "scan_compare":
       return (await runtime.compareScans(request as McpToolRequestMap["scan_compare"])) as McpToolResponseMap[T];
-    case "workspace_export_zip":
-      return (await runtime.exportWorkspace(request as McpToolRequestMap["workspace_export_zip"])) as McpToolResponseMap[T];
-    case "workspace_import_zip":
-      return (await runtime.importWorkspace(request as McpToolRequestMap["workspace_import_zip"])) as McpToolResponseMap[T];
   }
 }
 

@@ -305,6 +305,35 @@ describe("InMemoryHiveMapStore", () => {
     });
   });
 
+  it("rejects unsafe or non-canonical repository index locations", async () => {
+    const store = new InMemoryHiveMapStore();
+    await store.initialize();
+    await store.saveWorkspaceState(createState());
+
+    const baseRecord = {
+      id: "repo-index-unsafe",
+      workspaceId: "workspace-a",
+      mode: "safe" as const,
+      stage: "requested" as const,
+      requestedAt: "2026-08-20T12:00:00.000Z",
+      updatedAt: "2026-08-20T12:00:00.000Z",
+      actor: { agentId: "codex", tool: "test" },
+    };
+
+    await expect(
+      store.upsertRepositoryIndex({
+        ...baseRecord,
+        repositoryUrl: "https://example.com/org/repo.git?access_token=secret",
+      }),
+    ).rejects.toThrow("repositoryUrl must not contain query parameters or fragments");
+    await expect(
+      store.upsertRepositoryIndex({
+        ...baseRecord,
+        repositoryUrl: " https://example.com/org/repo.git ",
+      }),
+    ).rejects.toThrow("repositoryUrl must be canonical");
+  });
+
   it("stores repository index files and chunks and searches them", async () => {
     const store = new InMemoryHiveMapStore();
     await store.initialize();

@@ -4,7 +4,7 @@
 
 Use Postgres as the supported runtime persistence backend, behind explicit storage interfaces.
 
-The canonical workspace ZIP format stays storage-backend-independent. It is the supported portability and migration boundary between runtime backends.
+The current runtime has no workspace or project import/export boundary. The deferred portability direction is a backend-independent, versioned streaming NDJSON full-project snapshot.
 
 ## Scope
 
@@ -12,7 +12,7 @@ This spec is the source of truth for:
 
 - persisted logical workspace state,
 - storage rules and invariants,
-- ZIP import/export portability boundaries,
+- the absence of current import/export behavior and the deferred portability direction,
 - the concrete Postgres runtime schema.
 
 This file is the intended long-term source of truth for the concrete Postgres runtime schema.
@@ -52,10 +52,10 @@ The SQL below is the target Postgres schema contract. The current SQLite alpha i
   The next successful probe restores readiness without switching backends or
   inventing state.
 - Unknown schema versions are invalid.
-- Snapshots are not part of the current HiveMap runtime contract.
-- Use portable ZIP export/import for frozen evidence until a separate read-only clone contract exists.
-- ZIP import/export is the intended portability boundary and must use an explicit logical bundle-compatibility contract instead of runtime-adapter schema-version checks.
-- This spec defines the persisted logical state, import/export boundaries, and the target concrete Postgres DDL.
+- Import, export, and snapshots are not part of the current HiveMap runtime contract.
+- The deferred portability direction is a versioned streaming NDJSON full-project snapshot, not ZIP or another archive format.
+- A future portability contract must be defined independently from runtime-adapter schema versions before any import/export surface is implemented.
+- This spec defines the persisted logical state, the deferred portability direction, and the target concrete Postgres DDL.
 
 ## Postgres Conventions
 
@@ -68,7 +68,7 @@ The SQL below is the target Postgres schema contract. The current SQLite alpha i
 - Embeddings are runtime-derived suggestion state, not semantic source of truth.
 - The first vector slice stores explicit `concept` embeddings only.
 - Embedding writes require an explicit caller-supplied vector. HiveMap does not generate or silently regenerate embeddings on graph mutation in this slice.
-- ZIP export/import does not include embeddings in this slice; they are regenerable runtime state.
+- Embeddings are not portable in the current runtime. A future snapshot must define whether compatible vectors travel or are regenerated explicitly.
 - The semantic graph remains the source of truth for findings. A finding is stored as a graph node with `type = 'finding'`, plus validated finding metadata inside `nodes.metadata`.
 - Scan comparisons are derived from completed scan runs and finding evidence. They do not get a dedicated runtime table.
 
@@ -76,7 +76,7 @@ The SQL below is the target Postgres schema contract. The current SQLite alpha i
 
 The target Postgres runtime schema version is `16`.
 
-The current SQLite alpha implementation uses schema version `4` and remains legacy import evidence only, not the ZIP compatibility contract for the Postgres runtime.
+The historical SQLite alpha implementation used schema version `4` and remains implementation evidence only, not a supported runtime or migration contract.
 
 `scan_profiles.profile_recipe` stores only the allowlisted, typed, profile-specific evidence recipe arrays defined by `ScanProfile` (for example duplicate-authority and missing-owner patterns). Reads reject unknown keys before hydrating a profile, so JSON data cannot override core identity, scope, criteria, ordering, or required outputs from their explicit columns. Schema 16 closes the prior Postgres round-trip gap where those recipe fields were discarded and a freshly created workspace then failed validation on its first mutation.
 
@@ -598,26 +598,26 @@ They are derived from:
 - finding evidence stored on completed runs,
 - current finding nodes in the semantic graph when needed.
 
-Comparisons remain exportable evidence and repeat-scan artifacts, not a second mutable source of runtime truth.
+Comparisons remain persisted evidence and repeat-scan artifacts, not a second mutable source of runtime truth.
 
 ## Repository Index Job Storage
 
 Repository index jobs do get a dedicated operational table.
 
-They are not semantic graph state and they are not part of the canonical ZIP contract in this phase.
+They are not semantic graph state and are excluded from the deferred portable content because they describe mutable execution state.
 
 `repository_indexes` stores:
 
 - one explicit workspace-scoped repository indexing request or lifecycle record per `workspace_id` and `id`;
-- the requested repository URL and optional requested ref;
-- the current lifecycle stage for safe/deep indexing orchestration;
+- the canonical requested repository location and optional requested ref; the location uses the shared repository-location parser, contains no query, fragment, embedded HTTP(S) userinfo, URL password, ASCII control character, or backtick, and imported or hydrated records fail fast when this invariant is not met;
+- the current lifecycle stage for safe/deep indexing orchestration; in the supported single-process topology, an active stage encountered by a later explicit execute call is an interrupted prior-process attempt and is restarted from an empty fact set;
 - agent/tool provenance for who requested the job;
 - optional resolved commit and terminal failure details;
 - optional persisted summary stats for completed file/chunk content.
 
 `repository_indexes` is operational runtime state. Replacing or deleting a workspace may clear these rows; callers must treat them as rebuildable orchestration state rather than portable canonical content.
 
-This does not remove the long-term portability requirement for completed repository indexes. The omitted piece in the current slice is only job/execution state, not the eventual ability to move a finished index between environments through the normal full-project export/import flow.
+This does not remove the long-term portability requirement for completed repository indexes. The omitted piece in the current slice is only job/execution state; completed retrieval facts belong in the deferred full-project NDJSON snapshot.
 
 ## Repository Index Content Storage
 
@@ -646,7 +646,7 @@ This does not remove the long-term portability requirement for completed reposit
 - bounded source range plus deterministic visibility/export flags;
 - explicit producer provenance for the parser adapter that generated the row.
 
-In this slice these tables are persisted runtime evidence, not semantic graph truth, and they are still excluded from the canonical ZIP portability contract.
+In this slice these tables are persisted runtime evidence, not semantic graph truth. They have no current portability surface and belong in the deferred full-project NDJSON snapshot.
 
 ## Planned Structural Fact Storage
 
@@ -662,14 +662,15 @@ The implementation target for that slice is:
 - every row references the owning repository file and bounded range when applicable;
 - every row stores explicit producer provenance such as tool id, version, and configuration digest;
 - facts remain retrieval/index evidence rather than semantic graph truth;
-- these tables remain excluded from the ZIP contract until the completed-index portability phase defines how finished index facts move between environments.
+- these tables have no current portability surface and must join the same deferred full-project NDJSON snapshot when that contract is implemented.
 
 ## Transaction Model
 
-- Every create, save, import, proposal apply, or scan mutation for one workspace must execute inside one database transaction.
+- Every create, save, proposal apply, or scan mutation for one workspace must execute inside one database transaction.
 - Writers must lock the owning workspace row before replacing child state so concurrent whole-workspace writes do not silently lose updates.
+- The current single-process runtime serializes every workspace-owned mutation by workspace id, including whole-workspace load/modify/save flows and repository-index lifecycle writes. This closes stale-snapshot, duplicate-execution, and workspace-replacement races between REST and HTTP MCP within the supported one-replica topology.
+- Multi-process or multi-replica writers are not supported until the storage contract exposes and checks an expected workspace revision.
 - Successful mutating transactions must increment `workspaces.revision`.
-- `replace` ZIP import must delete and recreate the target workspace state inside one transaction so a failed import cannot partially destroy the previous workspace.
 - Read operations may load the whole workspace state, but write behavior must be explicit about revision/concurrency handling instead of assuming SQLite-like single-writer behavior.
 
 ## Vector Storage And Query Rules
@@ -683,41 +684,27 @@ The implementation target for that slice is:
 - The first similarity query is bounded to one workspace, one source concept node, and one model.
 - The first similarity query uses exact cosine similarity ordering and returns read-only suggestions only.
 - Approximate nearest-neighbor indexing is intentionally deferred until model and dimension strategy are stable enough to justify model-specific partial indexes.
-- Embeddings are runtime-derived state and are intentionally omitted from the canonical ZIP portability contract in this slice.
-- Repository index jobs are operational runtime state and are intentionally omitted from the canonical ZIP portability contract in this slice.
-- Repository file/chunk/symbol retrieval tables are also intentionally omitted from the canonical ZIP portability contract in this slice.
-- A future completed-index portability slice may include bounded retrieval-ready embedding payloads or may regenerate them on import, but that decision is still open.
+- Embeddings are runtime-derived state. A future portability contract must either declare a compatible model/provenance contract for transferred vectors or regenerate them explicitly from transferred chunks.
+- Repository index jobs are operational runtime state and are not future portable semantic/retrieval content.
+- Completed repository file, chunk, symbol, reference, and dependency facts are required by the deferred full-project portability direction so a receiving agent can use a transferred completed scan without repeating semantic analysis.
 
 This keeps vector suggestions useful without making them semantic truth or coupling the runtime or portability contract to embedding generation.
 
-## Portable ZIP
+## Deferred Full-Project Portability
 
-The ZIP format and import modes follow `repository-scan.md`. `workspace.json` is the only canonical archive entry. Every other file is checksummed generated evidence and import validates it against the canonical state.
+The current runtime exposes no workspace or project import/export operation through REST, MCP, UI, local filesystem helpers, or storage APIs.
 
-The local UI downloads and uploads the same canonical bundle bytes through REST. Browser transport does not define a second archive format and does not expose server-side filesystem paths.
+The recorded future direction is one versioned NDJSON stream that can be validated and persisted incrementally without archive entry paths, decompression, or one large in-memory document. That contract is not implemented in the current phase.
 
-`replace` deletes and recreates the workspace inside one database transaction so a changed graph id cannot leave shadow graph state and a failed import cannot destroy the previous workspace.
+A future portable stream must include:
 
-Bundle manifest contract:
+- canonical workspace state, including semantic graph, projections, scan profiles, immutable completed scan runs, coverage, boundary maps, findings, and comparison inputs;
+- immutable repository identity and the completed retrieval facts required by the transferred scans: files, chunks, symbols, references, and dependencies;
+- explicit record kinds, format version, producer provenance, counts, and end-of-stream integrity data;
+- a defined embedding policy: compatible model-qualified vectors or explicit regeneration from imported chunks;
+- incremental per-record and total-stream validation before one atomic destination commit.
 
-- `format = "hivemap-workspace"`
-- `formatVersion = 2`
-- `logicalStateVersion = 1`
-- `storageSchemaVersion` is not part of the current canonical bundle contract
-
-Compatibility rules:
-
-- current runtimes must export format version `2` bundles only;
-- current runtimes must import format version `2` bundles when `logicalStateVersion = 1`;
-- current runtimes may import legacy format version `1` bundles only as a compatibility bridge for prior schema-version-coupled exports;
-- the accepted legacy storage schema bridge currently includes historical schema versions `2` and `4`;
-- runtime storage schema versions and bundle logical-state versions are distinct compatibility axes and must not be conflated.
-
-Current scope note:
-
-- the canonical workspace ZIP does not yet carry repository index operational rows or completed repository content tables such as `repository_files`, `repository_chunks`, and `repository_symbols`;
-- long-term product direction does require the normal full-project export/import path to carry completed repository index data so scans can be reviewed in another environment without repository checkout;
-- operational repository index job/execution rows remain excluded from that portable contract.
+It must exclude mutable repository-index execution/job state. It must also not embed an editable repository checkout: source code remains Git-owned, and the receiving environment must fetch the recorded commit or receive it through a separate standard Git bundle workflow. Receiving a completed index avoids another semantic scan; attaching a checkout is still required before an agent can edit files.
 
 ## Workspace Discovery Metadata
 
@@ -725,11 +712,11 @@ Current scope note:
 
 ## Current SQLite Alpha Reference
 
-The current SQLite alpha implementation remains the runnable compatibility reference until the Postgres adapter lands in code.
+The historical SQLite alpha implementation remains reference evidence only.
 
 Its concrete schema and migration behavior live in:
 
 - `packages/storage/src/index.ts`
 - `packages/storage/src/schema.ts`
 
-That implementation uses schema version `4` and remains transitional evidence, including legacy ZIP import compatibility, not the target runtime destination.
+That implementation used schema version `4` and is not the target runtime destination or a supported migration source.

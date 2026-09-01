@@ -12,7 +12,7 @@ import { connectHiveMapStdioServer } from "./sdk-server.js";
 const storeConfig = readStoreConfig(process.argv, process.env);
 const store = openHiveMapStore(storeConfig);
 await store.initialize();
-await connectHiveMapStdioServer(new HiveMapRuntime({ store }));
+await connectHiveMapStdioServer(new HiveMapRuntime({ store, repositorySourcePolicy: "local-allowed" }));
 console.error(`HiveMap MCP server running on stdio with ${describePostgresTarget(storeConfig.connectionString)}`);
 
 function readStoreConfig(

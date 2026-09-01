@@ -32,7 +32,7 @@ describeIfPostgres("api server on Postgres", () => {
     await store.close();
   });
 
-  it("preserves workspace, graph, and ZIP semantics on a Postgres-backed server", async () => {
+  it("preserves workspace and graph semantics on a Postgres-backed server", async () => {
     const workspaceId = `pg-api-${randomUUID()}`;
     const workspace = {
       id: workspaceId,
@@ -62,22 +62,6 @@ describeIfPostgres("api server on Postgres", () => {
       expect(listResponse.status).toBe(200);
       const listBody = parseJson<{ workspaces: Array<typeof workspace> }>(listResponse);
       expect(listBody.workspaces.find((candidate) => candidate.id === workspace.id)).toEqual(workspace);
-
-      const exportResponse = await postJson(handleRequest, `/workspaces/${workspace.id}/export-bundle`, {
-        exportedAt: "2026-08-19T21:21:00.000Z",
-      });
-      expect(exportResponse.status).toBe(200);
-      const zip = exportResponse.body;
-
-      await store.deleteWorkspace(workspace.id);
-
-      const importResponse = await request(handleRequest, "/workspace-import-bundles?mode=new", {
-        method: "POST",
-        headers: { "content-type": "application/zip" },
-        body: zip,
-      });
-      expect(importResponse.status).toBe(201);
-      expect(parseJson(importResponse) as unknown).toMatchObject({ workspace });
 
       const workspaceResponse = await request(handleRequest, `/workspaces/${workspace.id}`);
       expect(workspaceResponse.status).toBe(200);

@@ -70,8 +70,6 @@ describe("HiveMap MCP SDK server", () => {
       "finding_update",
       "scan_complete",
       "scan_compare",
-      "workspace_export_zip",
-      "workspace_import_zip",
     ]);
     expect(result.tools.find((tool) => tool.name === "scan_start")?.description).toContain("calibration-phase response");
   });
@@ -161,7 +159,7 @@ describe("HiveMap MCP SDK server", () => {
         workspaceId: "workspace-a",
         index: {
           id: "repo-index-a",
-          repositoryUrl: "/fixtures/repo",
+          repositoryUrl: "https://example.com/fixtures/repo.git",
           requestedRef: "main",
           mode: "safe",
           requestedAt: "2026-08-20T12:00:00.000Z",
@@ -179,7 +177,7 @@ describe("HiveMap MCP SDK server", () => {
         index: {
           id: "repo-index-a",
           workspaceId: "workspace-a",
-          repositoryUrl: "/fixtures/repo",
+          repositoryUrl: "https://example.com/fixtures/repo.git",
           requestedRef: "main",
           mode: "safe",
           stage: "requested",

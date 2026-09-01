@@ -19,9 +19,8 @@ import {
   validateListRepositoryEvidenceCandidatesRequest,
   validateGetWorkspaceSummaryRequest,
   validateGetProjectionRequest,
-  validateExportWorkspaceBundleRequest,
-  validateImportWorkspaceBundleRequest,
   validateListRepositoryIndexesRequest,
+  normalizeRepositoryUrlIdentifier,
   validateListWorkspaceSummariesRequest,
   validateRecordFeedbackRequest,
   validateRecordScanCalibrationDecisionRequest,
@@ -72,6 +71,9 @@ describe("api contracts", () => {
   });
 
   it("validates repository index requests", () => {
+    expect(normalizeRepositoryUrlIdentifier(" HTTPS://EXAMPLE.COM/org/repo.git ")).toBe(
+      "https://example.com/org/repo.git",
+    );
     expect(() => validateListRepositoryIndexesRequest({ workspaceId: "workspace-a" })).not.toThrow();
     expect(() => validateGetRepositoryIndexRequest({ workspaceId: "workspace-a", indexId: "repo-index-a" })).not.toThrow();
     expect(() =>
@@ -105,6 +107,91 @@ describe("api contracts", () => {
         },
       }),
     ).toThrow("index.repositoryUrl must be non-empty");
+    expect(() =>
+      validateStartRepositoryIndexRequest({
+        workspaceId: "workspace-a",
+        index: {
+          id: "repo-index-secret",
+          repositoryUrl: "https://operator:secret@example.com/org/repo.git",
+          mode: "safe",
+          requestedAt: "2026-08-20T12:00:00.000Z",
+          actor: { agentId: "codex", tool: "test" },
+        },
+      }),
+    ).toThrow("index.repositoryUrl must not contain embedded credentials");
+    expect(() =>
+      validateStartRepositoryIndexRequest({
+        workspaceId: "workspace-a",
+        index: {
+          id: "repo-index-control-character",
+          repositoryUrl: "https://example.com/org/repo.git`\nInjected",
+          mode: "safe",
+          requestedAt: "2026-08-20T12:00:00.000Z",
+          actor: { agentId: "codex", tool: "test" },
+        },
+      }),
+    ).toThrow("index.repositoryUrl must not contain ASCII control characters or backticks");
+    expect(() =>
+      validateStartRepositoryIndexRequest({
+        workspaceId: "workspace-a",
+        index: {
+          id: "repo-index-ssh-user",
+          repositoryUrl: "ssh://git@example.com/org/repo.git",
+          mode: "safe",
+          requestedAt: "2026-08-20T12:00:00.000Z",
+          actor: { agentId: "codex", tool: "test" },
+        },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateStartRepositoryIndexRequest({
+        workspaceId: "workspace-a",
+        index: {
+          id: "repo-index-query",
+          repositoryUrl: "https://example.com/org/repo.git?access_token=secret",
+          mode: "safe",
+          requestedAt: "2026-08-20T12:00:00.000Z",
+          actor: { agentId: "codex", tool: "test" },
+        },
+      }),
+    ).toThrow("index.repositoryUrl must not contain query parameters or fragments");
+    expect(() =>
+      validateStartRepositoryIndexRequest({
+        workspaceId: "workspace-a",
+        index: {
+          id: "repo-index-fragment",
+          repositoryUrl: "ssh://git@example.com/org/repo.git#secret",
+          mode: "safe",
+          requestedAt: "2026-08-20T12:00:00.000Z",
+          actor: { agentId: "codex", tool: "test" },
+        },
+      }),
+    ).toThrow("index.repositoryUrl must not contain query parameters or fragments");
+    expect(() =>
+      validateStartRepositoryIndexRequest({
+        workspaceId: "workspace-a",
+        index: {
+          id: "repo-index-option-ref",
+          repositoryUrl: "https://example.com/org/repo.git",
+          requestedRef: "--upload-pack=malicious",
+          mode: "safe",
+          requestedAt: "2026-08-20T12:00:00.000Z",
+          actor: { agentId: "codex", tool: "test" },
+        },
+      }),
+    ).toThrow("index.requestedRef must not begin with '-'");
+    expect(() =>
+      validateStartRepositoryIndexRequest({
+        workspaceId: "workspace-a",
+        index: {
+          id: "repo-index-uppercase-secret",
+          repositoryUrl: "HTTPS://operator:secret@example.com/org/repo.git",
+          mode: "safe",
+          requestedAt: "2026-08-20T12:00:00.000Z",
+          actor: { agentId: "codex", tool: "test" },
+        },
+      }),
+    ).toThrow("index.repositoryUrl must not contain embedded credentials");
     expect(() => validateExecuteRepositoryIndexRequest({ workspaceId: "workspace-a", indexId: "repo-index-a" })).not.toThrow();
     expect(() =>
       validateSearchRepositoryIndexRequest({
@@ -326,18 +413,6 @@ describe("api contracts", () => {
   it("rejects proposal approve without proposal id", () => {
     expect(() => validateApproveProposalRequest({ workspaceId: "workspace-a", proposalId: "" })).toThrow(
       ApiContractValidationError,
-    );
-  });
-
-  it("validates browser ZIP bundle boundaries", () => {
-    expect(() =>
-      validateExportWorkspaceBundleRequest({
-        workspaceId: "workspace-a",
-        exportedAt: "2026-07-17T12:00:00.000Z",
-      }),
-    ).not.toThrow();
-    expect(() => validateImportWorkspaceBundleRequest({ bytes: new Uint8Array(), mode: "new" })).toThrow(
-      "bytes must contain a ZIP bundle",
     );
   });
 

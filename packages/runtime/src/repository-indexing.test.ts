@@ -1,12 +1,17 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createRepositoryChunks, executeSafeRepositoryIndex } from "./repository-indexing.js";
+import {
+  createRepositoryChunks,
+  executeSafeRepositoryIndex,
+  SAFE_REPOSITORY_INDEX_LIMITS,
+} from "./repository-indexing.js";
+import { RepositoryFactBudget } from "./repository-fact-budget.js";
 
 const execFileAsync = promisify(execFile);
 const temporaryPaths: string[] = [];
@@ -24,6 +29,7 @@ describe("createRepositoryChunks", () => {
       language: "markdown",
       sourceKind: "documentation",
       text: "Intro paragraph.\nStill intro.\n\n# Heading\nBody text.",
+      factBudget: new RepositoryFactBudget(),
     });
 
     expect(chunks).toEqual([
@@ -70,6 +76,7 @@ describe("createRepositoryChunks", () => {
       language: "yaml",
       sourceKind: "config",
       text,
+      factBudget: new RepositoryFactBudget(),
     });
 
     expect(chunks).toHaveLength(1);
@@ -81,6 +88,22 @@ describe("createRepositoryChunks", () => {
         text,
       }),
     );
+  });
+
+  it("stops documentation chunk construction at the incremental fact budget", () => {
+    const factBudget = new RepositoryFactBudget({ maxFacts: 2, maxChunks: 2 });
+
+    expect(() =>
+      createRepositoryChunks({
+        workspaceId: "workspace-a",
+        indexId: "repo-index-a",
+        filePath: "docs/heading-heavy.md",
+        language: "markdown",
+        sourceKind: "documentation",
+        text: "# One\n# Two\n# Three\n",
+        factBudget,
+      }),
+    ).toThrowError(expect.objectContaining({ code: "REPOSITORY_CHUNK_LIMIT_EXCEEDED" }));
   });
 
   it("indexes extensionless node launchers as javascript and resolves their imports", async () => {
@@ -101,6 +124,7 @@ describe("createRepositoryChunks", () => {
       workspaceId: "workspace-a",
       indexId: "repo-index-a",
       repositoryUrl: repositoryRoot,
+      sourcePolicy: "local-allowed",
       requestedRef: "HEAD",
     });
 
@@ -134,4 +158,96 @@ describe("createRepositoryChunks", () => {
       ]),
     );
   });
+
+  it("rejects tracked symlinks instead of reading outside the checkout", async () => {
+    const repositoryRoot = await mkdtemp(join(tmpdir(), "hivemap-index-symlink-repo-"));
+    const outsideRoot = await mkdtemp(join(tmpdir(), "hivemap-index-symlink-outside-"));
+    temporaryPaths.push(repositoryRoot, outsideRoot);
+    const outsideFile = join(outsideRoot, "runtime-secret.txt");
+    await writeFile(outsideFile, "review-secret-marker\n");
+    await symlink(outsideFile, join(repositoryRoot, "tracked-link.txt"));
+    await commitFixture(repositoryRoot);
+
+    await expect(
+      executeSafeRepositoryIndex({
+        workspaceId: "workspace-a",
+        indexId: "repo-index-a",
+        repositoryUrl: repositoryRoot,
+        sourcePolicy: "local-allowed",
+        requestedRef: "HEAD",
+      }),
+    ).rejects.toMatchObject({ code: "REPOSITORY_SYMLINK_REJECTED" });
+  });
+
+  it("rejects oversized tracked files before reading them", async () => {
+    const repositoryRoot = await mkdtemp(join(tmpdir(), "hivemap-index-large-file-"));
+    temporaryPaths.push(repositoryRoot);
+    await writeFile(join(repositoryRoot, "oversized.txt"), Buffer.alloc(SAFE_REPOSITORY_INDEX_LIMITS.maxFileBytes + 1, 65));
+    await commitFixture(repositoryRoot);
+
+    await expect(
+      executeSafeRepositoryIndex({
+        workspaceId: "workspace-a",
+        indexId: "repo-index-a",
+        repositoryUrl: repositoryRoot,
+        sourcePolicy: "local-allowed",
+        requestedRef: "HEAD",
+      }),
+    ).rejects.toMatchObject({ code: "REPOSITORY_FILE_SIZE_LIMIT_EXCEEDED" });
+  });
+
+  it("rejects credential-bearing repository URLs before clone", async () => {
+    await expect(
+      executeSafeRepositoryIndex({
+        workspaceId: "workspace-a",
+        indexId: "repo-index-a",
+        repositoryUrl: "https://operator:secret@example.com/org/repo.git",
+      }),
+    ).rejects.toMatchObject({ code: "UNSAFE_REPOSITORY_URL" });
+  });
+
+  it("rejects repository URL query parameters before clone", async () => {
+    await expect(
+      executeSafeRepositoryIndex({
+        workspaceId: "workspace-a",
+        indexId: "repo-index-a",
+        repositoryUrl: "https://example.com/org/repo.git?access_token=secret",
+      }),
+    ).rejects.toMatchObject({ code: "UNSAFE_REPOSITORY_URL" });
+  });
+
+  it("rejects local repository sources unless the caller explicitly enables local operation", async () => {
+    const repositoryRoot = await mkdtemp(join(tmpdir(), "hivemap-index-local-policy-"));
+    temporaryPaths.push(repositoryRoot);
+    await writeFile(join(repositoryRoot, "README.md"), "# Local fixture\n");
+    await commitFixture(repositoryRoot);
+
+    await expect(
+      executeSafeRepositoryIndex({
+        workspaceId: "workspace-a",
+        indexId: "repo-index-a",
+        repositoryUrl: repositoryRoot,
+        requestedRef: "HEAD",
+      }),
+    ).rejects.toMatchObject({ code: "LOCAL_REPOSITORY_SOURCE_NOT_ALLOWED" });
+  });
+
+  it("rejects option-shaped Git refs before invoking fetch", async () => {
+    await expect(
+      executeSafeRepositoryIndex({
+        workspaceId: "workspace-a",
+        indexId: "repo-index-a",
+        repositoryUrl: "https://example.com/org/repo.git",
+        requestedRef: "--upload-pack=malicious",
+      }),
+    ).rejects.toMatchObject({ code: "UNSAFE_REPOSITORY_REF" });
+  });
 });
+
+async function commitFixture(repositoryRoot: string): Promise<void> {
+  await execFileAsync("git", ["init"], { cwd: repositoryRoot });
+  await execFileAsync("git", ["config", "user.email", "codex@example.com"], { cwd: repositoryRoot });
+  await execFileAsync("git", ["config", "user.name", "Codex"], { cwd: repositoryRoot });
+  await execFileAsync("git", ["add", "."], { cwd: repositoryRoot });
+  await execFileAsync("git", ["commit", "-m", "fixture"], { cwd: repositoryRoot });
+}

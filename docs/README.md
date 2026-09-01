@@ -21,7 +21,7 @@ Design HiveMap 1.0 around:
 - category overlays,
 - user-controlled capture policy,
 - agent-mediated interpretation,
-- saved views plus portable exports for demos/history.
+- saved views for demos/history; project portability is deferred.
 
 ## Canonical Docs
 
@@ -38,8 +38,8 @@ Design HiveMap 1.0 around:
 - `evidence/`: bounded visual and interaction-review artifacts for changed UI behavior.
 - `ai/`: command, review, Jester, and HiveMind workflow rules.
 - `ai/KNOWLEDGE_MAP_WORKFLOW.md`: repeatable workflow for correlating concepts with docs, code, tests, assets, and HiveMind.
-- `specs/repository-scan.md`: repeatable agent scans, finding evidence, before/after comparison, and portable ZIP bundles.
-- `ai/REPOSITORY_SCAN_WORKFLOW.md`: agent procedure for executing, verifying, importing, and repeating a scan.
+- `specs/repository-scan.md`: repeatable agent scans, finding evidence, and before/after comparison.
+- `ai/REPOSITORY_SCAN_WORKFLOW.md`: agent procedure for executing, verifying, and repeating a scan in one environment.
 
 ## POC Boundary
 

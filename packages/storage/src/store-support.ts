@@ -7,7 +7,11 @@ import { validateGraphProposal, validateCapturePolicy, validateFeedbackEvents } 
 import { validateCategoryAssignments, validateCategoryCatalog, type CategoryAssignmentTargetIndex } from "@hivemap/categories";
 import { validateGraph, type SemanticGraph } from "@hivemap/graph-core";
 import { validateProjection, type Projection } from "@hivemap/projections";
-import { validateScanState } from "@hivemap/scans";
+import {
+  assertCanonicalRepositoryLocation,
+  RepositoryLocationValidationError,
+  validateScanState,
+} from "@hivemap/scans";
 
 import type {
   ConceptEmbeddingRecord,
@@ -119,7 +123,14 @@ export function validateConceptEmbeddingRecord(record: ConceptEmbeddingRecord): 
 export function validateRepositoryIndexRecord(record: RepositoryIndexRecord): void {
   assertNonEmpty("workspaceId", record.workspaceId);
   assertNonEmpty("id", record.id);
-  assertNonEmpty("repositoryUrl", record.repositoryUrl);
+  try {
+    assertCanonicalRepositoryLocation(record.repositoryUrl);
+  } catch (error) {
+    if (error instanceof RepositoryLocationValidationError) {
+      throw new StorageError(error.message);
+    }
+    throw error;
+  }
   if (record.requestedRef !== undefined) {
     assertNonEmpty("requestedRef", record.requestedRef);
   }

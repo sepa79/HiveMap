@@ -21,7 +21,6 @@ import {
   Check,
   CheckCircle2,
   CircleSlash,
-  Download,
   FolderPlus,
   GitBranchPlus,
   GitCommitHorizontal,
@@ -30,9 +29,8 @@ import {
   Plus,
   Search,
   Tags,
-  Upload,
 } from "lucide-react";
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 
 import {
@@ -46,9 +44,7 @@ import {
   createProjectMap,
   createProposal,
   createWorkspace,
-  downloadWorkspaceBundle,
   getWorkspace,
-  importWorkspaceBundle,
   listWorkspaces,
   rejectProposal,
   recordFeedback,
@@ -97,7 +93,6 @@ export function App() {
   const [workspaceOptions, setWorkspaceOptions] = useState<WorkspaceRecord[]>([]);
   const [newWorkspaceId, setNewWorkspaceId] = useState("");
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
-  const [importMode, setImportMode] = useState<"new" | "replace">("new");
   const [state, setState] = useState<WorkspaceState | null>(null);
   const [selectedProjection, setSelectedProjection] = useState<Projection | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -113,7 +108,6 @@ export function App() {
   const [resolutionEvidence, setResolutionEvidence] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const importInputRef = useRef<HTMLInputElement>(null);
   const conceptDetailsRef = useRef<HTMLElement>(null);
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null);
   const [navigationDepth, setNavigationDepth] = useState(0);
@@ -363,44 +357,6 @@ export function App() {
       setSelectedNodeId(next.graph.nodes[0]?.id ?? null);
       setEdgeFrom(next.graph.nodes[0]?.id ?? "");
       setEdgeTo(next.graph.nodes[1]?.id ?? "");
-    });
-  }
-
-  function handleExportWorkspace(): void {
-    if (state === null) return;
-    void run(async () => {
-      const blob = await downloadWorkspaceBundle(state.workspace.id, new Date().toISOString());
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${state.workspace.id}.hivemap.zip`;
-      document.body.append(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    });
-  }
-
-  function handleImportWorkspace(event: ChangeEvent<HTMLInputElement>): void {
-    const input = event.currentTarget;
-    const file = input.files?.[0];
-    if (file === undefined) return;
-    void run(async () => {
-      try {
-        const imported = await importWorkspaceBundle(file, importMode);
-        await refreshWorkspaceOptions(imported.id);
-        const next = await refresh(imported.id);
-        setWorkspaceId(imported.id);
-        const projection = selectInitialProjection(next);
-        setSelectedProjection(projection);
-        replaceProjectionLocation(imported.id, projection, 0);
-        setNavigationDepth(0);
-        setSelectedNodeId(next.graph.nodes[0]?.id ?? null);
-        setEdgeFrom(next.graph.nodes[0]?.id ?? "");
-        setEdgeTo(next.graph.nodes[1]?.id ?? "");
-      } finally {
-        input.value = "";
-      }
     });
   }
 
@@ -688,20 +644,10 @@ export function App() {
               ))}
             </select>
           </label>
-          <div className="button-row">
-            <button type="button" onClick={handleLoadWorkspace} disabled={workspaceId === ""}>
-              <Search size={16} />
-              Load
-            </button>
-            <button
-              type="button"
-              onClick={handleExportWorkspace}
-              disabled={state === null || state.workspace.id !== workspaceId}
-            >
-              <Download size={16} />
-              Export ZIP
-            </button>
-          </div>
+          <button type="button" onClick={handleLoadWorkspace} disabled={workspaceId === ""}>
+            <Search size={16} />
+            Load
+          </button>
 
           <div className="workspace-divider" />
           <form className="nested-form" onSubmit={handleWorkspaceSubmit}>
@@ -718,26 +664,6 @@ export function App() {
               Create
             </button>
           </form>
-
-          <div className="workspace-divider" />
-          <label>
-            ZIP import behavior
-            <select value={importMode} onChange={(event) => setImportMode(event.currentTarget.value as "new" | "replace")}>
-              <option value="new">Create a new workspace</option>
-              <option value="replace">Replace matching workspace</option>
-            </select>
-          </label>
-          <input
-            ref={importInputRef}
-            className="file-input"
-            type="file"
-            accept=".zip,.hivemap.zip,application/zip"
-            onChange={handleImportWorkspace}
-          />
-          <button type="button" onClick={() => importInputRef.current?.click()}>
-            <Upload size={16} />
-            Import ZIP
-          </button>
         </section>
 
         <details className="panel emergency-tools">

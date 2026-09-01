@@ -15,6 +15,7 @@ import {
   validateListRepositoryIndexesRequest,
   validateListRepositoryEvidenceCandidatesRequest,
   validateListWorkspaceSummariesRequest,
+  normalizeRepositoryUrlIdentifier,
   validateResolveWorkspaceRequest,
   validateSearchRepositoryIndexRequest,
   validateListSimilarConceptsRequest,
@@ -33,10 +34,6 @@ import {
   validateCompleteScanRequest,
   validateCreateScanFindingRequest,
   validateRecordScanCalibrationDecisionRequest,
-  validateExportWorkspaceRequest,
-  validateExportWorkspaceBundleRequest,
-  validateImportWorkspaceRequest,
-  validateImportWorkspaceBundleRequest,
   validateRecordScanCoverageRequest,
   validateStartScanRequest,
   validateUpdateFindingRequest,
@@ -102,14 +99,6 @@ import {
   type CreateScanFindingResponse,
   type ExecuteRepositoryIndexRequest,
   type ExecuteRepositoryIndexResponse,
-  type ExportWorkspaceRequest,
-  type ExportWorkspaceResponse,
-  type ExportWorkspaceBundleRequest,
-  type ExportWorkspaceBundleResponse,
-  type ImportWorkspaceRequest,
-  type ImportWorkspaceResponse,
-  type ImportWorkspaceBundleRequest,
-  type ImportWorkspaceBundleResponse,
   type ListWorkspacesResponse,
   type ListWorkspaceSummariesRequest,
   type ListWorkspaceSummariesResponse,
@@ -162,12 +151,7 @@ import {
   type InProgressScanRun,
 } from "@hivemap/scans";
 import {
-  readWorkspaceBundle,
-  createWorkspaceBundle,
-  parseWorkspaceBundle,
   stableJson,
-  writeWorkspaceBundle,
-  type WorkspaceBundle,
   type HiveMapStore,
   type RepositoryFileRecord,
   type RepositoryDependencyRecord,
@@ -180,7 +164,12 @@ import {
 } from "@hivemap/storage";
 
 import { buildBoundaryMapArtifact } from "./repository-boundary-map.js";
-import { RepositoryIndexExecutionError, executeSafeRepositoryIndex, type RepositoryIndexExecutor } from "./repository-indexing.js";
+import {
+  RepositoryIndexExecutionError,
+  assertRepositorySourcePolicy,
+  executeSafeRepositoryIndex,
+  type RepositoryIndexExecutor,
+} from "./repository-indexing.js";
 import { RuntimeError } from "./runtime-error.js";
 import {
   createScanCoverageWarnings,
@@ -197,6 +186,7 @@ import {
 } from "./scan-profile-guidance.js";
 import { createRepositoryEvidenceCandidates } from "./repository-evidence-candidates.js";
 import { matchesAnyGlob, normalizeRepositoryPath } from "./repository-path.js";
+import { OperationCoordinator } from "./operation-coordinator.js";
 
 export { RepositoryIndexExecutionError, executeSafeRepositoryIndex, type RepositoryIndexExecutor } from "./repository-indexing.js";
 export { RuntimeError } from "./runtime-error.js";
@@ -204,25 +194,31 @@ export { RuntimeError } from "./runtime-error.js";
 export type HiveMapRuntimeOptions = {
   store: HiveMapStore;
   repositoryIndexExecutor?: RepositoryIndexExecutor;
+  repositorySourcePolicy?: "remote-only" | "local-allowed";
   now?: () => string;
 };
 
 export class HiveMapRuntime {
   private readonly store: HiveMapStore;
   private readonly repositoryIndexExecutor: RepositoryIndexExecutor;
+  private readonly repositorySourcePolicy: "remote-only" | "local-allowed";
   private readonly now: () => string;
+  private readonly operations = new OperationCoordinator();
 
   constructor(options: HiveMapRuntimeOptions) {
     this.store = options.store;
     this.repositoryIndexExecutor = options.repositoryIndexExecutor ?? executeSafeRepositoryIndex;
+    this.repositorySourcePolicy = options.repositorySourcePolicy ?? "remote-only";
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
   async createWorkspace(request: CreateWorkspaceRequest): Promise<CreateWorkspaceResponse> {
     validateCreateWorkspaceRequest(request);
-    const state = createInitialWorkspaceState(request);
-    await this.store.saveWorkspaceState(state);
-    return { workspace: state.workspace };
+    return this.operations.run(workspaceMutationKey(request.workspace.id), async () => {
+      const state = createInitialWorkspaceState(request);
+      await this.store.saveWorkspaceState(state);
+      return { workspace: state.workspace };
+    });
   }
 
   async listWorkspaceSummaries(request: ListWorkspaceSummariesRequest): Promise<ListWorkspaceSummariesResponse> {
@@ -300,6 +296,24 @@ export class HiveMapRuntime {
 
   async startRepositoryIndex(request: StartRepositoryIndexRequest): Promise<StartRepositoryIndexResponse> {
     validateStartRepositoryIndexRequest(request);
+    const repositoryUrl = normalizeRepositoryUrlIdentifier(request.index.repositoryUrl);
+    try {
+      assertRepositorySourcePolicy(repositoryUrl, this.repositorySourcePolicy);
+    } catch (error) {
+      if (error instanceof RepositoryIndexExecutionError) {
+        throw new RuntimeError(error.message, { code: error.code });
+      }
+      throw error;
+    }
+    return this.operations.run(workspaceMutationKey(request.workspaceId), () =>
+      this.startRepositoryIndexMutation(request, repositoryUrl),
+    );
+  }
+
+  private async startRepositoryIndexMutation(
+    request: StartRepositoryIndexRequest,
+    repositoryUrl: string,
+  ): Promise<StartRepositoryIndexResponse> {
     if (request.index.mode === "deep") {
       throw new RuntimeError("Deep repository indexing is not implemented in the current phase", {
         code: "REPOSITORY_INDEX_MODE_UNAVAILABLE",
@@ -318,7 +332,7 @@ export class HiveMapRuntime {
     const index: RepositoryIndexRecord = {
       id: request.index.id,
       workspaceId: request.workspaceId,
-      repositoryUrl: request.index.repositoryUrl,
+      repositoryUrl,
       mode: request.index.mode,
       stage: "requested",
       requestedAt: request.index.requestedAt,
@@ -336,6 +350,22 @@ export class HiveMapRuntime {
 
   async executeRepositoryIndex(request: ExecuteRepositoryIndexRequest): Promise<ExecuteRepositoryIndexResponse> {
     validateExecuteRepositoryIndexRequest(request);
+    return this.operations.runExclusive(
+      repositoryIndexExecutionKey(),
+      repositoryIndexExecutionId(request.workspaceId, request.indexId),
+      () => this.operations.run(
+        workspaceMutationKey(request.workspaceId),
+        () => this.executeRepositoryIndexMutation(request),
+      ),
+      () =>
+        new RuntimeError(`Repository index is already running: ${request.indexId}`, {
+          code: "REPOSITORY_INDEX_ALREADY_RUNNING",
+          details: { indexId: request.indexId },
+        }),
+    );
+  }
+
+  private async executeRepositoryIndexMutation(request: ExecuteRepositoryIndexRequest): Promise<ExecuteRepositoryIndexResponse> {
     const index = await this.store.getRepositoryIndex(request.workspaceId, request.indexId);
     if (index.mode !== "safe") {
       throw new RuntimeError("Only safe repository indexing is implemented in the current phase", {
@@ -343,15 +373,8 @@ export class HiveMapRuntime {
         details: { mode: index.mode },
       });
     }
-    if (isRepositoryIndexStageActive(index.stage)) {
-      throw new RuntimeError(`Repository index is already running: ${index.id}`, {
-        code: "REPOSITORY_INDEX_ALREADY_RUNNING",
-        details: { indexId: index.id, stage: index.stage },
-      });
-    }
-
     await this.store.upsertRepositoryIndex(createRepositoryIndexExecutionRecord(index, this.now()));
-    if (isRepositoryIndexTerminalStage(index.stage)) {
+    if (index.stage !== "requested") {
       await this.store.replaceRepositoryIndexContents(request.workspaceId, request.indexId, [], [], []);
     }
 
@@ -361,6 +384,7 @@ export class HiveMapRuntime {
         workspaceId: request.workspaceId,
         indexId: request.indexId,
         repositoryUrl: index.repositoryUrl,
+        sourcePolicy: this.repositorySourcePolicy,
         ...(index.requestedRef === undefined ? {} : { requestedRef: index.requestedRef }),
       });
       await this.bumpRepositoryIndexStage(request.workspaceId, request.indexId, "discovering", {
@@ -624,6 +648,12 @@ export class HiveMapRuntime {
 
   async upsertConceptEmbedding(request: UpsertConceptEmbeddingRequest): Promise<UpsertConceptEmbeddingResponse> {
     validateUpsertConceptEmbeddingRequest(request);
+    return this.operations.run(workspaceMutationKey(request.workspaceId), () => this.upsertConceptEmbeddingMutation(request));
+  }
+
+  private async upsertConceptEmbeddingMutation(
+    request: UpsertConceptEmbeddingRequest,
+  ): Promise<UpsertConceptEmbeddingResponse> {
     const state = await this.store.loadWorkspaceState(request.workspaceId);
     const node = findNodeById(state.graph, request.nodeId);
     if (node.type !== "concept") {
@@ -706,10 +736,12 @@ export class HiveMapRuntime {
 
   async applyGraphCommands(request: ApplyGraphCommandsRequest): Promise<ApplyGraphCommandsResponse> {
     validateApplyGraphCommandsRequest(request);
-    const state = await this.store.loadWorkspaceState(request.workspaceId);
-    const nextState = { ...state, graph: applyGraphCommands(state.graph, request.commands) };
-    await this.store.saveWorkspaceState(nextState);
-    return { graph: nextState.graph };
+    return this.operations.run(workspaceMutationKey(request.workspaceId), async () => {
+      const state = await this.store.loadWorkspaceState(request.workspaceId);
+      const nextState = { ...state, graph: applyGraphCommands(state.graph, request.commands) };
+      await this.store.saveWorkspaceState(nextState);
+      return { graph: nextState.graph };
+    });
   }
 
   async getCategories(workspaceId: string): Promise<GetCategoriesResponse> {
@@ -718,11 +750,13 @@ export class HiveMapRuntime {
   }
 
   async assignCategory(request: AssignCategoryRequest): Promise<AssignCategoryResponse> {
-    const state = await this.store.loadWorkspaceState(request.workspaceId);
-    validateAssignCategoryRequest(request, state.categoryCatalog, createTargetIndex(state));
-    const nextState = { ...state, categoryAssignments: [...state.categoryAssignments, request.assignment] };
-    await this.store.saveWorkspaceState(nextState);
-    return { assignments: nextState.categoryAssignments };
+    return this.operations.run(workspaceMutationKey(request.workspaceId), async () => {
+      const state = await this.store.loadWorkspaceState(request.workspaceId);
+      validateAssignCategoryRequest(request, state.categoryCatalog, createTargetIndex(state));
+      const nextState = { ...state, categoryAssignments: [...state.categoryAssignments, request.assignment] };
+      await this.store.saveWorkspaceState(nextState);
+      return { assignments: nextState.categoryAssignments };
+    });
   }
 
   async getProjection(request: GetProjectionRequest): Promise<GetProjectionResponse> {
@@ -732,16 +766,18 @@ export class HiveMapRuntime {
   }
 
   async createProjection(request: CreateProjectionRequest): Promise<CreateProjectionResponse> {
-    const state = await this.store.loadWorkspaceState(request.workspaceId);
-    const projection =
-      "type" in request.input
-        ? createProjectMapProjection(state.graph, request.input)
-        : "rootNodeId" in request.input
-        ? createDiveInProjection(state.graph, request.input)
-        : createOverviewProjection(state.graph, request.input);
-    const nextState = { ...state, projections: [...state.projections, projection] };
-    await this.store.saveWorkspaceState(nextState);
-    return { projection };
+    return this.operations.run(workspaceMutationKey(request.workspaceId), async () => {
+      const state = await this.store.loadWorkspaceState(request.workspaceId);
+      const projection =
+        "type" in request.input
+          ? createProjectMapProjection(state.graph, request.input)
+          : "rootNodeId" in request.input
+          ? createDiveInProjection(state.graph, request.input)
+          : createOverviewProjection(state.graph, request.input);
+      const nextState = { ...state, projections: [...state.projections, projection] };
+      await this.store.saveWorkspaceState(nextState);
+      return { projection };
+    });
   }
 
   async listFeedback(request: ListFeedbackRequest): Promise<ListFeedbackResponse> {
@@ -751,10 +787,12 @@ export class HiveMapRuntime {
 
   async recordFeedback(request: RecordFeedbackRequest): Promise<RecordFeedbackResponse> {
     validateRecordFeedbackRequest(request);
-    const state = await this.store.loadWorkspaceState(request.workspaceId);
-    const nextState = { ...state, feedbackEvents: [...state.feedbackEvents, request.feedbackEvent] };
-    await this.store.saveWorkspaceState(nextState);
-    return { feedbackEvents: nextState.feedbackEvents };
+    return this.operations.run(workspaceMutationKey(request.workspaceId), async () => {
+      const state = await this.store.loadWorkspaceState(request.workspaceId);
+      const nextState = { ...state, feedbackEvents: [...state.feedbackEvents, request.feedbackEvent] };
+      await this.store.saveWorkspaceState(nextState);
+      return { feedbackEvents: nextState.feedbackEvents };
+    });
   }
 
   async listProposals(request: ListProposalsRequest): Promise<ListProposalsResponse> {
@@ -764,50 +802,58 @@ export class HiveMapRuntime {
 
   async createProposal(request: CreateProposalRequest): Promise<CreateProposalResponse> {
     validateCreateProposalRequest(request);
-    const state = await this.store.loadWorkspaceState(request.workspaceId);
-    const nextState = { ...state, proposals: [...state.proposals, request.proposal] };
-    await this.store.saveWorkspaceState(nextState);
-    return { proposal: request.proposal };
+    return this.operations.run(workspaceMutationKey(request.workspaceId), async () => {
+      const state = await this.store.loadWorkspaceState(request.workspaceId);
+      const nextState = { ...state, proposals: [...state.proposals, request.proposal] };
+      await this.store.saveWorkspaceState(nextState);
+      return { proposal: request.proposal };
+    });
   }
 
   async applyProposal(request: ApplyProposalRequest): Promise<ApplyProposalResponse> {
     validateApplyProposalRequest(request);
-    const state = await this.store.loadWorkspaceState(request.workspaceId);
-    const proposal = findById(state.proposals, request.proposalId, "Proposal");
-    const result = applyApprovedProposal(state.graph, proposal);
-    const nextState = {
-      ...state,
-      graph: result.graph,
-      proposals: state.proposals.map((candidate) => (candidate.id === proposal.id ? result.proposal : candidate)),
-    };
-    await this.store.saveWorkspaceState(nextState);
-    return { graph: result.graph, proposal: result.proposal };
+    return this.operations.run(workspaceMutationKey(request.workspaceId), async () => {
+      const state = await this.store.loadWorkspaceState(request.workspaceId);
+      const proposal = findById(state.proposals, request.proposalId, "Proposal");
+      const result = applyApprovedProposal(state.graph, proposal);
+      const nextState = {
+        ...state,
+        graph: result.graph,
+        proposals: state.proposals.map((candidate) => (candidate.id === proposal.id ? result.proposal : candidate)),
+      };
+      await this.store.saveWorkspaceState(nextState);
+      return { graph: result.graph, proposal: result.proposal };
+    });
   }
 
   async approveProposal(request: ApproveProposalRequest): Promise<ApproveProposalResponse> {
     validateApproveProposalRequest(request);
-    const state = await this.store.loadWorkspaceState(request.workspaceId);
-    const proposal = findById(state.proposals, request.proposalId, "Proposal");
-    const approvedProposal = approvePendingProposal(proposal);
-    const nextState = {
-      ...state,
-      proposals: state.proposals.map((candidate) => (candidate.id === approvedProposal.id ? approvedProposal : candidate)),
-    };
-    await this.store.saveWorkspaceState(nextState);
-    return { proposal: approvedProposal };
+    return this.operations.run(workspaceMutationKey(request.workspaceId), async () => {
+      const state = await this.store.loadWorkspaceState(request.workspaceId);
+      const proposal = findById(state.proposals, request.proposalId, "Proposal");
+      const approvedProposal = approvePendingProposal(proposal);
+      const nextState = {
+        ...state,
+        proposals: state.proposals.map((candidate) => (candidate.id === approvedProposal.id ? approvedProposal : candidate)),
+      };
+      await this.store.saveWorkspaceState(nextState);
+      return { proposal: approvedProposal };
+    });
   }
 
   async rejectProposal(request: RejectProposalRequest): Promise<RejectProposalResponse> {
     validateRejectProposalRequest(request);
-    const state = await this.store.loadWorkspaceState(request.workspaceId);
-    const proposal = findById(state.proposals, request.proposalId, "Proposal");
-    const rejectedProposal = rejectPendingProposal(proposal);
-    const nextState = {
-      ...state,
-      proposals: state.proposals.map((candidate) => (candidate.id === rejectedProposal.id ? rejectedProposal : candidate)),
-    };
-    await this.store.saveWorkspaceState(nextState);
-    return { proposal: rejectedProposal };
+    return this.operations.run(workspaceMutationKey(request.workspaceId), async () => {
+      const state = await this.store.loadWorkspaceState(request.workspaceId);
+      const proposal = findById(state.proposals, request.proposalId, "Proposal");
+      const rejectedProposal = rejectPendingProposal(proposal);
+      const nextState = {
+        ...state,
+        proposals: state.proposals.map((candidate) => (candidate.id === rejectedProposal.id ? rejectedProposal : candidate)),
+      };
+      await this.store.saveWorkspaceState(nextState);
+      return { proposal: rejectedProposal };
+    });
   }
 
   async listScanProfiles(request: ListScanProfilesRequest): Promise<ListScanProfilesResponse> {
@@ -820,6 +866,10 @@ export class HiveMapRuntime {
 
   async startScan(request: StartScanRequest): Promise<StartScanResponse> {
     validateStartScanRequest(request);
+    return this.operations.run(workspaceMutationKey(request.workspaceId), () => this.startScanMutation(request));
+  }
+
+  private async startScanMutation(request: StartScanRequest): Promise<StartScanResponse> {
     const state = await this.store.loadWorkspaceState(request.workspaceId);
     if (state.scanRuns.some((run) => run.id === request.scan.id)) throw new RuntimeError(`Scan already exists: ${request.scan.id}`);
     const profile = findScanProfile(state, request.scan.profileId, request.scan.profileVersion);
@@ -883,6 +933,12 @@ export class HiveMapRuntime {
     request: RecordScanCalibrationDecisionRequest,
   ): Promise<RecordScanCalibrationDecisionResponse> {
     validateRecordScanCalibrationDecisionRequest(request);
+    return this.operations.run(workspaceMutationKey(request.workspaceId), () => this.recordScanCalibrationDecisionMutation(request));
+  }
+
+  private async recordScanCalibrationDecisionMutation(
+    request: RecordScanCalibrationDecisionRequest,
+  ): Promise<RecordScanCalibrationDecisionResponse> {
     const state = await this.store.loadWorkspaceState(request.workspaceId);
     const run = findInProgressScan(state, request.scanId);
     const recordedDecision: ScanCalibrationDecisionRecord = {
@@ -901,6 +957,10 @@ export class HiveMapRuntime {
 
   async recordScanCoverage(request: RecordScanCoverageRequest): Promise<RecordScanCoverageResponse> {
     validateRecordScanCoverageRequest(request);
+    return this.operations.run(workspaceMutationKey(request.workspaceId), () => this.recordScanCoverageMutation(request));
+  }
+
+  private async recordScanCoverageMutation(request: RecordScanCoverageRequest): Promise<RecordScanCoverageResponse> {
     const state = await this.store.loadWorkspaceState(request.workspaceId);
     const run = findInProgressScan(state, request.scanId);
     requireCalibrationDecision(run, "correct-coverage", "Recording corrected scan coverage");
@@ -1015,6 +1075,10 @@ export class HiveMapRuntime {
 
   async createScanFinding(request: CreateScanFindingRequest): Promise<CreateScanFindingResponse> {
     validateCreateScanFindingRequest(request);
+    return this.operations.run(workspaceMutationKey(request.workspaceId), () => this.createScanFindingMutation(request));
+  }
+
+  private async createScanFindingMutation(request: CreateScanFindingRequest): Promise<CreateScanFindingResponse> {
     const state = await this.store.loadWorkspaceState(request.workspaceId);
     if (state.capturePolicy.mode !== "delegated") {
       throw new RuntimeError(`scan_finding_create requires delegated capture; current mode is ${state.capturePolicy.mode}`);
@@ -1041,6 +1105,10 @@ export class HiveMapRuntime {
 
   async updateFinding(request: UpdateFindingRequest): Promise<UpdateFindingResponse> {
     validateUpdateFindingRequest(request);
+    return this.operations.run(workspaceMutationKey(request.workspaceId), () => this.updateFindingMutation(request));
+  }
+
+  private async updateFindingMutation(request: UpdateFindingRequest): Promise<UpdateFindingResponse> {
     const state = await this.store.loadWorkspaceState(request.workspaceId);
     const current = findById(state.graph.nodes, request.findingNodeId, "Finding node");
     const node = updateFindingNode(current, request.changes);
@@ -1060,6 +1128,10 @@ export class HiveMapRuntime {
 
   async completeScan(request: CompleteScanRequest): Promise<CompleteScanResponse> {
     validateCompleteScanRequest(request);
+    return this.operations.run(workspaceMutationKey(request.workspaceId), () => this.completeScanMutation(request));
+  }
+
+  private async completeScanMutation(request: CompleteScanRequest): Promise<CompleteScanResponse> {
     const state = await this.store.loadWorkspaceState(request.workspaceId);
     const run = findInProgressScan(state, request.scanId);
     if (run.coverage === undefined) throw new RuntimeError(`Scan coverage has not been recorded: ${run.id}`);
@@ -1127,42 +1199,6 @@ export class HiveMapRuntime {
     return { comparison: compareCompletedScans(before, after) };
   }
 
-  async exportWorkspace(request: ExportWorkspaceRequest): Promise<ExportWorkspaceResponse> {
-    validateExportWorkspaceRequest(request);
-    const state = await this.store.loadWorkspaceState(request.workspaceId);
-    return { path: request.targetPath, manifest: writeWorkspaceBundle(request.targetPath, state, request.exportedAt) };
-  }
-
-  async exportWorkspaceBundle(request: ExportWorkspaceBundleRequest): Promise<ExportWorkspaceBundleResponse> {
-    validateExportWorkspaceBundleRequest(request);
-    return createWorkspaceBundle(await this.store.loadWorkspaceState(request.workspaceId), request.exportedAt);
-  }
-
-  async importWorkspace(request: ImportWorkspaceRequest): Promise<ImportWorkspaceResponse> {
-    validateImportWorkspaceRequest(request);
-    return this.persistImportedBundle(readWorkspaceBundle(request.sourcePath), request.mode);
-  }
-
-  async importWorkspaceBundle(request: ImportWorkspaceBundleRequest): Promise<ImportWorkspaceBundleResponse> {
-    validateImportWorkspaceBundleRequest(request);
-    return this.persistImportedBundle(parseWorkspaceBundle(request.bytes), request.mode);
-  }
-
-  private async persistImportedBundle(
-    bundle: WorkspaceBundle,
-    mode: "new" | "replace",
-  ): Promise<ImportWorkspaceResponse> {
-    const exists = await this.store.workspaceExists(bundle.state.workspace.id);
-    if (mode === "new" && exists) throw new RuntimeError(`Workspace already exists: ${bundle.state.workspace.id}`);
-    if (mode === "replace" && !exists) throw new RuntimeError(`Workspace does not exist for replacement: ${bundle.state.workspace.id}`);
-    if (mode === "replace") {
-      await this.store.replaceWorkspaceState(bundle.state);
-    } else {
-      await this.store.saveWorkspaceState(bundle.state);
-    }
-    return { workspace: bundle.state.workspace, manifest: bundle.manifest };
-  }
-
   private async bumpRepositoryIndexStage(
     workspaceId: string,
     indexId: string,
@@ -1193,6 +1229,18 @@ function createInitialWorkspaceState(request: CreateWorkspaceRequest): Workspace
     scanProfiles: INITIAL_SCAN_PROFILES,
     scanRuns: [],
   };
+}
+
+function workspaceMutationKey(workspaceId: string): string {
+  return `workspace:${workspaceId}`;
+}
+
+function repositoryIndexExecutionKey(): string {
+  return "repository-index-execution";
+}
+
+function repositoryIndexExecutionId(workspaceId: string, indexId: string): string {
+  return `repository-index-execution:${workspaceId}:${indexId}`;
 }
 
 function toWorkspaceSummary(workspace: WorkspaceRecord): WorkspaceSummary {
@@ -1259,14 +1307,6 @@ function scoreWorkspaceSummaryMatch(workspace: WorkspaceSummary, query: string):
   }
 
   return 0;
-}
-
-function isRepositoryIndexStageActive(stage: RepositoryIndexRecord["stage"]): boolean {
-  return stage !== "requested" && stage !== "completed" && stage !== "failed" && stage !== "cancelled";
-}
-
-function isRepositoryIndexTerminalStage(stage: RepositoryIndexRecord["stage"]): boolean {
-  return stage === "completed" || stage === "failed" || stage === "cancelled";
 }
 
 function normalizeRepositoryIndexFailure(error: unknown): { code: string; message: string } {

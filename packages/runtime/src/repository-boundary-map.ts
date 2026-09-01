@@ -1,3 +1,8 @@
+/**
+ * Responsibility: Derive one candidate scan boundary-map artifact from normalized repository facts and coverage.
+ * Must not: Read repositories, persist scan state, or treat candidate boundaries as confirmed graph semantics.
+ * Contract: Implements the boundary-map artifact rules in docs/specs/repository-indexing.md and docs/specs/repository-scan.md.
+ */
 import { posix as pathPosix } from "node:path";
 
 import type { ProjectSourceRef } from "@hivemap/graph-core";

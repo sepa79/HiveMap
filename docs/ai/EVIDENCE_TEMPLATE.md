@@ -20,7 +20,7 @@ Passed / failed / not run, with short reason.
 
 ## Manual verification
 
-What was inspected manually: UI, API, MCP, bundle import/export, scan flow, or docs alignment.
+What was inspected manually: UI, API, MCP, scan flow, storage behavior, or docs alignment.
 
 ## Risks / TODOs
 

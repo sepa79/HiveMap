@@ -1534,6 +1534,7 @@ function rowToRepositoryIndexRecord(row: RepositoryIndexRow): RepositoryIndexRec
     };
   }
 
+  validateRepositoryIndexRecord(record);
   return record;
 }
 

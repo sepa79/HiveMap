@@ -57,49 +57,6 @@ describeIfPostgres("HiveMapRuntime on Postgres", () => {
     }
   });
 
-  it("round-trips ZIP bundles through the Postgres-backed runtime", async () => {
-    const workspaceId = `pg-runtime-${randomUUID()}`;
-    const workspace = {
-      id: workspaceId,
-      slug: `${workspaceId}-slug`,
-      name: `Postgres Runtime Import Export ${workspaceId}`,
-      createdAt: "2026-08-19T21:10:00.000Z",
-      updatedAt: "2026-08-19T21:10:00.000Z",
-    };
-
-    try {
-      await runtime.createWorkspace({ workspace });
-      await runtime.applyGraphCommands({
-        workspaceId: workspace.id,
-        commands: [
-          {
-            id: "cmd-root",
-            type: "node.create",
-            payload: { node: { id: "root", label: "Root", type: "concept" } },
-          },
-        ],
-      });
-
-      const before = await runtime.getWorkspace(workspace.id);
-      const exported = await runtime.exportWorkspaceBundle({
-        workspaceId: workspace.id,
-        exportedAt: "2026-08-19T21:11:00.000Z",
-      });
-
-      expect(exported.manifest.formatVersion).toBe(2);
-      expect(exported.manifest.logicalStateVersion).toBe(1);
-
-      await store.deleteWorkspace(workspace.id);
-      await runtime.importWorkspaceBundle({ bytes: exported.bytes, mode: "new" });
-
-      await expect(runtime.getWorkspace(workspace.id)).resolves.toEqual(before);
-    } finally {
-      if (await store.workspaceExists(workspace.id)) {
-        await store.deleteWorkspace(workspace.id);
-      }
-    }
-  });
-
   it("stores concept embeddings and returns read-only similar concept suggestions", async () => {
     const workspaceId = `pg-runtime-${randomUUID()}`;
     const workspace = {

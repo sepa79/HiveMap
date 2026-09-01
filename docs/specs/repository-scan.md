@@ -1,6 +1,6 @@
 # Repository Scan Contract
 
-Repository scans are agent-executed, auditable work units that populate a HiveMap semantic graph. HiveMap instructs, validates, persists, compares, imports, and exports scans; it does not silently crawl or interpret a repository.
+Repository scans are agent-executed, auditable work units that populate a HiveMap semantic graph. HiveMap instructs, validates, persists, and compares scans; it does not silently crawl or interpret a repository.
 
 ## Ownership
 
@@ -9,7 +9,7 @@ Repository scans are agent-executed, auditable work units that populate a HiveMa
 - The scan domain owns profiles, run lifecycle, coverage, finding metadata, and comparison semantics.
 - The semantic graph owns active findings. A finding is a graph node with type `finding`.
 - Completed scan evidence is immutable historical evidence, not a second active finding store.
-- Storage owns ZIP and database IO.
+- Storage owns database IO and persisted scan evidence.
 - MCP/API validate every boundary and expose failures.
 - Direct `scan_finding_create` graph mutation requires delegated capture. Other capture modes must use the existing proposal/approval flow.
 
@@ -206,7 +206,7 @@ Finding cards render the human title separately from machine-oriented tags. The 
 
 The map header explains what the current projection contains and the next available interaction. Clicking a finding node opens its dive-in directly; selecting a raw node without changing the projection is not sufficient finding navigation.
 
-The findings overview and finding dive-in carry projection-owned orientation notes rendered as large note nodes. An overview note explains what the review map is for, how priority columns and finding kinds differ, how to open evidence, and how to return. It is exported with the workspace.
+The findings overview and finding dive-in carry projection-owned orientation notes rendered as large note nodes. An overview note explains what the review map is for, how priority columns and finding kinds differ, how to open evidence, and how to return. It is persisted with the workspace.
 
 Workspace and projection ids are encoded in browser history. Opening a finding pushes its dive-in URL; both the application Back button and browser Back restore the previous projection. Direct projection URLs fail visibly when the workspace or projection does not exist.
 
@@ -220,27 +220,12 @@ Runs must use the same profile id. A profile version change remains visible in t
 
 The MVP pass policy requires no still-open, regressed, or new high/critical findings, no unverifiable results, and equal profile versions.
 
-## ZIP Bundle
+## Portability Boundary
 
-A `.hivemap.zip` contains:
+Workspace and scan import/export are not part of the current runtime. Completed scan evidence remains persisted and reviewable in its originating HiveMap environment.
 
-```text
-manifest.json
-workspace.json
-graph.json
-findings.json
-SUMMARY.md
-comparisons/<before-scan-id>--<after-scan-id>.json
-scans/<scan-id>/run.json
-scans/<scan-id>/coverage.json
-scans/<scan-id>/instructions.md
-scans/<scan-id>/repeat-scan.md
-```
-
-`workspace.json` is canonical. Other JSON/Markdown files are declared generated projections. Import validates schema version, every checksum, the canonical workspace state, and generated graph/findings equality.
-
-Import modes are explicit: `new` fails if the workspace exists; `replace` replaces a workspace with the same id. There is no silent merge or id rewriting.
+The deferred direction is the versioned streaming NDJSON full-project snapshot defined at a high level in `storage-format.md`. It must carry both completed scan evidence and the completed repository retrieval facts needed to continue agent work without repeating the semantic scan. No ZIP or archive-path contract remains active.
 
 ## Repeatability
 
-Every export includes the selected profile, original coverage, repository identity, scan criteria, and exact MCP operation sequence required to repeat the scan. The repeat scan must resolve or create a completed repository index, derive coverage from that index during `scan_start`, and compare the new completed run with the imported baseline. Explicit coverage override remains available only when the derived inventory needs correction.
+The persisted completed run includes the selected effective profile, original coverage, repository identity, applied scan criteria, declared outputs, and immutable evidence needed to compare a later run in the same environment. A repeat scan must resolve or create a completed repository index, derive coverage from that index during `scan_start`, and compare the new completed run with the existing baseline. Explicit coverage override remains available only when the derived inventory needs correction.

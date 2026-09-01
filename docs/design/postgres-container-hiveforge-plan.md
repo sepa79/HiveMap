@@ -1,6 +1,8 @@
 # Postgres, Container, HiveForge Plan
 
-Last updated: 2026-08-28
+Last updated: 2026-08-31
+
+Portability amendment: the former ZIP implementation and all current import/export surfaces were removed. Full-project portability is deferred to a separately specified streaming NDJSON contract and is not an active deliverable in this plan.
 
 ## Goal
 
@@ -10,13 +12,13 @@ Upgrade HiveMap from the local-first SQLite alpha shape to a container-friendly 
 
 - [x] HiveMind is the default durable memory layer for meaningful HiveMap development work when available.
 - [x] Runtime storage direction is `Postgres + pgvector`.
-- [x] ZIP export/import is the canonical workspace migration path between storage backends.
+- [x] Runtime storage does not expose a migration/import/export bridge; future full-project portability is deferred.
 - [x] Local Docker runtime comes before HiveForge integration.
 - [x] HiveForge integration comes before hosted Streamable HTTP MCP work.
 - [x] Embedding generation and vector-assisted product features were deferred from the base execution track and can be pulled forward afterward as a separate slice.
 - [x] Local packaging target is one self-contained container that bundles the HiveMap API, built web assets, Postgres, and built-in repository indexing/scan handlers.
 - [x] Local runtime should not require user-supplied DB URLs or database file paths.
-- [x] ZIP export remains a normal download flow.
+- [x] The installed runtime exposes no workspace or project import/export flow.
 - [x] Local `stdio` MCP is not part of the target runtime shape.
 
 ## Non-Goals For This Plan
@@ -53,7 +55,7 @@ Upgrade HiveMap from the local-first SQLite alpha shape to a container-friendly 
 
 - [x] Define the Postgres schema for workspaces, graph nodes/edges, categories, feedback, proposals, projections, scans, findings, and comparisons.
 - [x] Make `docs/specs/storage-format.md` the concrete Postgres schema source of truth instead of leaving schema details in a separate design-only document.
-- [x] Replace the current storage-schema-coupled bundle validator with an explicit backend-independent ZIP compatibility contract before calling the migration boundary complete.
+- [x] Remove the superseded archive validator and keep portability out of the active runtime contract.
 
 ## Phase 3 — Runtime Refactor
 
@@ -73,7 +75,7 @@ Upgrade HiveMap from the local-first SQLite alpha shape to a container-friendly 
 - [x] Keep local startup free of user-managed DB URLs or DB file paths.
 - [x] Add healthcheck behavior and explicit runtime env vars for the container-owned runtime only.
 - [x] Define startup/init/migration behavior for a fresh Postgres database inside the containerized runtime.
-- [x] Verify local container workflow for workspace create, graph operations, projection create/read, and ZIP download/import.
+- [x] Verify local container workflow for workspace create, graph operations, and projection create/read.
 - [x] Verify container restart behavior against a persisted Postgres volume without stale startup state.
 
 ## Phase 5 — Deferred Embeddings / Vector Workstream
@@ -201,7 +203,7 @@ Help an agent reach a correct working model of an unfamiliar repository before i
 ## Exit Criteria
 
 - [x] HiveMap runs locally in Docker on `Postgres + pgvector`.
-- [x] ZIP export/import works correctly on the new backend.
+- [x] Verify that the new backend has no workspace or project import/export surface.
 - [x] HiveForge can deploy the new runtime through an explicit contract.
 - [x] Protected Streamable HTTP MCP builds on the shared Postgres runtime instead of the old SQLite alpha shape.
 - [x] The local closeout matrix passes `npm run verify`, all real-Postgres suites, UI token save/use/clear, both HiveForge profile renders, and a built-image smoke covering REST, MCP, persistence, restart, SIGTERM, and Postgres outage/recovery.

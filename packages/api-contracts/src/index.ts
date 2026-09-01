@@ -25,6 +25,8 @@ import {
 } from "@hivemap/projections";
 import {
   SCAN_CALIBRATION_DECISION_VALUES,
+  normalizeRepositoryLocation,
+  RepositoryLocationValidationError,
   validateBoundaryMap,
   validateScanCoverage,
   type BoundaryMapArtifact,
@@ -39,7 +41,7 @@ import {
   type ScanRequiredOutput,
   type ScanRun,
 } from "@hivemap/scans";
-import type { BundleManifest, WorkspaceRecord, WorkspaceState } from "@hivemap/storage";
+import type { WorkspaceRecord, WorkspaceState } from "@hivemap/storage";
 
 export type OperationResult<T> = {
   ok: true;
@@ -621,15 +623,7 @@ export type CompleteScanResponse = { run: Extract<ScanRun, { status: "completed"
 export type CompareScansRequest = { workspaceId: string; beforeScanId: string; afterScanId: string };
 export type CompareScansResponse = { comparison: ScanComparison };
 
-export type ExportWorkspaceRequest = { workspaceId: string; targetPath: string; exportedAt: string };
-export type ExportWorkspaceResponse = { path: string; manifest: BundleManifest };
-export type ImportWorkspaceRequest = { sourcePath: string; mode: "new" | "replace" };
-export type ImportWorkspaceResponse = { workspace: WorkspaceRecord; manifest: BundleManifest };
 export type ListWorkspacesResponse = { workspaces: WorkspaceRecord[] };
-export type ExportWorkspaceBundleRequest = { workspaceId: string; exportedAt: string };
-export type ExportWorkspaceBundleResponse = { bytes: Uint8Array; manifest: BundleManifest };
-export type ImportWorkspaceBundleRequest = { bytes: Uint8Array; mode: "new" | "replace" };
-export type ImportWorkspaceBundleResponse = ImportWorkspaceResponse;
 
 export type McpToolName =
   | "workspace_list"
@@ -665,9 +659,7 @@ export type McpToolName =
   | "scan_finding_create"
   | "finding_update"
   | "scan_complete"
-  | "scan_compare"
-  | "workspace_export_zip"
-  | "workspace_import_zip";
+  | "scan_compare";
 
 export type McpToolRequestMap = {
   workspace_list: ListWorkspaceSummariesRequest;
@@ -704,8 +696,6 @@ export type McpToolRequestMap = {
   finding_update: UpdateFindingRequest;
   scan_complete: CompleteScanRequest;
   scan_compare: CompareScansRequest;
-  workspace_export_zip: ExportWorkspaceRequest;
-  workspace_import_zip: ImportWorkspaceRequest;
 };
 
 export type RestEndpointName =
@@ -794,14 +784,28 @@ export function validateGetRepositoryIndexRequest(request: GetRepositoryIndexReq
 export function validateStartRepositoryIndexRequest(request: StartRepositoryIndexRequest): void {
   assertNonEmpty("workspaceId", request.workspaceId);
   assertNonEmpty("index.id", request.index.id);
-  assertNonEmpty("index.repositoryUrl", request.index.repositoryUrl);
+  normalizeRepositoryUrlIdentifier(request.index.repositoryUrl);
   if (request.index.requestedRef !== undefined) {
     assertNonEmpty("index.requestedRef", request.index.requestedRef);
+    if (request.index.requestedRef.startsWith("-")) {
+      throw new ApiContractValidationError("index.requestedRef must not begin with '-'");
+    }
   }
   assertRepositoryIndexMode("index.mode", request.index.mode);
   assertDate("index.requestedAt", request.index.requestedAt);
   assertNonEmpty("index.actor.agentId", request.index.actor.agentId);
   assertNonEmpty("index.actor.tool", request.index.actor.tool);
+}
+
+export function normalizeRepositoryUrlIdentifier(repositoryUrl: string): string {
+  try {
+    return normalizeRepositoryLocation(repositoryUrl, "index.repositoryUrl");
+  } catch (error) {
+    if (error instanceof RepositoryLocationValidationError) {
+      throw new ApiContractValidationError(error.message);
+    }
+    throw error;
+  }
 }
 
 export function validateExecuteRepositoryIndexRequest(request: ExecuteRepositoryIndexRequest): void {
@@ -1004,29 +1008,6 @@ export function validateCompareScansRequest(request: CompareScansRequest): void 
   assertNonEmpty("beforeScanId", request.beforeScanId);
   assertNonEmpty("afterScanId", request.afterScanId);
   if (request.beforeScanId === request.afterScanId) throw new ApiContractValidationError("Scan comparison requires two different runs");
-}
-
-export function validateExportWorkspaceRequest(request: ExportWorkspaceRequest): void {
-  assertNonEmpty("workspaceId", request.workspaceId);
-  assertNonEmpty("targetPath", request.targetPath);
-  assertDate("exportedAt", request.exportedAt);
-}
-
-export function validateImportWorkspaceRequest(request: ImportWorkspaceRequest): void {
-  assertNonEmpty("sourcePath", request.sourcePath);
-  if (request.mode !== "new" && request.mode !== "replace") throw new ApiContractValidationError(`Unknown import mode: ${String(request.mode)}`);
-}
-
-export function validateExportWorkspaceBundleRequest(request: ExportWorkspaceBundleRequest): void {
-  assertNonEmpty("workspaceId", request.workspaceId);
-  assertDate("exportedAt", request.exportedAt);
-}
-
-export function validateImportWorkspaceBundleRequest(request: ImportWorkspaceBundleRequest): void {
-  if (!(request.bytes instanceof Uint8Array) || request.bytes.byteLength === 0) {
-    throw new ApiContractValidationError("bytes must contain a ZIP bundle");
-  }
-  if (request.mode !== "new" && request.mode !== "replace") throw new ApiContractValidationError(`Unknown import mode: ${String(request.mode)}`);
 }
 
 function assertNonEmpty(fieldName: string, value: string): void {

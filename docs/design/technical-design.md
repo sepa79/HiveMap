@@ -106,7 +106,7 @@ Reasoning:
 - compatible with HiveForge deployment goals,
 - compatible with the protected Streamable HTTP MCP transport now hosted by the shared runtime.
 
-Do not block the base runtime/container track on embedding-provider work, auth, or hosted deployment concerns. ZIP export/import remains the explicit migration and portability boundary.
+Do not block the base runtime/container track on embedding-provider work or future portability. The current runtime has no import/export boundary; a versioned streaming NDJSON full-project snapshot is the deferred direction.
 
 ## Tables / Stores
 

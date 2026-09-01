@@ -5,7 +5,7 @@ Use this workflow when an agent maps documentation, code, tests, deployment, or 
 ## Start
 
 1. Read the target repository rules and canonical docs.
-2. Load or import the target HiveMap workspace.
+2. Load the target HiveMap workspace.
 3. Call `scan_profile_list` and select an explicit profile id and version.
 4. Resolve or create a completed repository index for the target repository and revision.
 5. Call `scan_start` with the explicit `repositoryIndexId`. Treat the returned instructions, derived coverage, criteria, SSOT order, outputs, and overlay status as a provisional run checklist, not immediate permission to file final findings.
@@ -99,16 +99,8 @@ Completion freezes finding evidence and the graph digest for the run. Active fin
 6. Call `scan_compare` with the baseline and verification scan ids.
 7. Investigate every `new`, `regressed`, or `unverifiable` item.
 8. Update active resolved findings through `finding_update` with explicit resolution evidence.
-9. Call `workspace_export_zip` to produce the verification bundle.
+9. Retain both immutable runs and their comparison in the workspace as the current verification evidence.
 
-The ZIP contains both immutable runs, generated comparison evidence, source coverage, the resolved profile instructions, and a repeat-scan procedure.
+## Portability Status
 
-## Portability Check
-
-For release-quality evidence:
-
-1. Import the ZIP into a clean HiveMap database with `workspace_import_zip` in `new` mode.
-2. Call `scan_list` and `scan_compare` in the imported workspace.
-3. Re-export with the same timestamp when testing determinism; the archive must be byte-identical.
-
-Use `replace` only when the receiving database already contains the same workspace id and replacement is intentional.
+The current runtime has no workspace or project import/export operation. Do not claim cross-instance portability or attempt to move scan state through an undocumented format. The deferred direction is the versioned streaming NDJSON full-project snapshot described in `docs/specs/storage-format.md`; implementation belongs to a later explicit work unit.

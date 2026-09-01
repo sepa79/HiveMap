@@ -29,7 +29,7 @@ The installed runtime shape is single-process at the HTTP boundary:
 
 ```text
 human -> built web served by API -> bearer-protected REST API \
-agent -> bearer-protected Streamable HTTP MCP ----------------> shared runtime -> Postgres store -> ZIP export/import
+agent -> bearer-protected Streamable HTTP MCP ----------------> shared runtime -> Postgres store
 agent -> transitional local MCP stdio adapter ----------------/
 
 shared runtime -> graph core
@@ -46,7 +46,7 @@ shared runtime -> scan validation/evidence
 | `apps/api` | Local browser/test boundary | Routing, boundary parsing, static assets, process config, and shutdown are separate modules over the same runtime as MCP |
 | `apps/mcp` | Agent-facing tool boundary | Tool dispatch, SDK registration, Streamable HTTP, and transitional stdio are separate adapters |
 | `packages/runtime` | Shared service layer | Command orchestration delegates scan-profile coordination and evidence selection to focused modules |
-| `packages/storage` | Postgres runtime store, test in-memory store, and ZIP bundle persistence | Contracts, adapters, shared validation, SQL, and public exports have separate owners; runtime persistence is Postgres-only |
+| `packages/storage` | Postgres runtime store and test in-memory store | Contracts, adapters, shared validation, SQL, and public exports have separate owners; runtime persistence is Postgres-only |
 | `packages/scans` | Versioned scan profiles, evidence, findings, comparisons | Agent-executed workflow validation |
 
 ## Boundaries
@@ -55,7 +55,7 @@ shared runtime -> scan validation/evidence
 - `projections` derive views and must not mutate graph semantics.
 - `capture` owns feedback/proposal/capture-policy contracts.
 - `scans` validate coverage and findings but do not perform IO over repositories.
-- `storage` owns persistence and bundle serialization.
+- `storage` owns persistence and hydration validation.
 - `api` and `mcp` expose explicit commands over the same runtime behavior.
 
 ## Data model
@@ -66,9 +66,8 @@ Important persisted state:
 - semantic graph
 - category catalog and assignments
 - capture policy, feedback, and proposals
-- projections and portable exports
+- projections
 - scan profiles, runs, coverage, findings, and comparisons
-- portable bundle bytes for `.hivemap.zip`
 
 ## APIs / contracts / specs
 
@@ -98,7 +97,7 @@ The container owns its internal Postgres connection and requires exactly one bea
 - `npm run verify` is the main release gate
 - API and MCP fail fast on invalid inputs and missing required ids
 - scan completion validates coverage, criteria, and declared outputs
-- exported bundles preserve evidence and repeat-scan instructions
+- completed scans preserve immutable evidence and repeat-scan inputs in their originating workspace
 
 There is no mature metrics, identity, role, or multi-tenant ops stack yet.
 

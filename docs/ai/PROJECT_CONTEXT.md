@@ -6,7 +6,7 @@ HiveMap is an AI-assisted concept graph workspace for live conversations, projec
 
 ## What this project does
 
-HiveMap stores a canonical semantic graph and derives readable overview, dive-in, and project-map projections from it. A human communicates intent, an agent records explicit graph operations, and the UI renders projections without becoming semantic truth. The current alpha supports both concept mapping and versioned repository-scan workflows that produce findings, evidence, and portable ZIP exports. REST and MCP share one runtime so the browser UI and agent-facing tools operate on the same domain behavior. The repo also preserves a runnable `poc/` as evidence, not as the 1.0 architecture.
+HiveMap stores a canonical semantic graph and derives readable overview, dive-in, and project-map projections from it. A human communicates intent, an agent records explicit graph operations, and the UI renders projections without becoming semantic truth. The current alpha supports both concept mapping and versioned repository-scan workflows that produce findings and evidence. REST and MCP share one runtime so the browser UI and agent-facing tools operate on the same domain behavior. The repo also preserves a runnable `poc/` as evidence, not as the 1.0 architecture.
 
 ## What this project does not do
 
@@ -34,7 +34,7 @@ HiveMap stores a canonical semantic graph and derives readable overview, dive-in
 | `packages/projections` | View derivation for overview, dive-in, and project maps | Must not mutate graph semantics. |
 | `packages/capture` | Capture policy, feedback events, and proposal lifecycle | Models intent and reviewable changes. |
 | `packages/scans` | Repository scan profiles, validation, evidence, and comparisons | Validates agent-performed scans. |
-| `packages/storage` | Postgres runtime persistence, test in-memory store support, and ZIP import/export bundle support | Runtime persistence is Postgres-only. |
+| `packages/storage` | Postgres runtime persistence and test in-memory store support | Runtime persistence is Postgres-only. |
 | `packages/api-contracts` | Shared request/response and contract validation types | Prevents divergent REST/MCP DTO semantics. |
 
 ## Runtime model
@@ -50,9 +50,9 @@ The repo includes a single-image Docker runtime for protected REST, Streamable H
 - Canonical semantic graph state persisted in Postgres through `packages/storage`
 - Category catalog and assignments
 - Capture policy, feedback events, and proposals
-- Projections and portable exports
+- Projections
 - Repository scan profiles, coverage, findings, completed runs, and comparisons
-- Portable `.hivemap.zip` workspace bundles for export/import
+- No current workspace or project import/export surface; future full-project portability is a deferred versioned streaming NDJSON contract
 - POC assets and snapshots kept under `poc/` for evidence only
 
 ## External integrations

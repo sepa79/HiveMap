@@ -45,7 +45,7 @@ When HiveMind is available, treat it as required workflow support for meaningful
    - `feedback` for user/testing friction,
    - `risk` for unresolved concerns,
    - `tooling_note` for workflow behavior worth repeating or avoiding.
-7. Link relevant repo files, specs, commands, or exported workspace artifacts.
+7. Link relevant repo files, specs, commands, or persisted workspace evidence.
 8. Close the active context after the work unit. Do not rely on long-lived dangling context tokens.
 
 ## Active Project Ruleset

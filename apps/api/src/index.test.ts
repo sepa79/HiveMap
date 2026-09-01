@@ -282,12 +282,34 @@ describe("api server", () => {
     });
   });
 
+  it("rejects server-local repository sources over REST", async () => {
+    await createWorkspace();
+
+    const response = await postJson("/workspaces/workspace-a/repository-indexes", {
+      index: {
+        id: "repo-index-local",
+        repositoryUrl: "/srv/private-repository",
+        mode: "safe",
+        requestedAt: "2026-08-20T12:00:00.000Z",
+        actor: { agentId: "codex", tool: "rest" },
+      },
+    });
+
+    expect(response.status).toBe(400);
+    expect(parseJson(response)).toEqual({
+      error: {
+        code: "LOCAL_REPOSITORY_SOURCE_NOT_ALLOWED",
+        message: "Local repository paths are not allowed by this runtime",
+      },
+    });
+  });
+
   it("executes a repository index and searches it through REST", async () => {
     await createWorkspace();
     const startResponse = await postJson("/workspaces/workspace-a/repository-indexes", {
       index: {
         id: "repo-index-a",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-20T12:00:00.000Z",
@@ -339,7 +361,7 @@ describe("api server", () => {
         await postJson("/workspaces/workspace-a/repository-indexes", {
           index: {
             id: "repo-index-boundary",
-            repositoryUrl: "/fixtures/repo",
+            repositoryUrl: "https://example.com/fixtures/repo.git",
             requestedRef: "main",
             mode: "safe",
             requestedAt: "2026-08-20T12:00:00.000Z",
@@ -428,7 +450,7 @@ describe("api server", () => {
         await postJson("/workspaces/workspace-a/repository-indexes", {
           index: {
             id: "repo-index-boundary-missing-decision",
-            repositoryUrl: "/fixtures/repo",
+            repositoryUrl: "https://example.com/fixtures/repo.git",
             requestedRef: "main",
             mode: "safe",
             requestedAt: "2026-08-20T12:00:00.000Z",
@@ -479,7 +501,7 @@ describe("api server", () => {
     const startResponse = await postJson("/workspaces/workspace-a/repository-indexes", {
       index: {
         id: "repo-index-a",
-        repositoryUrl: "/fixtures/repo",
+        repositoryUrl: "https://example.com/fixtures/repo.git",
         requestedRef: "main",
         mode: "safe",
         requestedAt: "2026-08-20T12:00:00.000Z",
@@ -844,7 +866,7 @@ describe("api server", () => {
     );
   });
 
-  it("lists workspaces and round-trips a browser ZIP bundle", async () => {
+  it("lists workspaces", async () => {
     await createWorkspace();
 
     const listResponse = await request(handleRequest, "/workspaces");
@@ -852,25 +874,18 @@ describe("api server", () => {
     expect(parseJson(listResponse)).toEqual({
       workspaces: [{ id: "workspace-a", name: "Alpha", createdAt: "2026-05-13T21:00:00.000Z" }],
     });
+  });
 
-    const exportResponse = await postJson("/workspaces/workspace-a/export-bundle", {
-      exportedAt: "2026-07-17T12:00:00.000Z",
-    });
-    expect(exportResponse.status).toBe(200);
-    expect(exportResponse.headers["content-type"]).toBe("application/zip");
-    expect(exportResponse.headers["content-disposition"]).toBe('attachment; filename="workspace-a.hivemap.zip"');
-    const zip = exportResponse.body;
-    expect(new Uint8Array(zip).slice(0, 2)).toEqual(new Uint8Array([0x50, 0x4b]));
-
-    await store.deleteWorkspace("workspace-a");
-    const importResponse = await request(handleRequest, "/workspace-import-bundles?mode=new", {
+  it("rejects declared JSON request bodies above the transport limit", async () => {
+    const jsonResponse = await request(handleRequest, "/workspaces", {
       method: "POST",
-      headers: { "content-type": "application/zip" },
-      body: zip,
+      headers: { "content-type": "application/json", "content-length": String(2 * 1024 * 1024 + 1) },
+      body: "{}",
     });
-    expect(importResponse.status).toBe(201);
-    expect(parseJson(importResponse) as unknown).toMatchObject({ workspace: { id: "workspace-a", name: "Alpha" } });
-    expect((await store.loadWorkspaceState("workspace-a")).workspace.name).toBe("Alpha");
+    expect(jsonResponse.status).toBe(413);
+    expect(parseJson(jsonResponse)).toEqual({
+      error: { code: "PAYLOAD_TOO_LARGE", message: "JSON request body exceeds the 2 MiB limit" },
+    });
   });
 });
 
@@ -903,7 +918,7 @@ async function createCompletedRepositoryIndex(): Promise<void> {
   const startResponse = await postJson("/workspaces/workspace-a/repository-indexes", {
     index: {
       id: "repo-index-scan",
-      repositoryUrl: "/fixtures/repo",
+      repositoryUrl: "https://example.com/fixtures/repo.git",
       requestedRef: "main",
       mode: "safe",
       requestedAt: "2026-08-20T12:00:00.000Z",

@@ -4,6 +4,8 @@
 
 Accepted
 
+Portability-specific statements in this ADR were superseded on 2026-08-31: the ZIP implementation and every current import/export surface were removed. The Postgres runtime and container decisions remain accepted. Future full-project portability is deferred to a separately specified streaming NDJSON contract.
+
 ## Context
 
 HiveMap alpha currently runs as a local SQLite-backed runtime shared between the REST API and MCP process. That shape was acceptable for local evaluation, but it hard-codes a storage contract and process model that do not fit the next delivery goal:
@@ -13,7 +15,7 @@ HiveMap alpha currently runs as a local SQLite-backed runtime shared between the
 - HiveForge deployment,
 - a later hosted MCP work unit, now implemented as protected stateless `/mcp` in the shared HTTP runtime.
 
-The project also already has a portable ZIP export/import contract, which is a cleaner migration boundary than a live database upgrade path.
+At the time of the original decision, the project also had a portable ZIP export/import contract. That contract was later removed rather than becoming a permanent migration boundary.
 
 Vector-assisted features remain interesting for HiveMap, but provider choice, embedding generation, and similarity UX are not required to complete the base runtime/container track.
 
@@ -23,7 +25,7 @@ HiveMap 1.0 runtime direction moves to Postgres as the only supported runtime da
 
 `pgvector` remains part of the target backend direction, but embedding generation and vector-assisted product behavior are deferred from the current execution track.
 
-The migration boundary between the current SQLite alpha and the future Postgres runtime is the existing canonical ZIP export/import contract. HiveMap will not implement a direct live SQLite-to-Postgres migration path.
+HiveMap will not implement a direct live SQLite-to-Postgres migration path. The former ZIP migration boundary was removed; no application-level import/export bridge is currently supported.
 
 The near-term local runtime target is one self-contained container that bundles the HiveMap API, built web assets, Postgres, and the built-in repository indexing and scan handlers. These handlers are normal application capabilities, not a runtime plugin system. Optional persistence may come from a mounted filesystem path for Postgres data, but the default user experience should be: run one container and HiveMap works.
 
@@ -43,8 +45,6 @@ Bundled model-serving, provider-backed embedding generation, and a general runti
 
 That local runtime must not require the user to configure separate database URLs or database file paths. The container boundary replaces the current `--db` and `.hivemap/local.sqlite` setup.
 
-ZIP export remains a normal download flow.
-
 Local `stdio` MCP is not part of the target runtime shape for this track.
 
 The runtime/storage refactor must introduce an explicit storage interface so runtime, REST, and MCP logic stop depending on a SQLite-specific concrete store type.
@@ -53,7 +53,7 @@ The runtime/storage refactor must introduce an explicit storage interface so run
 
 - SQLite stops being a supported runtime destination instead of remaining a parallel backend.
 - Storage and runtime docs must stop presenting SQLite as the intended end state.
-- ZIP import/export portability becomes part of the runtime migration contract, not just a sharing feature.
+- No application-level SQLite migration or workspace portability surface is carried into the current runtime.
 - The repository needs explicit container startup, initialization, and healthcheck behavior before HiveForge work.
 - Local runtime packaging prioritizes one self-contained container over user-managed multi-service local setup.
 - Repository indexing and scan handlers ship as built-in HiveMap capabilities without a plugin-loading contract.
@@ -69,7 +69,7 @@ Rejected because it preserves duplicate runtime paths and slows the container/Hi
 
 ### Build a direct database migration path
 
-Rejected because the repo already has a portable, validated ZIP contract that preserves semantic state without coupling migration to one physical schema.
+Rejected because the production runtime should not carry a live legacy-backend migration path. Historical alpha data remains evidence rather than a supported runtime migration source.
 
 ### Pull embeddings into the base runtime track
 

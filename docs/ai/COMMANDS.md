@@ -44,7 +44,7 @@ Single-image container path:
 HIVEMAP_AUTH_TOKEN='replace-with-a-long-random-token' docker compose up --build
 ```
 
-That container path exposes protected REST and stateless Streamable HTTP MCP at `/mcp` through the same port and runtime. It is validated for workspace create, graph mutation, projection create/read, and ZIP export/import. It includes HiveMap's built-in repository indexing and scan handlers; there is no separate runtime plugin or bundled model-serving dependency. Postgres data is mounted at `./.local/hivemap-postgres` by the repository Compose file.
+That container path exposes protected REST and stateless Streamable HTTP MCP at `/mcp` through the same port and runtime. It is validated for workspace create, graph mutation, and projection create/read. It includes HiveMap's built-in repository indexing and scan handlers; there is no separate runtime plugin or bundled model-serving dependency. Postgres data is mounted at `./.local/hivemap-postgres` by the repository Compose file.
 
 Installed MCP endpoint:
 
@@ -107,28 +107,6 @@ Current boundary:
 - the repo-local command prepares Git and image artifacts; HiveForge MCP remains the operator boundary for runtime-env and lifecycle changes;
 - before every deploy/update, set `HIVEMAP_IMAGE` for `projectId=hivemap-development` and profile `docker-swarm` to the printed immutable image, then run the normal `deploy` or `update` for component `stack` and `gitRef=hivemap-dev-loop`;
 - do not use `dev-latest` as deployment identity: Portainer/Swarm may retain the previously resolved digest when a service is updated with the same moving tag.
-
-Bundle import helper for a running HiveMap API:
-
-```bash
-tools/import-workspace-bundle.sh \
-  --api-base-url http://127.0.0.1:8787 \
-  --mode new \
-  .hivemap/exports/caravanworld-supervised-regional-goal-current-2026-08-05T0010Z.hivemap.zip
-```
-
-If a live deployment still rejects a legacy `formatVersion=1` CaravanWorld ZIP with `storageSchemaVersion=2`, rewrite the manifest bridge first and import the rewritten file:
-
-```bash
-node tools/rewrite-legacy-bundle-schema.mjs \
-  .hivemap/exports/caravanworld-supervised-regional-goal-current-2026-08-05T0010Z.hivemap.zip \
-  /tmp/caravanworld-schema4.hivemap.zip
-
-tools/import-workspace-bundle.sh \
-  --api-base-url http://127.0.0.1:8787 \
-  --mode new \
-  /tmp/caravanworld-schema4.hivemap.zip
-```
 
 ## POC Install
 

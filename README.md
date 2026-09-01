@@ -4,7 +4,7 @@
 
 HiveMap is a local, AI-assisted workspace for turning conversations, projects, ideas, decisions, and repository knowledge into a semantic graph with readable overview and deep-dive maps. A human communicates intent, an agent interprets and records explicit graph operations, and HiveMap keeps the semantic model separate from its visual projections.
 
-Repository review is one supported workflow, not the definition of the product. In that workflow an agent scans a repository; HiveMap supplies repeatable scan instructions, validates evidence, stores findings, renders review projections, and exports the result as a portable ZIP. The same graph and projection model can also map an AI conversation, explore an idea, explain a system, or maintain a project knowledge map.
+Repository review is one supported workflow, not the definition of the product. In that workflow an agent scans a repository; HiveMap supplies repeatable scan instructions, validates evidence, stores findings, and renders review projections. The same graph and projection model can also map an AI conversation, explore an idea, explain a system, or maintain a project knowledge map.
 
 The current alpha is intended for local evaluation on real repositories. It is not a hosted multi-user service.
 
@@ -20,7 +20,6 @@ The intended local experience is one container that runs HiveMap with its bundle
 - map project concepts to documentation, code, tests, assets, and external evidence;
 - review documentation conflicts and implementation drift in priority columns;
 - click a finding to inspect its evidence and affected concepts;
-- export or import a complete `.hivemap.zip` workspace;
 - repeat a scan after fixes and compare the new result with the baseline;
 - run HiveMap through both a browser UI and an MCP-connected coding agent.
 
@@ -183,35 +182,20 @@ Expected workflow:
 
 The canonical agent procedure is [Repository Scan Workflow](docs/ai/REPOSITORY_SCAN_WORKFLOW.md). The underlying contract is [Repository Scan Contract](docs/specs/repository-scan.md).
 
-## Share a Review
+## Portability Status
 
-Select the workspace in the UI and click **Export ZIP**. The archive contains the canonical workspace plus checksummed scan evidence, coverage, resolved instructions, findings, comparisons, and a repeat-scan procedure.
-
-Send the `.hivemap.zip` to another tester. They can start a clean HiveMap checkout, open the UI, choose whether the import creates a new workspace or explicitly replaces the same workspace, and click **Import ZIP**. Import never silently merges or rewrites workspace IDs.
-
-For terminal-driven imports against a running API, the repo also carries:
-
-```bash
-tools/import-workspace-bundle.sh \
-  --api-base-url http://127.0.0.1:8787 \
-  --mode new \
-  .hivemap/exports/caravanworld-supervised-regional-goal-current-2026-08-05T0010Z.hivemap.zip
-```
-
-Treat exported ZIPs as project data. They may contain repository paths, claims, findings, and evidence references; inspect them before sharing outside the intended group.
+The current runtime does not expose workspace or project import/export. The recorded future direction is one versioned streaming NDJSON full-project snapshot carrying canonical workspace state plus completed repository-index retrieval facts. It is intentionally not implemented in this phase. Editable source code remains Git-owned and must be fetched at the scan's recorded immutable commit.
 
 ## Verify Documentation Fixes
 
 After the documentation or code is changed:
 
-1. import or load the baseline workspace;
+1. load the baseline workspace in the same HiveMap environment;
 2. ask the agent to repeat the same versioned scan profile against the current repository;
 3. rediscover coverage instead of copying the old file list;
 4. complete the new scan and call `scan_compare` against the baseline;
 5. investigate every new, regressed, or unverifiable finding;
-6. export the workspace again as completion evidence.
-
-The resulting ZIP retains both immutable scan runs and their comparison.
+6. retain both immutable scan runs and their comparison in the workspace as completion evidence.
 
 ## What Testers Should Report
 
@@ -219,11 +203,11 @@ When filing feedback, include:
 
 - operating system, Node version, browser, and agent/client name;
 - the selected scan profile and target repository revision;
-- whether the failure occurred during setup, scan, map review, ZIP export/import, or verification;
+- whether the failure occurred during setup, scan, map review, or verification;
 - the exact visible error and the last MCP operation, without attaching confidential repository content unnecessarily;
 - whether a fresh retry against the same revision reproduces the problem.
 
-Do not report a scan as successful based only on an attractive map. Check the coverage inventory, finding evidence, priority, deep-dive navigation, and exported repeat-scan instructions.
+Do not report a scan as successful based only on an attractive map. Check the coverage inventory, finding evidence, priority, deep-dive navigation, and persisted repeat-scan instructions.
 
 GitHub offers a structured **HiveMap alpha test report** issue form with these fields.
 
@@ -254,7 +238,7 @@ npm exec -w @hivemap/mcp -- hivemap-mcp --postgres-url 'postgres://postgres:post
 - `packages/graph-core/`: semantic graph and invariants;
 - `packages/projections/`: overview and deep-dive view derivation;
 - `packages/scans/`: scan profiles, lifecycle, evidence, and comparison;
-- `packages/storage/`: Postgres runtime persistence and portable ZIP bundles;
+- `packages/storage/`: Postgres runtime persistence and backend-neutral storage contracts;
 - `docs/specs/`: canonical contracts;
 - `docs/ai/`: agent workflows, commands, and review checks;
 - `poc/`: preserved proof-of-concept evidence, not the 1.0 architecture.
@@ -270,7 +254,7 @@ HiveMap is licensed under `GPL-3.0-or-later`, matching PocketHive. See [LICENSE]
 - local single-user runtime only;
 - one required shared bearer token for REST and MCP, without users or roles;
 - no built-in repository crawler: scanning is agent-executed;
-- no silent merge during ZIP import;
+- no workspace or project import/export surface in the current runtime;
 - manual graph editing is emergency tooling, not the primary workflow;
 - semantic graph data is the source of truth; UI maps are projections.
 

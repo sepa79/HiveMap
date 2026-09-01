@@ -123,6 +123,31 @@ describeIfPostgres("PostgresHiveMapStore", () => {
     await store.deleteWorkspace(workspaceId);
   });
 
+  it("rejects an unsafe repository index location hydrated from Postgres", async () => {
+    const workspaceId = `pg-${randomUUID()}`;
+    await store.saveWorkspaceState(createState(workspaceId));
+
+    try {
+      await introspectionPool.query(
+        "INSERT INTO repository_indexes (workspace_id, id, repository_url, mode, stage, requested_at, updated_at, actor_agent_id, actor_tool) VALUES ($1, $2, $3, 'safe', 'requested', $4, $4, $5, $6)",
+        [
+          workspaceId,
+          "repo-index-unsafe",
+          "https://example.com/org/repo.git?access_token=secret",
+          "2026-08-20T12:00:00.000Z",
+          "codex",
+          "test",
+        ],
+      );
+
+      await expect(store.getRepositoryIndex(workspaceId, "repo-index-unsafe")).rejects.toThrow(
+        "repositoryUrl must not contain query parameters or fragments",
+      );
+    } finally {
+      await store.deleteWorkspace(workspaceId);
+    }
+  });
+
   it("rejects unsupported stored scan profile recipe fields instead of overriding core profile fields", async () => {
     const workspaceId = `pg-${randomUUID()}`;
     await store.saveWorkspaceState(createState(workspaceId));

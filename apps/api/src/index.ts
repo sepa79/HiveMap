@@ -16,8 +16,6 @@ import {
   type RecordFeedbackRequest,
   type CompleteScanRequest,
   type CreateScanFindingRequest,
-  type ExportWorkspaceRequest,
-  type ImportWorkspaceRequest,
   type ListRepositoryIndexesRequest,
   type RecordScanCalibrationDecisionRequest,
   type RecordScanCoverageRequest,
@@ -39,15 +37,12 @@ import {
   parseOptionalPositiveInteger,
   parseRequiredPositiveInteger,
   parseUrl,
-  readBytes,
   readJson,
   requireQueryParam,
-  safeFilename,
   writeEmpty,
   writeError,
   writeJson,
   writeStatic,
-  writeZip,
 } from "./http-boundary.js";
 import { readStorageReadiness } from "./storage-readiness.js";
 import { isPublicUiRequest, readStaticFile } from "./static-assets.js";
@@ -71,6 +66,7 @@ export function createApiRequestHandler(options: ApiServerOptions): ApiRequestHa
   }
   const runtime = new HiveMapRuntime({
     store: options.store,
+    repositorySourcePolicy: "remote-only",
     ...(options.repositoryIndexExecutor === undefined ? {} : { repositoryIndexExecutor: options.repositoryIndexExecutor }),
   });
   return (request, response) => {
@@ -130,22 +126,7 @@ async function handleRequest(
       return;
     }
 
-    if (method === "POST" && pathname === "/workspace-imports") {
-      const body = await readJson<ImportWorkspaceRequest>(request);
-      writeJson(response, 201, await runtime.importWorkspace(body));
-      return;
-    }
-
-    if (method === "POST" && pathname === "/workspace-import-bundles") {
-      const mode = url.searchParams.get("mode");
-      if (mode !== "new" && mode !== "replace") {
-        throw new ApiHttpError(400, "INVALID_IMPORT_MODE", "ZIP import requires mode=new or mode=replace");
-      }
-      writeJson(response, 201, await runtime.importWorkspaceBundle({ bytes: await readBytes(request), mode }));
-      return;
-    }
-
-    if (method === "GET" && staticRoot !== undefined && !pathname.startsWith("/workspaces") && pathname !== "/workspace-imports" && pathname !== "/workspace-import-bundles") {
+    if (method === "GET" && staticRoot !== undefined && !pathname.startsWith("/workspaces")) {
       const file = await readStaticFile(staticRoot, pathname);
       if (file !== undefined) {
         writeStatic(response, file.contentType, file.bytes);
@@ -486,19 +467,6 @@ async function handleRequest(
     ) {
       const body = await readJson<Pick<UpdateFindingRequest, "changes">>(request);
       writeJson(response, 200, await runtime.updateFinding({ workspaceId, findingNodeId: segments[3], changes: body.changes }));
-      return;
-    }
-
-    if (method === "POST" && segments[2] === "exports" && segments.length === 3) {
-      const body = await readJson<Omit<ExportWorkspaceRequest, "workspaceId">>(request);
-      writeJson(response, 201, await runtime.exportWorkspace({ workspaceId, ...body }));
-      return;
-    }
-
-    if (method === "POST" && segments[2] === "export-bundle" && segments.length === 3) {
-      const body = await readJson<{ exportedAt: string }>(request);
-      const bundle = await runtime.exportWorkspaceBundle({ workspaceId, exportedAt: body.exportedAt });
-      writeZip(response, bundle.bytes, `${safeFilename(workspaceId)}.hivemap.zip`);
       return;
     }
 

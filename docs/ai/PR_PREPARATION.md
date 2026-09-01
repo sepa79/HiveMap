@@ -26,7 +26,7 @@ Before preparing a PR or final change summary:
 - No secrets were added.
 - No forbidden git actions were performed.
 - HiveMind was updated if product/architecture learnings changed.
-- Export/import, scan, or projection changes did not silently change IDs or semantics.
+- Scan or projection changes did not silently change IDs or semantics.
 
 ## Summary format
 

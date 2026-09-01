@@ -15,6 +15,8 @@ const CORS_HEADERS = {
   "access-control-expose-headers": "mcp-session-id",
 };
 
+const MAX_JSON_REQUEST_BYTES = 2 * 1024 * 1024;
+
 export class ApiHttpError extends Error {
   constructor(
     readonly statusCode: number,
@@ -66,18 +68,8 @@ export function parseOptionalNumber(value: string | null, fieldName: string): nu
   return parsed;
 }
 
-export async function readBytes(request: IncomingMessage): Promise<Uint8Array> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  const bytes = Buffer.concat(chunks);
-  if (bytes.byteLength === 0) throw new ApiHttpError(400, "EMPTY_BODY", "ZIP request body is required");
-  return bytes;
-}
-
 export async function readJson<T>(request: IncomingMessage): Promise<T> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  const text = Buffer.concat(chunks).toString("utf8");
+  const text = (await readBoundedBody(request, MAX_JSON_REQUEST_BYTES, "JSON")).toString("utf8");
   if (text.trim().length === 0) {
     throw new ApiHttpError(400, "EMPTY_BODY", "JSON request body is required");
   }
@@ -86,6 +78,29 @@ export async function readJson<T>(request: IncomingMessage): Promise<T> {
   } catch {
     throw new ApiHttpError(400, "INVALID_JSON", "Request body must be valid JSON");
   }
+}
+
+async function readBoundedBody(request: IncomingMessage, maxBytes: number, label: string): Promise<Buffer> {
+  const declaredLength = Number(request.headers["content-length"]);
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    throw new ApiHttpError(413, "PAYLOAD_TOO_LARGE", `${label} request body exceeds the ${formatMiB(maxBytes)} MiB limit`);
+  }
+
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  for await (const chunk of request) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    totalBytes += bytes.byteLength;
+    if (totalBytes > maxBytes) {
+      throw new ApiHttpError(413, "PAYLOAD_TOO_LARGE", `${label} request body exceeds the ${formatMiB(maxBytes)} MiB limit`);
+    }
+    chunks.push(bytes);
+  }
+  return Buffer.concat(chunks, totalBytes);
+}
+
+function formatMiB(bytes: number): number {
+  return bytes / (1024 * 1024);
 }
 
 export function writeJson(response: ServerResponse, statusCode: number, body: unknown): void {
@@ -98,16 +113,6 @@ export function writeEmpty(response: ServerResponse, statusCode: number): void {
   response.end();
 }
 
-export function writeZip(response: ServerResponse, bytes: Uint8Array, filename: string): void {
-  response.writeHead(200, {
-    "access-control-allow-origin": "*",
-    "content-disposition": `attachment; filename="${filename}"`,
-    "content-length": bytes.byteLength,
-    "content-type": "application/zip",
-  });
-  response.end(Buffer.from(bytes));
-}
-
 export function writeStatic(response: ServerResponse, contentType: string, bytes: Uint8Array): void {
   response.writeHead(200, {
     "access-control-allow-origin": "*",
@@ -115,10 +120,6 @@ export function writeStatic(response: ServerResponse, contentType: string, bytes
     "content-type": contentType,
   });
   response.end(Buffer.from(bytes));
-}
-
-export function safeFilename(value: string): string {
-  return value.replace(/[^a-zA-Z0-9._-]/g, "-");
 }
 
 export function writeError(response: ServerResponse, error: unknown): void {
@@ -160,6 +161,9 @@ function mapRuntimeErrorStatus(error: RuntimeError): number {
     case "CONCEPT_EMBEDDING_STALE":
       return 409;
     case "REPOSITORY_INDEX_MODE_UNAVAILABLE":
+    case "LOCAL_REPOSITORY_SOURCE_NOT_ALLOWED":
+    case "UNSAFE_REPOSITORY_URL":
+    case "UNSAFE_REPOSITORY_REF":
     case "SCAN_PROFILE_OVERLAY_INVALID":
     case "UNSUPPORTED_EMBEDDING_NODE_TYPE":
     case "UNSUPPORTED_SIMILARITY_NODE_TYPE":

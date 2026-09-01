@@ -115,7 +115,7 @@ Revision scope must match correlation scope:
 - use an anchor plus a section or symbol digest when the correlation covers a bounded document section or code symbol;
 - use a content digest for dirty working-tree evidence because the repository commit does not identify that content.
 
-A whole-file mismatch is a refresh candidate, not proof that every concept referencing the file is stale. The refresh agent must inspect the bounded semantic diff and update only affected correlations. Materially changed projections receive a new version; if a frozen before-state matters, preserve it as exported evidence and mark the prior projection stale or superseded rather than silently rewriting it.
+A whole-file mismatch is a refresh candidate, not proof that every concept referencing the file is stale. The refresh agent must inspect the bounded semantic diff and update only affected correlations. Materially changed projections receive a new version; if a frozen before-state matters, preserve it as immutable evidence and mark the prior projection stale or superseded rather than silently rewriting it.
 
 ## Validation
 

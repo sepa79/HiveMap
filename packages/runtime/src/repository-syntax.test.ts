@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { RepositoryFactBudget } from "./repository-fact-budget.js";
 import {
   createRepositoryDependencies,
   createRepositoryReferences,
@@ -8,12 +9,62 @@ import {
 } from "./repository-syntax.js";
 
 describe("createRepositorySymbols", () => {
+  it("stops symbol construction at the shared fact budget", () => {
+    expect(() =>
+      createRepositorySyntaxFacts({
+        workspaceId: "workspace-a",
+        indexId: "repo-index-a",
+        filePath: "src/too-many-symbols.ts",
+        language: "typescript",
+        sourceKind: "code",
+        text: "export class First {}\nexport class Second {}\n",
+        factBudget: new RepositoryFactBudget({ maxFacts: 1 }),
+      }),
+    ).toThrowError(expect.objectContaining({ code: "REPOSITORY_FACT_LIMIT_EXCEEDED" }));
+  });
+
+  it("stops reference construction at the shared fact budget", () => {
+    expect(() =>
+      createRepositorySyntaxFacts({
+        workspaceId: "workspace-a",
+        indexId: "repo-index-a",
+        filePath: "src/too-many-references.ts",
+        language: "typescript",
+        sourceKind: "code",
+        text: "first();\nsecond();\n",
+        factBudget: new RepositoryFactBudget({ maxFacts: 1 }),
+      }),
+    ).toThrowError(expect.objectContaining({ code: "REPOSITORY_FACT_LIMIT_EXCEEDED" }));
+  });
+
+  it("stops dependency construction at the shared fact budget", () => {
+    const sourceFacts = createRepositorySyntaxFacts({
+      workspaceId: "workspace-a",
+      indexId: "repo-index-a",
+      filePath: "src/too-many-dependencies.ts",
+      language: "typescript",
+      sourceKind: "code",
+      text: "first();\nsecond();\n",
+      factBudget: new RepositoryFactBudget(),
+    });
+
+    expect(() =>
+      createRepositoryDependencies({
+        files: [],
+        symbols: sourceFacts.symbols,
+        references: sourceFacts.references,
+        factBudget: new RepositoryFactBudget({ maxFacts: 1 }),
+      }),
+    ).toThrowError(expect.objectContaining({ code: "REPOSITORY_FACT_LIMIT_EXCEEDED" }));
+  });
+
   it("extracts top-level and member symbols from TypeScript and TSX syntax", () => {
     const symbols = createRepositorySymbols({
       workspaceId: "workspace-a",
       indexId: "repo-index-a",
       filePath: "src/example.tsx",
       language: "tsx",
+      factBudget: new RepositoryFactBudget(),
       text: [
         "export class ApiClient {",
         "  baseUrl: string;",
@@ -65,6 +116,7 @@ describe("createRepositorySymbols", () => {
       indexId: "repo-index-a",
       filePath: "src/main/java/com/example/ApiClient.java",
       language: "java",
+      factBudget: new RepositoryFactBudget(),
       text: [
         "package com.example;",
         "public class ApiClient {",
@@ -116,6 +168,7 @@ describe("createRepositorySymbols", () => {
       filePath: "src/example.tsx",
       language: "tsx",
       sourceKind: "code",
+      factBudget: new RepositoryFactBudget(),
       text: [
         "import { Foo as Bar } from './foo';",
         "class Base {}",
@@ -146,6 +199,7 @@ describe("createRepositorySymbols", () => {
       filePath: "src/main/java/com/example/ApiClient.java",
       language: "java",
       sourceKind: "code",
+      factBudget: new RepositoryFactBudget(),
       text: [
         "package com.example;",
         "import java.util.List;",
@@ -176,6 +230,7 @@ describe("createRepositorySymbols", () => {
       filePath: "src/example.tsx",
       language: "tsx",
       sourceKind: "code",
+      factBudget: new RepositoryFactBudget(),
       text: [
         "import { Foo } from './foo';",
         "export class Baz extends Base {",
@@ -189,6 +244,7 @@ describe("createRepositorySymbols", () => {
       indexId: "repo-index-a",
       filePath: "src/base.ts",
       language: "typescript",
+      factBudget: new RepositoryFactBudget(),
       text: "export class Base {}",
     });
     const widgetSymbols = createRepositorySymbols({
@@ -196,6 +252,7 @@ describe("createRepositorySymbols", () => {
       indexId: "repo-index-a",
       filePath: "src/widgets/Widget.tsx",
       language: "tsx",
+      factBudget: new RepositoryFactBudget(),
       text: "export class Widget {}",
     });
     const helperSymbols = createRepositorySymbols({
@@ -203,6 +260,7 @@ describe("createRepositorySymbols", () => {
       indexId: "repo-index-a",
       filePath: "src/helper.ts",
       language: "typescript",
+      factBudget: new RepositoryFactBudget(),
       text: "export function helper() { return 1; }",
     });
 
@@ -256,6 +314,7 @@ describe("createRepositorySymbols", () => {
       ],
       symbols: [...sourceFacts.symbols, ...baseSymbols, ...widgetSymbols, ...helperSymbols],
       references: sourceFacts.references,
+      factBudget: new RepositoryFactBudget(),
     });
 
     expect(dependencies).toEqual(
@@ -281,6 +340,7 @@ describe("createRepositorySymbols", () => {
       filePath: "test/unit/bin.test.js",
       language: "javascript",
       sourceKind: "code",
+      factBudget: new RepositoryFactBudget(),
       text: "import '../../bin/main.js';",
     });
 
@@ -307,6 +367,7 @@ describe("createRepositorySymbols", () => {
       ],
       symbols: sourceFacts.symbols,
       references: sourceFacts.references,
+      factBudget: new RepositoryFactBudget(),
     });
 
     expect(dependencies).toEqual([

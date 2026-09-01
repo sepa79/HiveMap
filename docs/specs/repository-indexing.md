@@ -19,7 +19,7 @@ After the current runtime/container/HiveForge base is closed, the next deliberat
 - [x] Repository index jobs are operational records, not semantic graph truth.
 - [x] The first implementation slice is persisted safe-mode job records plus shared API/MCP contracts.
 - [x] The current implemented slice also includes in-process safe-mode execution, bounded file/chunk persistence, and bounded repository search.
-- [x] Long-term, a completed repository index must be exportable and importable so teams can analyze the indexed result without re-running checkout/scan in the target environment.
+- [x] Long-term, a completed repository index must be portable so teams can analyze the indexed result without repeating the semantic scan in the target environment; no import/export surface exists in the current runtime.
 
 ## Execution Tracker
 
@@ -40,7 +40,7 @@ After the current runtime/container/HiveForge base is closed, the next deliberat
 
 ### Phase 2: Safe Repository Inventory
 
-- [ ] Implement URL validation and normalization policy for repository remotes.
+- [x] Implement one canonical repository-location parser across API start, scan-state validation, storage records, and runtime acquisition. It normalizes identifiers and rejects embedded parameters or credentials while preserving valid SSH usernames.
 - [x] Implement immutable Git checkout.
 - [x] Implement file inventory, content hashes, byte counts, and basic language/source-kind detection.
 - [x] Implement profile glob coverage derivation for current scan-start integration.
@@ -65,12 +65,12 @@ After the current runtime/container/HiveForge base is closed, the next deliberat
   Current slice: `scan_boundary_map_build` derives a candidate typed artifact from persisted repository facts plus current scan coverage; built-in profiles still require explicit agent review and `scan_complete` submission.
 - [ ] Keep structural fact extraction usable for repository understanding and rewrite planning without forcing compiler-backed deep mode.
 
-### Phase 5: Portable Completed Index Export
+### Phase 5: Portable Completed Index Snapshot
 
-- [ ] Define a portable export/import contract for completed repository indexes.
-- [ ] Support analysis in a target environment without repository checkout when a completed index artifact was imported.
+- [ ] Define the versioned streaming NDJSON full-project snapshot contract for completed repository indexes.
+- [ ] Support analysis in a target environment without repository checkout after the deferred full-project NDJSON snapshot transfers a completed index.
 - [ ] Keep operational job rows separate from the portable completed-index artifact.
-- [x] Completed-index portability extends the normal full project export instead of using a separate companion artifact.
+- [x] Direction chosen: completed-index portability belongs to one future full-project NDJSON stream rather than ZIP or a separate companion artifact; implementation is deferred.
 
 ## Purpose
 
@@ -108,7 +108,7 @@ repository URL + requested ref
 8. Every fact records its producing tool, version, configuration, source range, and revision.
 9. Embeddings assist retrieval and clustering; they do not independently prove a finding.
 10. The complete runtime is hosted/containerized and has no workstation dependencies.
-11. A completed repository index should be portable across environments when the human intentionally exports it.
+11. A completed repository index should become portable only through the deferred full-project NDJSON snapshot.
 
 ## Boundary With Repository Scans
 
@@ -150,6 +150,12 @@ Two jobs with the same index key should reuse the existing completed index. A ch
 ### Safe Mode
 
 Safe mode is the default for untrusted repositories.
+
+The current safe-mode boundary rejects HTTP remotes, HTTP(S) userinfo, passwords in URL-form SSH locations, query parameters, fragments, ASCII control characters, and backticks regardless of scheme casing. SSH usernames remain valid in both URL form (`ssh://git@example.com/org/repo.git`) and the supported SCP-style form (`git@example.com:org/repo.git`). Every tracked symlink and every tracked path whose resolved location is outside the temporary checkout is also rejected. Repository locations are normalized identifiers only: boundary whitespace is removed, URL-form sources use the platform URL serializer, and credentials or other parameters are never accepted inside them. The installed HTTP runtime accepts remote HTTPS and SSH Git sources only; explicit local paths and `file://` sources are reserved for local stdio operation. Acquisition uses one shallow, no-tags, blob-filtered fetch. HiveMap validates the fetched tree's file types, file count, per-file bytes, and total bytes before checkout. One execution-scoped fact budget is consumed before each chunk, symbol, reference, or dependency is appended, so fact construction fails before any generated-fact collection can exceed its limit. Git-output and Git wall-clock limits apply independently.
+
+The same canonical repository-location parser governs repository-index start requests, persisted repository-index records, and scan-run repository metadata. New boundary input is normalized before persistence and stored records must already be canonical. A future portability boundary must reuse this invariant rather than introducing an alternate path for credential-bearing or parameterized locations.
+
+The supported single-process runtime executes at most one repository index at a time across all workspaces. A second index waits for the global execution slot, while a duplicate request for the same in-memory execution fails explicitly. Because one process owns every live execution, a persisted active stage found after process restart represents an interrupted attempt. A later explicit `repository_index_execute` restarts that index from an empty fact set instead of leaving it permanently busy.
 
 It may:
 
@@ -235,7 +241,7 @@ Deep mode:
 
 New languages begin with the language-neutral syntax adapter. A compiler-aware adapter is added only when the product needs resolution accuracy that syntax extraction cannot provide.
 
-SCIP is a candidate interchange format for language-specific semantic indexes. HiveMap should normalize imported SCIP data into its own stable fact model and retain SCIP/tool provenance rather than exposing indexer-specific schemas to the rest of the product.
+SCIP is a candidate input format for language-specific semantic indexes. HiveMap should normalize SCIP data into its own stable fact model and retain SCIP/tool provenance rather than exposing indexer-specific schemas to the rest of the product.
 
 ## Phase 4A Safe Syntax Package
 
@@ -299,7 +305,7 @@ Each row should:
 - carry explicit producer provenance such as tool id, parser/query version, and configuration digest;
 - point back to the owning file and bounded line/range information;
 - remain operational retrieval/index evidence rather than semantic graph truth;
-- stay outside the ZIP portability contract until the completed-index portability phase lands.
+- have no current portability surface and must be included only when the deferred full-project NDJSON contract is implemented.
 
 ### Retrieval Surfaces To Add After The Facts Exist
 
@@ -415,7 +421,7 @@ Repository facts are a navigation/evidence index, not a second semantic graph. C
 
 Long-term, completed repository facts also need an explicit portability path so a workspace plus its finished index can move between environments without repeating checkout and indexing.
 
-That portability should use the same normal full-project export/import flow rather than a second export artifact.
+That portability should use the single deferred full-project NDJSON stream rather than a separate completed-index artifact. No such read or write flow exists in the current runtime.
 
 ## Job Lifecycle
 
@@ -522,7 +528,7 @@ Explicitly removes or schedules removal of an index and its derived private data
 
 No agent should need to enumerate or read the repository from scratch.
 
-When a completed repository index was imported from another environment, the same scan/review flow should work against that imported index without requiring local checkout of the original repository.
+When the deferred full-project NDJSON snapshot eventually transfers a completed repository index from another environment, the same scan/review flow should work against those received facts without requiring local checkout of the original repository.
 
 ## Container Topology
 
@@ -542,9 +548,9 @@ The embedding service is internal-only. During model evaluation it may support a
 
 ## Security Requirements
 
-- validate and normalize repository URLs;
+- validate and normalize repository locations, rejecting HTTP(S) userinfo, every URL password, query parameters, fragments, ASCII control characters, and backticks while allowing the SSH username required by SSH Git transports;
 - use short-lived, repository-scoped credentials;
-- never store credentials in graph notes, exports, logs, or clone URLs;
+- never store credentials in graph notes, persisted evidence, logs, or clone URLs;
 - control redirects and alternate Git transports;
 - run checkouts as an isolated non-root user;
 - prevent checkout paths from escaping the job workspace;
@@ -556,6 +562,8 @@ The embedding service is internal-only. During model evaluation it may support a
 - make network egress stage-specific;
 - prohibit cross-tenant caches and semantic searches;
 - record model, parser, indexer, and rule versions with results.
+
+Current safe-mode defaults are 20,000 tracked files, 5 MiB per file, 250 MiB per fetched tree, 100,000 generated chunk/symbol/reference/dependency records total, at most 100,000 chunks within that fact budget, 32 MiB Git command output, 300 MiB per file written by Git, 1 GiB Git-process address space, and 120 seconds of CPU plus 120 seconds wall time per Git command. Chunks, symbols, references, and dependencies consume the same execution-scoped fact budget incrementally while they are constructed. Fetch is shallow and excludes tags and eager blob transfer; process limits still apply when a remote ignores partial-clone filtering. Tree limits are checked before checkout can materialize tracked content. Tracked symlinks and non-regular tracked entries are rejected before checkout. The single-process runtime admits one repository-index execution at a time, so these per-execution limits also bound aggregate repository-index activity in the supported one-replica topology. Multi-process or multi-replica deployment requires a distributed execution lease and deployment-level resource policy before it is supported.
 
 ## Delivery Plan
 
@@ -592,11 +600,11 @@ The embedding service is internal-only. During model evaluation it may support a
 - normalize symbols, references, dependencies, and diagnostics;
 - prove deterministic repeat results for the same commit/toolchain.
 
-### Phase 4: Portable Index Bundles
+### Phase 4: Portable Completed-Index Stream
 
-- define how completed repository index data is embedded into the normal full-project export/import format;
+- define how completed repository index data is represented in one versioned streaming NDJSON full-project snapshot;
 - include normalized facts, provenance, revision identity, and any required bounded retrieval data;
-- support import into another HiveMap environment without repository checkout;
+- support retrieval and analysis in another HiveMap environment without repeating the semantic scan;
 - decide whether embeddings are regenerated on import or included as an optional payload;
 - preserve the boundary that job execution state is not itself the portable artifact.
 
@@ -629,7 +637,7 @@ The embedding service is internal-only. During model evaluation it may support a
 - one scan profile obtains coverage without agent discovery;
 - the agent receives bounded evidence candidates rather than the full repository;
 - failures remain visible and completion cannot claim missing coverage;
-- a completed index can later be exported and imported for offline analysis in another environment.
+- a completed index can later travel inside the single deferred full-project NDJSON snapshot for offline analysis in another environment.
 
 ## Benchmark Plan
 

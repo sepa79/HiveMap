@@ -48,7 +48,7 @@ Build a local-first HiveMap alpha that proves:
 7. Agent applies a delegated update or creates a proposal if the policy requires review.
 8. Projection updates.
 9. User switches to Project Map semantics when the conversation is about a project.
-10. ZIP export is saved when a frozen checkpoint is needed.
+10. Reviewed state remains persisted in the originating workspace; portability is deferred.
 
 ## Definition Of Done
 
@@ -95,7 +95,7 @@ Build a local-first HiveMap alpha that proves:
 
 ### Milestone 5 — Demo Hardening
 
-- portable exports,
-- import POC demo bundles,
+- document deferred project portability without implementing it,
+- keep POC demo evidence as reference-only files,
 - README run instructions,
 - final smoke test.

@@ -61,8 +61,6 @@ const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   scan_complete:
     "Complete a scan only after coverage, every profile criterion, required output, and finding evidence validate. Findings-bearing completion from a non-ready calibration state requires an explicit calibrationOverrideReason.",
   scan_compare: "Compare two completed runs of the same profile and return resolved, open, changed, new, regressed, or unverifiable evidence.",
-  workspace_export_zip: "Export a deterministic checksummed .hivemap.zip with canonical workspace state and repeat-scan instructions.",
-  workspace_import_zip: "Import a validated .hivemap.zip in explicit new or replace mode without silent merge or id rewriting.",
 };
 
 const projectSourceRefSchema = z.object({
@@ -337,17 +335,6 @@ export function createHiveMapMcpServer(runtime: HiveMapRuntime): McpServer {
     workspaceId: z.string(),
     beforeScanId: z.string(),
     afterScanId: z.string(),
-  });
-
-  registerTool(server, runtime, "workspace_export_zip", {
-    workspaceId: z.string(),
-    targetPath: z.string(),
-    exportedAt: z.string(),
-  });
-
-  registerTool(server, runtime, "workspace_import_zip", {
-    sourcePath: z.string(),
-    mode: z.enum(["new", "replace"]),
   });
 
   return server;

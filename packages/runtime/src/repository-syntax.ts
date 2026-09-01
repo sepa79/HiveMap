@@ -1,3 +1,8 @@
+/**
+ * Responsibility: Extract deterministic syntax symbols, references, and dependency facts from supported source text.
+ * Must not: Read repositories, execute project code, install dependencies, or persist facts.
+ * Contract: Implements the safe-mode structural fact rules in docs/specs/repository-indexing.md.
+ */
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { posix as pathPosix } from "node:path";
@@ -10,6 +15,8 @@ import type {
   RepositoryReferenceRecord,
   RepositorySymbolRecord,
 } from "@hivemap/storage";
+
+import { RepositoryFactBudget } from "./repository-fact-budget.js";
 
 const require = createRequire(import.meta.url);
 const TypeScript = require("tree-sitter-typescript") as {
@@ -30,6 +37,7 @@ export function createRepositorySyntaxFacts(options: {
   language: string;
   sourceKind: string;
   text: string;
+  factBudget: RepositoryFactBudget;
 }): {
   symbols: RepositorySymbolRecord[];
   references: RepositoryReferenceRecord[];
@@ -60,6 +68,7 @@ export function createRepositorySymbols(options: {
   filePath: string;
   language: string;
   text: string;
+  factBudget: RepositoryFactBudget;
 }): RepositorySymbolRecord[] {
   return createRepositorySyntaxFacts({ ...options, sourceKind: "code" }).symbols;
 }
@@ -71,6 +80,7 @@ export function createRepositoryReferences(options: {
   language: string;
   sourceKind: string;
   text: string;
+  factBudget: RepositoryFactBudget;
 }): RepositoryReferenceRecord[] {
   return createRepositorySyntaxFacts(options).references;
 }
@@ -79,16 +89,27 @@ export function createRepositoryDependencies(options: {
   files: readonly RepositoryFileRecord[];
   symbols: readonly RepositorySymbolRecord[];
   references: readonly RepositoryReferenceRecord[];
+  factBudget: RepositoryFactBudget;
 }): RepositoryDependencyRecord[] {
   const importTargetIndex = createImportTargetIndex(options.files);
   const symbolsByKey = new Map(options.symbols.map((symbol) => [symbol.key, symbol]));
   const symbolLookup = createReferenceSymbolIndex(options.symbols);
-
-  return dedupeDependencies(
-    options.references.map((reference) =>
-      createDependencyRecord(reference, resolveDependencyTarget(reference, symbolsByKey, symbolLookup, importTargetIndex)),
-    ),
-  );
+  const dependencies: RepositoryDependencyRecord[] = [];
+  const seen = new Set<string>();
+  for (const reference of options.references) {
+    const dependency = createDependencyRecord(
+      reference,
+      resolveDependencyTarget(reference, symbolsByKey, symbolLookup, importTargetIndex),
+    );
+    const fingerprint = createDependencyFingerprint(dependency);
+    if (seen.has(fingerprint)) {
+      continue;
+    }
+    seen.add(fingerprint);
+    options.factBudget.consume("dependency");
+    dependencies.push(dependency);
+  }
+  return dependencies;
 }
 
 function resolveSyntaxLanguage(language: string): SupportedSyntaxLanguage | undefined {
@@ -124,6 +145,7 @@ function extractTypeScriptFacts(
     filePath: string;
     language: string;
     sourceKind: string;
+    factBudget: RepositoryFactBudget;
   },
   rootNode: Parser.SyntaxNode,
 ): { symbols: RepositorySymbolRecord[]; references: RepositoryReferenceRecord[] } {
@@ -148,6 +170,7 @@ function collectTypeScriptNodeSymbols(options: {
   indexId: string;
   filePath: string;
   language: string;
+  factBudget: RepositoryFactBudget;
   node: Parser.SyntaxNode;
   exported: boolean;
   parents: RepositorySymbolRecord[];
@@ -167,6 +190,7 @@ function collectTypeScriptNodeSymbols(options: {
     if (symbol === undefined) {
       return;
     }
+    options.factBudget.consume("symbol");
     options.symbols.push(symbol);
     const body = node.childForFieldName("body");
     if (body !== null) {
@@ -182,6 +206,7 @@ function collectTypeScriptNodeSymbols(options: {
           getNodeText(member.childForFieldName("name")),
         );
         if (memberSymbol !== undefined) {
+          options.factBudget.consume("symbol");
           options.symbols.push(memberSymbol);
         }
       }
@@ -204,6 +229,7 @@ function collectTypeScriptNodeSymbols(options: {
     if (symbol === undefined) {
       return;
     }
+    options.factBudget.consume("symbol");
     options.symbols.push(symbol);
 
     if (node.type === "interface_declaration") {
@@ -221,6 +247,7 @@ function collectTypeScriptNodeSymbols(options: {
             getNodeText(member.childForFieldName("name")),
           );
           if (memberSymbol !== undefined) {
+            options.factBudget.consume("symbol");
             options.symbols.push(memberSymbol);
           }
         }
@@ -230,11 +257,15 @@ function collectTypeScriptNodeSymbols(options: {
   }
 
   if (node.type === "lexical_declaration" || node.type === "variable_declaration") {
-    for (const declarator of node.namedChildren.filter((child) => child.type === "variable_declarator")) {
+    for (const declarator of node.namedChildren) {
+      if (declarator.type !== "variable_declarator") {
+        continue;
+      }
       const nameNode = declarator.childForFieldName("name");
       const name = extractSimpleIdentifier(nameNode);
       const symbol = createSymbolRecord(options, declarator, "variable", name);
       if (symbol !== undefined) {
+        options.factBudget.consume("symbol");
         options.symbols.push(symbol);
       }
     }
@@ -248,6 +279,7 @@ function extractJavaFacts(
     filePath: string;
     language: string;
     sourceKind: string;
+    factBudget: RepositoryFactBudget;
   },
   rootNode: Parser.SyntaxNode,
 ): { symbols: RepositorySymbolRecord[]; references: RepositoryReferenceRecord[] } {
@@ -264,6 +296,7 @@ function extractJavaFacts(
       packageName,
     );
     if (packageSymbol !== undefined) {
+      options.factBudget.consume("symbol");
       symbols.push(packageSymbol);
     }
   }
@@ -291,6 +324,7 @@ function collectJavaDeclarationSymbols(options: {
   indexId: string;
   filePath: string;
   language: string;
+  factBudget: RepositoryFactBudget;
   node: Parser.SyntaxNode;
   parents: RepositorySymbolRecord[];
   symbols: RepositorySymbolRecord[];
@@ -304,6 +338,7 @@ function collectJavaDeclarationSymbols(options: {
   if (symbol === undefined) {
     return;
   }
+  options.factBudget.consume("symbol");
   options.symbols.push(symbol);
 
   const body = options.node.childForFieldName("body");
@@ -317,7 +352,7 @@ function collectJavaDeclarationSymbols(options: {
       continue;
     }
     if (member.type === "field_declaration" || member.type === "constant_declaration") {
-      for (const declarator of findNamedChildren(member, "variable_declarator")) {
+      for (const declarator of iterateNamedDescendants(member, "variable_declarator")) {
         const fieldSymbol = createSymbolRecord(
           { ...options, parents: [...options.parents, symbol], exported: false },
           declarator,
@@ -325,6 +360,7 @@ function collectJavaDeclarationSymbols(options: {
           getNodeText(declarator.childForFieldName("name")),
         );
         if (fieldSymbol !== undefined) {
+          options.factBudget.consume("symbol");
           options.symbols.push(fieldSymbol);
         }
       }
@@ -338,6 +374,7 @@ function collectJavaDeclarationSymbols(options: {
         getNodeText(member.childForFieldName("name")),
       );
       if (memberSymbol !== undefined) {
+        options.factBudget.consume("symbol");
         options.symbols.push(memberSymbol);
       }
     }
@@ -351,6 +388,7 @@ function extractTypeScriptReferences(
     filePath: string;
     language: string;
     sourceKind: string;
+    factBudget: RepositoryFactBudget;
   },
   rootNode: Parser.SyntaxNode,
   symbols: readonly RepositorySymbolRecord[],
@@ -363,6 +401,7 @@ function extractTypeScriptReferences(
       const sourceNode = node.namedChildren.find((child) => child.type === "string");
       const sourceText = sourceNode?.text.replace(/^['"]|['"]$/gu, "").trim();
       if (sourceNode !== undefined && sourceText !== undefined && sourceText.length > 0) {
+        options.factBudget.consume("reference");
         references.push(createReferenceRecord(options, sourceNode, "import", sourceText, symbolIndex));
       }
       continue;
@@ -380,6 +419,7 @@ function collectTypeScriptNodeReferences(
     filePath: string;
     language: string;
     sourceKind: string;
+    factBudget: RepositoryFactBudget;
   },
   node: Parser.SyntaxNode,
   symbolIndex: Map<string, RepositorySymbolRecord>,
@@ -392,12 +432,17 @@ function collectTypeScriptNodeReferences(
         if (clause.type === "extends_clause") {
           const targetNode = clause.namedChildren.find((child) => child.type === "identifier" || child.type === "type_identifier");
           if (targetNode !== undefined) {
+            options.factBudget.consume("reference");
             references.push(createReferenceRecord(options, targetNode, "extends", targetNode.text, symbolIndex));
           }
           continue;
         }
         if (clause.type === "implements_clause") {
-          for (const targetNode of clause.namedChildren.filter((child) => child.type === "identifier" || child.type === "type_identifier")) {
+          for (const targetNode of clause.namedChildren) {
+            if (targetNode.type !== "identifier" && targetNode.type !== "type_identifier") {
+              continue;
+            }
+            options.factBudget.consume("reference");
             references.push(createReferenceRecord(options, targetNode, "implements", targetNode.text, symbolIndex));
           }
         }
@@ -408,6 +453,7 @@ function collectTypeScriptNodeReferences(
   if (node.type === "new_expression") {
     const constructorNode = node.namedChildren.find((child) => child.type === "identifier" || child.type === "type_identifier");
     if (constructorNode !== undefined) {
+      options.factBudget.consume("reference");
       references.push(createReferenceRecord(options, constructorNode, "instantiation", constructorNode.text, symbolIndex));
     }
   }
@@ -416,6 +462,7 @@ function collectTypeScriptNodeReferences(
     const functionNode = node.childForFieldName("function") ?? node.namedChildren[0];
     const targetText = extractCallableTargetText(functionNode);
     if (functionNode !== undefined && targetText !== undefined) {
+      options.factBudget.consume("reference");
       references.push(createReferenceRecord(options, functionNode, "call", targetText, symbolIndex));
     }
   }
@@ -432,6 +479,7 @@ function extractJavaReferences(
     filePath: string;
     language: string;
     sourceKind: string;
+    factBudget: RepositoryFactBudget;
   },
   rootNode: Parser.SyntaxNode,
   symbols: readonly RepositorySymbolRecord[],
@@ -443,6 +491,7 @@ function extractJavaReferences(
     if (node.type === "import_declaration") {
       const targetNode = node.namedChildren.find((child) => child.type === "scoped_identifier" || child.type === "identifier");
       if (targetNode !== undefined) {
+        options.factBudget.consume("reference");
         references.push(createReferenceRecord(options, targetNode, "import", normalizeJavaQualifiedName(targetNode.text), symbolIndex));
       }
       continue;
@@ -460,6 +509,7 @@ function collectJavaNodeReferences(
     filePath: string;
     language: string;
     sourceKind: string;
+    factBudget: RepositoryFactBudget;
   },
   node: Parser.SyntaxNode,
   symbolIndex: Map<string, RepositorySymbolRecord>,
@@ -470,10 +520,12 @@ function collectJavaNodeReferences(
     const superInterfaces = node.namedChildren.find((child) => child.type === "super_interfaces");
     const superType = superclass?.namedChildren.find((child) => child.type === "type_identifier");
     if (superType !== undefined) {
+      options.factBudget.consume("reference");
       references.push(createReferenceRecord(options, superType, "extends", superType.text, symbolIndex));
     }
     if (superInterfaces !== undefined) {
-      for (const targetNode of findNamedChildren(superInterfaces, "type_identifier")) {
+      for (const targetNode of iterateNamedDescendants(superInterfaces, "type_identifier")) {
+        options.factBudget.consume("reference");
         references.push(createReferenceRecord(options, targetNode, "implements", targetNode.text, symbolIndex));
       }
     }
@@ -482,6 +534,7 @@ function collectJavaNodeReferences(
   if (node.type === "object_creation_expression") {
     const typeNode = node.namedChildren.find((child) => child.type === "type_identifier");
     if (typeNode !== undefined) {
+      options.factBudget.consume("reference");
       references.push(createReferenceRecord(options, typeNode, "instantiation", typeNode.text, symbolIndex));
     }
   }
@@ -489,6 +542,7 @@ function collectJavaNodeReferences(
   if (node.type === "method_invocation") {
     const targetText = extractJavaMethodInvocationTarget(node);
     if (targetText !== undefined) {
+      options.factBudget.consume("reference");
       references.push(createReferenceRecord(options, node, "call", targetText, symbolIndex));
     }
   }
@@ -815,28 +869,18 @@ function dedupeReferences(references: readonly RepositoryReferenceRecord[]): Rep
   return deduped;
 }
 
-function dedupeDependencies(dependencies: readonly RepositoryDependencyRecord[]): RepositoryDependencyRecord[] {
-  const seen = new Set<string>();
-  const deduped: RepositoryDependencyRecord[] = [];
-  for (const dependency of dependencies) {
-    const fingerprint = [
-      dependency.filePath,
-      dependency.kind,
-      dependency.targetText,
-      dependency.targetFilePath ?? "",
-      dependency.targetSymbolKey ?? "",
-      dependency.startLine,
-      dependency.startColumn,
-      dependency.endLine,
-      dependency.endColumn,
-    ].join("::");
-    if (seen.has(fingerprint)) {
-      continue;
-    }
-    seen.add(fingerprint);
-    deduped.push(dependency);
-  }
-  return deduped;
+function createDependencyFingerprint(dependency: RepositoryDependencyRecord): string {
+  return [
+    dependency.filePath,
+    dependency.kind,
+    dependency.targetText,
+    dependency.targetFilePath ?? "",
+    dependency.targetSymbolKey ?? "",
+    dependency.startLine,
+    dependency.startColumn,
+    dependency.endLine,
+    dependency.endColumn,
+  ].join("::");
 }
 
 function getNodeText(node: Parser.SyntaxNode | null): string | undefined {
@@ -873,15 +917,13 @@ function hasPublicModifier(node: Parser.SyntaxNode): boolean {
   return node.text.trimStart().startsWith("public ");
 }
 
-function findNamedChildren(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode[] {
-  const matches: Parser.SyntaxNode[] = [];
+function* iterateNamedDescendants(node: Parser.SyntaxNode, type: string): IterableIterator<Parser.SyntaxNode> {
   for (const child of node.namedChildren) {
     if (child.type === type) {
-      matches.push(child);
+      yield child;
     }
-    matches.push(...findNamedChildren(child, type));
+    yield* iterateNamedDescendants(child, type);
   }
-  return matches;
 }
 
 function resolveTypeScriptMemberKind(type: string): string | undefined {

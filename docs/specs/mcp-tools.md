@@ -36,8 +36,6 @@ Draft MCP surface for agents. MCP is the primary HiveMap agent interface for alp
 - `finding_update`
 - `scan_complete`
 - `scan_compare`
-- `workspace_export_zip`
-- `workspace_import_zip`
 
 ## Rules
 
@@ -51,14 +49,15 @@ Draft MCP surface for agents. MCP is the primary HiveMap agent interface for alp
 - All graph mutations must be explicit.
 - REST endpoints, if present, must call the same command handlers as MCP tools.
 - Scan tools instruct and validate an agent; they do not silently crawl the repository.
-- ZIP paths and import mode are explicit. Import never merges or rewrites ids silently.
+- No current MCP profile exposes workspace or project import/export tools.
+- Installed Streamable HTTP MCP accepts remote HTTPS or SSH repository sources only. Local repository paths and `file://` sources require intentional local stdio operation.
 - Repository-index tools persist explicit job records; they do not silently crawl or execute repository code in this phase.
 
 ## Implementation Direction
 
 The MCP app exposes tool handlers over the shared HiveMap runtime. Transport-specific MCP server wiring must stay thin and must not reimplement graph, category, projection, feedback, or proposal behavior.
 
-The installed/container runtime exposes stateless Streamable HTTP MCP at `/mcp` in the same HTTP process and port as REST. It creates transport/server wiring per request while sharing the process-owned `HiveMapRuntime` and Postgres store with REST. The endpoint requires the same exact bearer token as REST through `Authorization: Bearer <token>`. The HTTP runtime accepts exactly one source for that token: direct `HIVEMAP_AUTH_TOKEN`/`--auth-token` or file-backed `HIVEMAP_AUTH_TOKEN_FILE`/`--auth-token-file`; HiveForge uses the file-backed external-secret path. The legacy stdio entrypoint remains available only for explicit local development and is not part of the installed runtime contract.
+The installed/container runtime exposes stateless Streamable HTTP MCP at `/mcp` in the same HTTP process and port as REST. It creates transport/server wiring per request while sharing the process-owned `HiveMapRuntime` and Postgres store with REST. The endpoint requires the same exact bearer token as REST through `Authorization: Bearer <token>`. The HTTP runtime accepts exactly one source for that token: direct `HIVEMAP_AUTH_TOKEN`/`--auth-token` or file-backed `HIVEMAP_AUTH_TOKEN_FILE`/`--auth-token-file`; HiveForge uses the file-backed external-secret path. The legacy stdio entrypoint remains available only for explicit local development and is not part of the installed runtime contract. Neither transport exposes import/export in the current phase.
 
 For repository-backed scans, transport and agent UX should expose one explicit calibration checkpoint between `scan_start` and final findings. The caller should be asked to confirm that the effective profile, derived coverage, and preliminary evidence shape make sense before the workflow proceeds to durable findings or `scan_complete`.
 

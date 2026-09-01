@@ -1,20 +1,9 @@
 /**
- * Responsibility: Expose the canonical public storage contracts, adapters, bundle API, and schema versions.
+ * Responsibility: Expose the canonical public storage contracts, adapters, deterministic serialization, and schema versions.
  * Must not: Implement adapters, validation, migrations, or runtime behavior.
  * Contract: Re-exports each storage concern from its single owning module.
  */
-export {
-  BundleValidationError,
-  HIVEMAP_BUNDLE_FORMAT_VERSION,
-  HIVEMAP_LOGICAL_STATE_VERSION,
-  createWorkspaceBundle,
-  parseWorkspaceBundle,
-  readWorkspaceBundle,
-  stableJson,
-  writeWorkspaceBundle,
-  type BundleManifest,
-  type WorkspaceBundle,
-} from "./bundle.js";
+export { stableJson } from "./stable-json.js";
 export type {
   ConceptEmbeddingRecord,
   HiveMapStore,

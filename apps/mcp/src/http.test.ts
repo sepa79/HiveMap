@@ -12,6 +12,7 @@ import { handleHiveMapMcpHttpRequest } from "./http.js";
 let client: Client;
 let httpServer: Server;
 let store: InMemoryHiveMapStore;
+let baseUrl: string;
 
 beforeEach(async () => {
   store = new InMemoryHiveMapStore();
@@ -25,8 +26,9 @@ beforeEach(async () => {
   if (address === null || typeof address === "string") {
     throw new Error("Expected an allocated TCP port for the MCP test server");
   }
+  baseUrl = `http://127.0.0.1:${address.port}`;
   client = new Client({ name: "hivemap-http-test-client", version: "0.1.0" });
-  const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/mcp`));
+  const transport = new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`));
   await client.connect(transport as unknown as Parameters<typeof client.connect>[0]);
 });
 
@@ -44,5 +46,18 @@ describe("HiveMap Streamable HTTP MCP transport", () => {
 
     expect(tools.tools.map((tool) => tool.name)).toContain("workspace_list");
     expect(tools.tools.map((tool) => tool.name)).toContain("scan_start");
+  });
+
+  it("rejects MCP request bodies above the 2 MiB transport limit", async () => {
+    const response = await fetch(`${baseUrl}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "x".repeat(2 * 1024 * 1024 + 1),
+    });
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({
+      error: { code: "INVALID_MCP_HTTP_BODY", message: "MCP request body exceeds the 2 MiB limit" },
+    });
   });
 });
