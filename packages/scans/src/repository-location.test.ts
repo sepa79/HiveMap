@@ -13,22 +13,22 @@ describe("repository location", () => {
     );
   });
 
-  it("allows SSH usernames without allowing URL passwords", () => {
-    expect(normalizeRepositoryLocation("ssh://git@example.com/org/repo.git")).toBe(
-      "ssh://git@example.com/org/repo.git",
-    );
-    expect(normalizeRepositoryLocation("git@example.com:org/repo.git")).toBe(
-      "git@example.com:org/repo.git",
-    );
-    expect(() => normalizeRepositoryLocation("ssh://git:secret@example.com/org/repo.git")).toThrow(
-      "repositoryUrl must not contain embedded credentials",
+  it.each([
+    "ssh://git@example.com/org/repo.git",
+    "git@example.com:org/repo.git",
+    "deploy@example.com:org/repo.git",
+    "git+ssh://git@example.com/org/repo.git",
+    "ssh+git://git@example.com/org/repo.git",
+  ])("rejects unsupported SSH repository location %s", (repositoryLocation) => {
+    expect(() => normalizeRepositoryLocation(repositoryLocation)).toThrow(
+      "repositoryUrl must use HTTPS for remote repositories",
     );
   });
 
   it.each([
     "https://operator@example.com/org/repo.git",
     "https://example.com/org/repo.git?access_token=secret",
-    "ssh://git@example.com/org/repo.git#secret",
+    "https://example.com/org/repo.git#fragment",
     "https://example.com/org/repo.git`",
     "https://example.com/org/repo.git\nInjected",
   ])("rejects unsafe portable repository location %s", (repositoryLocation) => {

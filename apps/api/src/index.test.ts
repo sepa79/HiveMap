@@ -304,6 +304,28 @@ describe("api server", () => {
     });
   });
 
+  it("rejects SSH repository sources over REST", async () => {
+    await createWorkspace();
+
+    const response = await postJson("/workspaces/workspace-a/repository-indexes", {
+      index: {
+        id: "repo-index-ssh",
+        repositoryUrl: "ssh://git@example.com/org/repo.git",
+        mode: "safe",
+        requestedAt: "2026-08-20T12:00:00.000Z",
+        actor: { agentId: "codex", tool: "rest" },
+      },
+    });
+
+    expect(response.status).toBe(400);
+    expect(parseJson(response)).toEqual({
+      error: {
+        code: "ApiContractValidationError",
+        message: "index.repositoryUrl must use HTTPS for remote repositories",
+      },
+    });
+  });
+
   it("executes a repository index and searches it through REST", async () => {
     await createWorkspace();
     const startResponse = await postJson("/workspaces/workspace-a/repository-indexes", {

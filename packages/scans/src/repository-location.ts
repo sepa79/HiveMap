@@ -6,6 +6,8 @@
 
 const URL_SOURCE_PATTERN = /^[a-z][a-z0-9+.-]*:\/\//i;
 const FORBIDDEN_PORTABLE_TEXT_PATTERN = /[\u0000-\u001f\u007f`]/u;
+const SCP_STYLE_SSH_PATTERN = /^[^/\\\s@:]+@[^/\\\s:]+:.+/u;
+const SSH_PROTOCOLS = new Set(["ssh:", "git+ssh:", "ssh+git:"]);
 
 export class RepositoryLocationValidationError extends Error {
   constructor(message: string) {
@@ -27,8 +29,8 @@ export function normalizeRepositoryLocation(repositoryLocation: string, label = 
     throw new RepositoryLocationValidationError(`${label} must not contain query parameters or fragments`);
   }
 
-  if (normalizedWhitespace.startsWith("git@")) {
-    return normalizedWhitespace;
+  if (SCP_STYLE_SSH_PATTERN.test(normalizedWhitespace)) {
+    throw new RepositoryLocationValidationError(`${label} must use HTTPS for remote repositories`);
   }
   if (!URL_SOURCE_PATTERN.test(normalizedWhitespace)) {
     return normalizedWhitespace;
@@ -39,6 +41,10 @@ export function normalizeRepositoryLocation(repositoryLocation: string, label = 
     parsed = new URL(normalizedWhitespace);
   } catch {
     throw new RepositoryLocationValidationError(`${label} must be a valid repository URL`);
+  }
+
+  if (SSH_PROTOCOLS.has(parsed.protocol)) {
+    throw new RepositoryLocationValidationError(`${label} must use HTTPS for remote repositories`);
   }
 
   if (parsed.password.length > 0 || (parsed.username.length > 0 && (parsed.protocol === "http:" || parsed.protocol === "https:"))) {

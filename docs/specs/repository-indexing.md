@@ -40,7 +40,7 @@ After the current runtime/container/HiveForge base is closed, the next deliberat
 
 ### Phase 2: Safe Repository Inventory
 
-- [x] Implement one canonical repository-location parser across API start, scan-state validation, storage records, and runtime acquisition. It normalizes identifiers and rejects embedded parameters or credentials while preserving valid SSH usernames.
+- [x] Implement one canonical repository-location parser across API start, scan-state validation, storage records, and runtime acquisition. It normalizes identifiers and rejects SSH, embedded parameters, and credentials.
 - [x] Implement immutable Git checkout.
 - [x] Implement file inventory, content hashes, byte counts, and basic language/source-kind detection.
 - [x] Implement profile glob coverage derivation for current scan-start integration.
@@ -151,7 +151,7 @@ Two jobs with the same index key should reuse the existing completed index. A ch
 
 Safe mode is the default for untrusted repositories.
 
-The current safe-mode boundary rejects HTTP remotes, HTTP(S) userinfo, passwords in URL-form SSH locations, query parameters, fragments, ASCII control characters, and backticks regardless of scheme casing. SSH usernames remain valid in both URL form (`ssh://git@example.com/org/repo.git`) and the supported SCP-style form (`git@example.com:org/repo.git`). Every tracked symlink and every tracked path whose resolved location is outside the temporary checkout is also rejected. Repository locations are normalized identifiers only: boundary whitespace is removed, URL-form sources use the platform URL serializer, and credentials or other parameters are never accepted inside them. The installed HTTP runtime accepts remote HTTPS and SSH Git sources only; explicit local paths and `file://` sources are reserved for local stdio operation. Acquisition uses one shallow, no-tags, blob-filtered fetch. HiveMap validates the fetched tree's file types, file count, per-file bytes, and total bytes before checkout. One execution-scoped fact budget is consumed before each chunk, symbol, reference, or dependency is appended, so fact construction fails before any generated-fact collection can exceed its limit. Git-output and Git wall-clock limits apply independently.
+The current safe-mode boundary rejects HTTP and SSH remotes, HTTP(S) userinfo, every URL password, query parameters, fragments, ASCII control characters, and backticks regardless of scheme casing. Every tracked symlink and every tracked path whose resolved location is outside the temporary checkout is also rejected. Repository locations are normalized identifiers only: boundary whitespace is removed, URL-form sources use the platform URL serializer, and credentials or other parameters are never accepted inside them. The installed HTTP runtime accepts remote HTTPS Git sources only; explicit local paths and `file://` sources are reserved for local stdio operation. Acquisition uses one shallow, no-tags, blob-filtered fetch. HiveMap validates the fetched tree's file types, file count, per-file bytes, and total bytes before checkout. One execution-scoped fact budget is consumed before each chunk, symbol, reference, or dependency is appended, so fact construction fails before any generated-fact collection can exceed its limit. Git-output and Git wall-clock limits apply independently.
 
 The same canonical repository-location parser governs repository-index start requests, persisted repository-index records, and scan-run repository metadata. New boundary input is normalized before persistence and stored records must already be canonical. A future portability boundary must reuse this invariant rather than introducing an alternate path for credential-bearing or parameterized locations.
 
@@ -548,7 +548,7 @@ The embedding service is internal-only. During model evaluation it may support a
 
 ## Security Requirements
 
-- validate and normalize repository locations, rejecting HTTP(S) userinfo, every URL password, query parameters, fragments, ASCII control characters, and backticks while allowing the SSH username required by SSH Git transports;
+- validate and normalize repository locations, rejecting HTTP and SSH remotes, HTTP(S) userinfo, every URL password, query parameters, fragments, ASCII control characters, and backticks;
 - use short-lived, repository-scoped credentials;
 - never store credentials in graph notes, persisted evidence, logs, or clone URLs;
 - control redirects and alternate Git transports;

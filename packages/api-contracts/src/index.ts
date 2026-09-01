@@ -698,47 +698,6 @@ export type McpToolRequestMap = {
   scan_compare: CompareScansRequest;
 };
 
-export type RestEndpointName =
-  | "workspace.create"
-  | "workspace.get"
-  | "graph.get"
-  | "repository-index.list"
-  | "repository-index.get"
-  | "repository-index.start"
-  | "repository-index.execute"
-  | "repository-index.search"
-  | "repository-index.evidence-candidates"
-  | "scan.boundary-map.build"
-  | "scan-profile-overlay.help"
-  | "scan-profile-overlay.suggest"
-  | "concept-embedding.upsert"
-  | "concept-embedding.refresh"
-  | "concept-embedding.backfill"
-  | "concept-similar.list"
-  | "graph.commands.apply"
-  | "categories.get"
-  | "category.assign"
-  | "projection.get"
-  | "projection.create"
-  | "feedback.list"
-  | "feedback.record"
-  | "proposal.list"
-  | "proposal.create"
-  | "proposal.approve"
-  | "proposal.apply"
-  | "proposal.reject"
-  | "scan-profile.list"
-  | "scan.list"
-  | "scan.start"
-  | "scan.coverage.record"
-  | "scan.finding.validate"
-  | "scan.finding.create"
-  | "finding.update"
-  | "scan.complete"
-  | "scan.compare"
-  | "workspace.export"
-  | "workspace.import";
-
 export class ApiContractValidationError extends Error {
   constructor(message: string) {
     super(message);

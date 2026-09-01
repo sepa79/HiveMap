@@ -155,6 +155,36 @@ describe("MCP tool adapter", () => {
     });
   });
 
+  it("rejects SSH repository sources through MCP handlers", async () => {
+    await handleMcpTool(runtime, "project_create", {
+      workspace: {
+        id: "workspace-a",
+        name: "Alpha",
+        createdAt: "2026-05-13T21:00:00.000Z",
+      },
+    });
+
+    await expect(
+      handleMcpTool(runtime, "repository_index_start", {
+        workspaceId: "workspace-a",
+        index: {
+          id: "repo-index-ssh",
+          repositoryUrl: "git@example.com:org/repo.git",
+          mode: "safe",
+          requestedAt: "2026-08-20T12:00:00.000Z",
+          actor: { agentId: "codex", tool: "mcp" },
+        },
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      tool: "repository_index_start",
+      error: {
+        code: "ApiContractValidationError",
+        message: "index.repositoryUrl must use HTTPS for remote repositories",
+      },
+    });
+  });
+
   it("executes and searches repository indexes through MCP handlers", async () => {
     await handleMcpTool(runtime, "project_create", {
       workspace: {

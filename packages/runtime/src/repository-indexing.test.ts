@@ -216,6 +216,19 @@ describe("createRepositoryChunks", () => {
     ).rejects.toMatchObject({ code: "UNSAFE_REPOSITORY_URL" });
   });
 
+  it.each([
+    "ssh://git@example.com/org/repo.git",
+    "git@example.com:org/repo.git",
+  ])("rejects unsupported SSH repository source %s before clone", async (repositoryUrl) => {
+    await expect(
+      executeSafeRepositoryIndex({
+        workspaceId: "workspace-a",
+        indexId: "repo-index-a",
+        repositoryUrl,
+      }),
+    ).rejects.toMatchObject({ code: "UNSAFE_REPOSITORY_URL" });
+  });
+
   it("rejects local repository sources unless the caller explicitly enables local operation", async () => {
     const repositoryRoot = await mkdtemp(join(tmpdir(), "hivemap-index-local-policy-"));
     temporaryPaths.push(repositoryRoot);

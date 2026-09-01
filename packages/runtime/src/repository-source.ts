@@ -34,10 +34,6 @@ export async function normalizeRepositorySource(
     }
     return parsed.href;
   }
-  if (normalized.startsWith("git@")) {
-    return normalized;
-  }
-
   const resolvedPath = resolve(normalized);
   await assertLocalRepositoryDirectory(resolvedPath, normalized);
   return pathToFileURL(resolvedPath).href;
@@ -61,7 +57,7 @@ export function assertRepositorySourcePolicy(repositoryUrl: string, sourcePolicy
     if (parsed.protocol === "http:") {
       throw new RepositoryIndexExecutionError("UNSAFE_REPOSITORY_URL", `Insecure repository URL is not allowed: ${trimmed}`);
     }
-    if (parsed.protocol !== "https:" && parsed.protocol !== "ssh:" && parsed.protocol !== "file:") {
+    if (parsed.protocol !== "https:" && parsed.protocol !== "file:") {
       throw new RepositoryIndexExecutionError("UNSAFE_REPOSITORY_URL", `Unsupported repository URL protocol: ${parsed.protocol}`);
     }
   }
@@ -81,5 +77,5 @@ async function assertLocalRepositoryDirectory(resolvedPath: string, displaySourc
 }
 
 function isLocalRepositorySource(repositoryUrl: string): boolean {
-  return /^file:\/\//i.test(repositoryUrl) || (!/^[a-z][a-z0-9+.-]*:\/\//i.test(repositoryUrl) && !repositoryUrl.startsWith("git@"));
+  return /^file:\/\//i.test(repositoryUrl) || !/^[a-z][a-z0-9+.-]*:\/\//i.test(repositoryUrl);
 }

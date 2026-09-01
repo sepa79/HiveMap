@@ -135,14 +135,14 @@ describe("api contracts", () => {
       validateStartRepositoryIndexRequest({
         workspaceId: "workspace-a",
         index: {
-          id: "repo-index-ssh-user",
+          id: "repo-index-ssh",
           repositoryUrl: "ssh://git@example.com/org/repo.git",
           mode: "safe",
           requestedAt: "2026-08-20T12:00:00.000Z",
           actor: { agentId: "codex", tool: "test" },
         },
       }),
-    ).not.toThrow();
+    ).toThrow("index.repositoryUrl must use HTTPS for remote repositories");
     expect(() =>
       validateStartRepositoryIndexRequest({
         workspaceId: "workspace-a",
@@ -160,7 +160,7 @@ describe("api contracts", () => {
         workspaceId: "workspace-a",
         index: {
           id: "repo-index-fragment",
-          repositoryUrl: "ssh://git@example.com/org/repo.git#secret",
+          repositoryUrl: "https://example.com/org/repo.git#fragment",
           mode: "safe",
           requestedAt: "2026-08-20T12:00:00.000Z",
           actor: { agentId: "codex", tool: "test" },

@@ -50,7 +50,7 @@ Draft MCP surface for agents. MCP is the primary HiveMap agent interface for alp
 - REST endpoints, if present, must call the same command handlers as MCP tools.
 - Scan tools instruct and validate an agent; they do not silently crawl the repository.
 - No current MCP profile exposes workspace or project import/export tools.
-- Installed Streamable HTTP MCP accepts remote HTTPS or SSH repository sources only. Local repository paths and `file://` sources require intentional local stdio operation.
+- Installed Streamable HTTP MCP accepts remote HTTPS repository sources only. SSH, local repository paths, and `file://` sources are unsupported at the network boundary; local paths require intentional local stdio operation.
 - Repository-index tools persist explicit job records; they do not silently crawl or execute repository code in this phase.
 
 ## Implementation Direction

@@ -25,7 +25,7 @@ MCP is the primary agent interface. REST must call the same command handlers as 
   running HTTP process with unavailable Postgres is unhealthy.
 - `OPTIONS` is public for CORS preflight; allowed headers include `authorization` and MCP protocol headers.
 - JSON and MCP request bodies are limited to 2 MiB.
-- Repository indexing over REST accepts remote HTTPS or SSH Git sources only. HTTP(S) userinfo, every URL password, query parameters, fragments, ASCII control characters, and backticks are rejected; the SSH username required by SSH Git transports remains valid. Accepted locations are normalized before persistence. Server-local paths and `file://` sources are not part of the network API authority.
+- Repository indexing over REST accepts remote HTTPS Git sources only. SSH, HTTP(S) userinfo, every URL password, query parameters, fragments, ASCII control characters, and backticks are rejected. Accepted locations are normalized before persistence. Server-local paths and `file://` sources are not part of the network API authority.
 
 The same token protects the Streamable HTTP MCP endpoint at `/mcp`. A missing or incorrect token returns `401` before REST or MCP dispatch. Authentication is intentionally one shared operator token; users, roles, and per-workspace authorization are not part of this alpha contract.
 

@@ -92,7 +92,7 @@ CREATE TABLE schema_metadata (
 Required row for the Postgres runtime:
 
 - `key = 'schema_version'`
-- `value = '13'`
+- `value = '16'`
 
 ## Postgres Types
 
