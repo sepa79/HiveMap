@@ -391,6 +391,7 @@ function createOverlaySymptomHints(profile: ScanProfile): ScanProfileOverlaySymp
           fields: [
             "boundaryMapContractPathMarkers",
             "boundaryMapContractFileStems",
+            "boundaryMapTestDirectoryNames",
             "boundaryMapRoutePathMarkers",
             "boundaryMapRouteNameSuffixes",
             "boundaryMapApiPathMarkers",

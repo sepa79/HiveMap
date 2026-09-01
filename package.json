@@ -24,9 +24,14 @@
     "test:container-scripts": "bash docker/runtime-supervisor.test.sh && bash -n docker/hivemap-entrypoint.sh docker/runtime-supervisor.sh",
     "test:workspaces": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "verify": "npm run build && npm run typecheck && npm run test:container-scripts && npm run test:workspaces"
+    "verify": "npm run build && npm run typecheck && npm run test:container-scripts && npm run test:workspaces",
+    "verify:postgres": "bash tools/acceptance/real-postgres.sh",
+    "verify:renders": "bash tools/acceptance/render-smoke.sh",
+    "verify:image": "bash tools/acceptance/image-smoke.sh",
+    "verify:acceptance": "npm run verify && npm run verify:postgres && npm run verify:renders && npm exec -- playwright install chromium && npm run verify:image"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/node": "^24.10.1",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"

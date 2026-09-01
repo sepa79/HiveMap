@@ -52,6 +52,9 @@ The current documentation/SSOT slice is intentionally selective:
 - duplicate-authority packets should already be topic-aware rather than broad pairwise authority matches;
 - stale-documentation packets should already be narrowed to lower-precedence, current-looking docs that conflict with stronger SSOT sources;
 - missing-owner packets should prefer material docs over generic glossary/history pages.
+- equivalent primary/default/canonical selections repeated with different introductory prose are corroborating claims, not contradictions or stale-documentation evidence;
+- files matched by an explicit documentation entry in the active `ssotOrder` already act as bounded owners and should not require redundant inline ownership wording;
+- co-located test files should attach to the surrounding code boundary, while configured test directories form distinct test-suite boundaries.
 - When those packet shapes are wrong for the repository, prefer changing the explicit recipe fields in the repo-local overlay over adding more runtime heuristics.
 
 ## Review Derived Coverage

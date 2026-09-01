@@ -90,6 +90,20 @@ describe("createRepositoryChunks", () => {
     );
   });
 
+  it("does not create storage-invalid chunks for empty config files", () => {
+    const chunks = createRepositoryChunks({
+      workspaceId: "workspace-a",
+      indexId: "repo-index-a",
+      filePath: "apps/.gitkeep",
+      language: "plain-text",
+      sourceKind: "config",
+      text: "   \n\t",
+      factBudget: new RepositoryFactBudget(),
+    });
+
+    expect(chunks).toEqual([]);
+  });
+
   it("stops documentation chunk construction at the incremental fact budget", () => {
     const factBudget = new RepositoryFactBudget({ maxFacts: 2, maxChunks: 2 });
 
@@ -111,6 +125,8 @@ describe("createRepositoryChunks", () => {
     temporaryPaths.push(repositoryRoot);
 
     await mkdir(join(repositoryRoot, "src", "bin"), { recursive: true });
+    await mkdir(join(repositoryRoot, "apps"), { recursive: true });
+    await writeFile(join(repositoryRoot, "apps", ".gitkeep"), "");
     await writeFile(join(repositoryRoot, "src", "bin", "uuid"), "#!/usr/bin/env node\nimport '../uuid-bin.js';\n");
     await writeFile(join(repositoryRoot, "src", "uuid-bin.ts"), "export function runCli() { return 'ok'; }\n");
 
@@ -135,8 +151,13 @@ describe("createRepositoryChunks", () => {
           language: "javascript",
           sourceKind: "code",
         }),
+        expect.objectContaining({
+          path: "apps/.gitkeep",
+          sourceKind: "config",
+        }),
       ]),
     );
+    expect(result.chunks.some((chunk) => chunk.filePath === "apps/.gitkeep")).toBe(false);
     expect(result.references ?? []).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

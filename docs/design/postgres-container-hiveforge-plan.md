@@ -1,6 +1,6 @@
 # Postgres, Container, HiveForge Plan
 
-Last updated: 2026-08-31
+Last updated: 2026-09-01
 
 Portability amendment: the former ZIP implementation and all current import/export surfaces were removed. Full-project portability is deferred to a separately specified streaming NDJSON contract and is not an active deliverable in this plan.
 
@@ -125,6 +125,35 @@ Current state:
 - Remote e2e passed public health/UI, REST and MCP `401` behavior, authenticated
   MCP mutation observed through REST, exact deployed image digest, and state
   persistence across a forced Swarm service restart.
+- On September 1, 2026 the closeout rerun pushed Forgejo snapshot
+  `547bb8a1d3d9c4ab990d6989525d2bdd0b2a7e34`, deployed image
+  `hivemap-dev-loop-20260901-114005`, and then pinned the service to
+  `sha256:964972c2f821a3d94b11afcb19c2a22538d3ad50d7590c33b347268011aed595`.
+  HiveForge operations `op-bd722d5f-e951-4439-b644-0a7874dacf00` and
+  `op-879a2c90-b554-4747-9e5e-2403792eb1ad` succeeded; the latter replaced the
+  running task, returned to `1/1` on `docker-swarm-mgr-1`, and passed health on
+  all four routing-mesh node addresses. The recorded Compose digest matched its
+  journal and deployment diagnostics reported no findings.
+- A final September 1 acceptance update selected the explicit public-test token
+  path for `hivemap-development`, using
+  `hivemap-test-only-2026-09-01-acceptance`. Forgejo snapshot
+  `5d0137f1ff90f635e9c250090862512c81215414` deployed image digest
+  `sha256:b56ed79155773803de9940991b30c21049c0d23a77959a4067593a0d92a6028c`
+  through HiveForge operations `op-a57ed0d5-6353-4bc1-9d46-932cdc986fd2`
+  and `op-dde4befa-14f9-4bdb-9b68-7faf74364807`. The final service returned to
+  `1/1` on `docker-swarm-mgr-1`; its recorded Compose has one redacted direct
+  token value and no secret mount.
+- Fresh remote acceptance then passed wrong-token `401`, authorized REST and
+  Streamable HTTP MCP, MCP mutation observed through REST, pinned HTTPS checkout
+  of `octocat/Spoon-Knife` commit
+  `d0dd1f61b33d64e29d8bc1372a94ef6a2fee76a9`, one-at-a-time repository-index
+  execution, search/evidence retrieval, scan start, and real-Chromium
+  save/use/reload/clear. After a forced Swarm task replacement, the graph,
+  completed index, and scan remained present, and health returned `200` through
+  all four routing-mesh node addresses.
+- The local matrix is now repeatable through `npm run verify:acceptance`; it uses
+  real PostgreSQL, a built image, a pinned public HTTPS repository, and real
+  Chromium rather than relying on unit-test substitutes for those boundaries.
 - Phase 6 is complete; future HiveForge work may automate the already-proven MCP
   operator steps but is not part of this base milestone.
 

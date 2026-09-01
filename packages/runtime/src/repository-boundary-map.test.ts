@@ -5,6 +5,58 @@ import { createBoundaryMapBuildConfig } from "@hivemap/scans";
 import { buildBoundaryMapArtifact } from "./repository-boundary-map.js";
 
 describe("buildBoundaryMapArtifact", () => {
+  it("attaches co-located test files to their code boundary without requiring a test directory", () => {
+    const artifact = buildBoundaryMapArtifact({
+      coverage: {
+        discovered: ["apps/.gitkeep", "apps/api/src/index.ts", "apps/api/src/index.test.ts"],
+        included: ["apps/.gitkeep", "apps/api/src/index.ts", "apps/api/src/index.test.ts"],
+        excluded: [],
+        failed: [],
+      },
+      files: [
+        {
+          workspaceId: "workspace-a",
+          indexId: "repo-index-a",
+          path: "apps/.gitkeep",
+          language: "plaintext",
+          sourceKind: "config",
+          contentHash: "hash-placeholder",
+          byteSize: 0,
+        },
+        {
+          workspaceId: "workspace-a",
+          indexId: "repo-index-a",
+          path: "apps/api/src/index.ts",
+          language: "typescript",
+          sourceKind: "code",
+          contentHash: "hash-api",
+          byteSize: 128,
+        },
+        {
+          workspaceId: "workspace-a",
+          indexId: "repo-index-a",
+          path: "apps/api/src/index.test.ts",
+          language: "typescript",
+          sourceKind: "test",
+          contentHash: "hash-api-test",
+          byteSize: 96,
+        },
+      ],
+      symbols: [],
+      dependencies: [],
+      revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      config: createBoundaryMapBuildConfig(),
+    });
+
+    expect(artifact.boundaries).toEqual([
+      expect.objectContaining({
+        id: "surface:apps-api",
+        ownedPaths: ["apps/api/src/index.test.ts", "apps/api/src/index.ts"],
+        testSourceRefs: [expect.objectContaining({ target: "apps/api/src/index.test.ts" })],
+      }),
+    ]);
+  });
+
   it("derives a CLI entrypoint from a tool launcher file without exported symbols", () => {
     const artifact = buildBoundaryMapArtifact({
       coverage: {

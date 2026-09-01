@@ -31,6 +31,10 @@ The MVP includes `documentation-conflicts@1` and `code-quality-review@1` profile
 
 An optional repository-local overlay may refine a built-in profile without changing the canonical workspace scan profile definition. In the current phase, the overlay path is `.hivemap/scan-profiles/<profile>.yaml`, where `<profile>` is the MCP-exposed overlay stem for the selected profile. The overlay appends repository-specific include and exclude globs to the built-in scope and may also replace repository-specific profile fields such as name, description, instructions, source types, criteria, SSOT order, required outputs, criterion-oriented evidence recipe fields, and boundary-map heuristics such as root-to-boundary rules, contract-doc markers, ignored match tokens, test-directory names, and entrypoint-detection suffix/path markers. Current examples of criterion-oriented recipe fields include duplicate-authority claim/topic selection, duplicate-responsibility symbol/path selection, missing-owner materiality markers, and stale-documentation currentness markers.
 
+Boundary-map derivation treats a test file inside a configured test directory as part of a distinct test-suite boundary. A co-located file already classified as `test` belongs to the same structural boundary as the adjacent production code and is attached there as verifying evidence; it must not require a synthetic test-directory marker or create a second overlapping boundary root.
+
+Only indexed `code` and `test` files seed structural boundaries. Documentation and configuration files may enrich an existing boundary, but placeholders and root configuration such as `.gitkeep`, package manifests, or compiler config must not create standalone structural boundaries.
+
 Overlay rules are explicit:
 
 - the overlay is resolved from the selected indexed repository revision, not from an untracked local working-tree file outside that revision;
@@ -44,6 +48,7 @@ Overlay tuning should also be repeatable:
 - `scan_profile_overlay_help` should return a repository-agnostic overlay-build workflow that starts from `scan_start`, uses representative calibration evidence, applies the smallest field change that explains the mismatch, and restarts from the same completed repository index;
 - `scan_profile_overlay_help` should also return symptom-to-field hints so the caller can choose between scope, SSOT, boundary-map, and criterion-oriented recipe changes deliberately instead of editing overlay YAML ad hoc;
 - `scan_profile_overlay_suggest` should accept one in-progress scan plus one explicit calibration symptom and return the smallest repo-aware YAML scaffold for the matching overlay fields, seeded from the active effective profile and current boundary-map config instead of guessed values;
+- the `boundary-map-heuristics` symptom must include test-directory configuration alongside contract and entrypoint fields, so an actual test-layout mismatch is not omitted from the suggested patch surface;
 - the workflow should bias toward tuning recipe fields before broad include/exclude churn, and toward tuning SSOT precedence only after packet shape/currentness already look coherent.
 
 ## Scan Run Lifecycle
@@ -171,6 +176,8 @@ The build heuristics must stay product-agnostic and repo-overridable:
 - boundary-map build must fail clearly when included coverage paths cannot be classified by the active root rules;
 - repository-local overlays may reclassify repository-specific test families and contract markers without runtime code changes;
 - repository-local overlays may also replace criterion-oriented evidence recipe fields such as duplicate-authority claim/topic selectors, duplicate-responsibility symbol kinds or ignored path globs, missing-owner materiality markers, or stale-documentation currentness markers without runtime code changes;
+- repeated primary/default/canonical claims select different owners only when their normalized final subject clauses differ; prose preceding the final selection clause must not become part of the selected owner;
+- a documentation path matched by an explicit non-implementation entry in `ssotOrder` is already an owning source for its bounded concern and must not be emitted as `missing-owner` solely because it omits an inline owner phrase;
 - agent prompts and docs should point humans to the overlay contract instead of encoding one repository shape in code.
 - agent prompts and docs should use `scan_profile_overlay_suggest` for symptom-scoped repo-aware patch scaffolds instead of hand-copying current profile values from unrelated responses.
 
@@ -208,7 +215,7 @@ The map header explains what the current projection contains and the next availa
 
 The findings overview and finding dive-in carry projection-owned orientation notes rendered as large note nodes. An overview note explains what the review map is for, how priority columns and finding kinds differ, how to open evidence, and how to return. It is persisted with the workspace.
 
-Workspace and projection ids are encoded in browser history. Opening a finding pushes its dive-in URL; both the application Back button and browser Back restore the previous projection. Direct projection URLs fail visibly when the workspace or projection does not exist.
+Workspace and projection ids are encoded in browser history. Opening a finding pushes its dive-in URL; both the application Back button and browser Back restore the previous projection. A protected direct projection URL remains pending until the operator sets the tab-scoped token, then loads that exact workspace and projection. Direct projection URLs fail visibly when the workspace or projection does not exist.
 
 A finding dive-in uses `affectedNodeIds` to show the finding beside the bounded project concepts it affects. Claims, owners, recommendations, and document/code references remain detail annotations. The UI must not duplicate them as semantic nodes or edges merely to obtain a convenient layout.
 

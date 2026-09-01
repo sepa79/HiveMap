@@ -66,9 +66,9 @@ export function buildBoundaryMapArtifact(options: {
   const includedSymbols = options.symbols.filter((symbol) => includedPaths.has(normalizeRepositoryPath(symbol.filePath)));
   const includedDependencies = options.dependencies.filter((dependency) => includedPaths.has(normalizeRepositoryPath(dependency.filePath)));
 
-  const seedFiles = includedFiles.filter((file) => file.sourceKind !== "documentation" && file.sourceKind !== "generated" && file.sourceKind !== "vendor");
+  const seedFiles = includedFiles.filter((file) => file.sourceKind === "code" || file.sourceKind === "test");
   if (seedFiles.length === 0) {
-    throw new Error("Boundary map build requires at least one included non-documentation repository file");
+    throw new Error("Boundary map build requires at least one included code or test repository file");
   }
 
   const boundaries = new Map<string, MutableBoundary>();
@@ -181,7 +181,7 @@ function createBoundarySeed(path: string, sourceKind: string, config: BoundaryMa
     throw new Error(`Cannot derive boundary from empty path: ${path}`);
   }
 
-  if (isBoundaryTestPath(normalizedPath, sourceKind, config)) {
+  if (hasBoundaryTestDirectory(normalizedPath, config)) {
     return createTestBoundarySeed(segments, config);
   }
 
@@ -239,6 +239,10 @@ function isBoundaryTestPath(path: string, sourceKind: string, config: BoundaryMa
     return true;
   }
 
+  return hasBoundaryTestDirectory(path, config);
+}
+
+function hasBoundaryTestDirectory(path: string, config: BoundaryMapBuildConfig): boolean {
   const segments = normalizeRepositoryPath(path)
     .toLowerCase()
     .split("/")

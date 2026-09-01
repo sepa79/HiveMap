@@ -55,6 +55,7 @@ Dive-in projection:
 - includes directly connected neighbor nodes,
 - includes edges touching the root node,
 - may include category annotations as projection groups.
+- renders generic projection group counts as items; only findings-overview groups use finding counts.
 
 Finding dive-in projection:
 

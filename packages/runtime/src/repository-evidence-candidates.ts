@@ -789,7 +789,7 @@ function buildMissingOwnerCandidates(
 
   const candidates: RepositoryEvidenceCandidate[] = [];
   for (const file of documentationFiles) {
-    if (authorityFilePaths.has(file.path)) {
+    if (authorityFilePaths.has(file.path) || isExplicitSsotSource(file.path, profile.ssotOrder)) {
       continue;
     }
     if (!isMaterialOwnershipDocument(file, chunksByFile.get(file.path) ?? [], recipe)) {
@@ -1025,7 +1025,7 @@ function matchExclusiveSelectionClaim(
   if (qualifier !== "primary" && qualifier !== "default" && qualifier !== "canonical") {
     return undefined;
   }
-  const subjectTokens = normalizeClaimTokens(match.groups?.subject ?? "");
+  const subjectTokens = normalizeClaimTokens(selectExclusiveSelectionSubject(match.groups?.subject ?? ""));
   const contextTokens = normalizeClaimTokens(`${currentHeading ?? ""} ${match.groups?.context ?? ""}`);
   if (subjectTokens.length === 0 || contextTokens.length < 2) {
     return undefined;
@@ -1045,6 +1045,15 @@ function matchExclusiveSelectionClaim(
       lineNumber,
     ),
   };
+}
+
+function selectExclusiveSelectionSubject(value: string): string {
+  const clauses = value
+    .trim()
+    .split(/[.!?;:]\s+/)
+    .map((clause) => clause.trim())
+    .filter((clause) => clause.length > 0);
+  return clauses.at(-1) ?? "";
 }
 
 function matchAuthorityPhrase(value: string, recipe: DuplicateAuthorityEvidenceRecipe): string | undefined {
@@ -1196,6 +1205,11 @@ function haveSameNormalizedTokens(left: readonly string[], right: readonly strin
   }
   const rightTokens = new Set(right);
   return left.every((token) => rightTokens.has(token));
+}
+
+function isExplicitSsotSource(filePath: string, ssotOrder: readonly string[]): boolean {
+  const normalizedPath = normalizeRepositoryPath(filePath);
+  return ssotOrder.some((pattern) => pattern !== "implementation" && matchesGlob(normalizedPath, normalizeRepositoryPath(pattern)));
 }
 
 function capitalize(value: string): string {

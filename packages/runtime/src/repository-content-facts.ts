@@ -68,7 +68,7 @@ export function createRepositoryChunks(options: {
   for (const segment of segments) {
     const text = lines.slice(segment.startLine - 1, segment.endLine).join("\n");
     const chunkText = options.sourceKind === "config" ? text : text.trim();
-    if (chunkText.length === 0) {
+    if (chunkText.trim().length === 0) {
       continue;
     }
     options.factBudget.consume("chunk");
@@ -185,6 +185,7 @@ function inferScriptLanguage(path: string, text: string | undefined): "javascrip
 
 function classifySourceKind(path: string): string {
   const normalized = path.toLocaleLowerCase();
+  const baseName = normalized.split("/").at(-1) ?? normalized;
   if (
     normalized.startsWith("docs/") ||
     normalized.endsWith(".md") ||
@@ -204,6 +205,7 @@ function classifySourceKind(path: string): string {
     return "test";
   }
   if (
+    baseName.startsWith(".") ||
     normalized.endsWith(".json") ||
     normalized.endsWith(".yaml") ||
     normalized.endsWith(".yml") ||

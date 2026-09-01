@@ -108,11 +108,23 @@ HIVEMAP_SWARM_PLACEMENT_CONSTRAINT='node.hostname == docker-swarm-mgr-1'
 
 The bind source is an explicit HiveMap-owned Postgres data path on the swarm node. The placement constraint is required because that path is node-local; without it, Swarm can reschedule HiveMap onto a different node and break persistence. Paths used by unrelated local test stacks are not part of the HiveMap deployment contract.
 
+Run the complete disposable local acceptance matrix with:
+
+```bash
+npm run verify:acceptance
+```
+
+It includes the normal repository checks, all real-Postgres suites, both deployment renders, built-image lifecycle and failure tests, pinned HTTPS repository indexing, and a real Chromium save/use/reload/clear token flow. See `docs/ai/COMMANDS.md` for stage commands and prerequisites.
+
 Direct development binds to `127.0.0.1` by default. Container profiles bind to all container interfaces and require the shared bearer token before startup. This is coarse single-operator protection, not multi-user authorization.
 
 HiveForge declares `hivemap-auth-token` through `requirements.secrets` and
 mounts it read-only at `/run/secrets/hivemap-auth-token`. The rendered Compose
 file contains only that external secret reference, never the credential value.
+An explicitly disposable test environment may instead set the non-secret
+`HIVEMAP_PUBLIC_TEST_AUTH_TOKEN`; the renderer then passes that public value as
+`HIVEMAP_AUTH_TOKEN` and omits the secret mount. Never use this override for a
+private or production credential.
 
 The active vector slice accepts explicit caller-supplied concept embeddings and supports bounded read-only similarity queries. HiveMap does not generate embeddings or bundle model-serving in the base runtime. The removed provider experiment is preserved as inactive, restorable evidence under `archive/deferred-ollama-embedding-provider/`.
 

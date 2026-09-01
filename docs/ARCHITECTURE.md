@@ -90,7 +90,7 @@ Current runtime direction in code is single-operator Node.js on Postgres:
 - bearer-protected REST plus stateless Streamable HTTP MCP at `/mcp`
 - one shared Postgres store; stdio remains only a temporary adapter
 
-The container owns its internal Postgres connection and requires exactly one bearer-token source before startup: direct `HIVEMAP_AUTH_TOKEN`/`--auth-token` or file-backed `HIVEMAP_AUTH_TOKEN_FILE`/`--auth-token-file`. Repository-local Compose uses the direct source; HiveForge mounts its external Docker secret and supplies only the file-backed source.
+The container owns its internal Postgres connection and requires exactly one bearer-token source before startup: direct `HIVEMAP_AUTH_TOKEN`/`--auth-token` or file-backed `HIVEMAP_AUTH_TOKEN_FILE`/`--auth-token-file`. Repository-local Compose uses the direct source; HiveForge normally mounts its external Docker secret and supplies only the file-backed source. An explicitly disposable test deployment may select the direct source with the non-secret `HIVEMAP_PUBLIC_TEST_AUTH_TOKEN` renderer input; this override is not a private-credential store.
 
 ## Observability
 

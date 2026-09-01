@@ -93,4 +93,38 @@ describe("App token lifecycle", () => {
     expect(apiMocks.listWorkspaces).toHaveBeenCalledOnce();
     expect(apiMocks.getWorkspace).toHaveBeenCalledOnce();
   });
+
+  it("loads a protected projection deep link after the token is set", async () => {
+    const user = userEvent.setup();
+    clearAuthToken();
+    apiMocks.listWorkspaces.mockRejectedValueOnce(new Error("Unauthorized"));
+    render(<App />);
+
+    await waitFor(() => expect(screen.getAllByText("Unauthorized").length).toBeGreaterThan(0));
+    await user.type(screen.getByLabelText("API / MCP token"), "operator-token");
+    await user.click(screen.getByRole("button", { name: "Set token" }));
+
+    await waitFor(() => expect(screen.getAllByText("Protected Workspace").length).toBeGreaterThan(0));
+    expect(screen.getAllByText("Protected Concept").length).toBeGreaterThan(0);
+    expect(window.location.search).toBe("?workspace=workspace-a&projection=projection-a");
+  });
+
+  it("labels generic projection groups as items instead of findings", async () => {
+    apiMocks.getWorkspace.mockResolvedValue({
+      ...workspaceState,
+      projections: [{
+        id: "projection-a",
+        name: "Protected Projection",
+        type: "project-map",
+        rootNodeIds: ["node-a"],
+        visibleNodeIds: ["node-a"],
+        visibleEdgeIds: [],
+        groups: [{ id: "components", label: "Components", nodeIds: ["node-a"] }],
+      }],
+    });
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText(/1 item/)).toBeTruthy());
+    expect(screen.queryByText(/1 finding/)).toBeNull();
+  });
 });

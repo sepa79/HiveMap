@@ -350,6 +350,8 @@ The storage/API model must be independent from any individual parser.
 - content hash and byte size;
 - included, excluded, or failed status and reason;
 - generated, vendor, test, or documentation classification;
+- repository dotfiles are configuration facts; placeholder dotfiles such as `.gitkeep` must not be classified as code or seed structural code boundaries;
+- empty or whitespace-only text files remain file facts but do not produce storage-invalid empty chunks;
 - last indexed revision.
 
 ### RepositorySymbol

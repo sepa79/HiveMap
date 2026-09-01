@@ -20,6 +20,32 @@ npm run verify
 
 This is the same test, typecheck, and build sequence used by GitHub Actions.
 
+## Full Local Acceptance
+
+```bash
+npm run verify:acceptance
+```
+
+This no-argument gate runs, in order:
+
+1. the normal build, typecheck, container-script, and workspace test suite;
+2. every PostgreSQL-gated storage, runtime, REST, and MCP suite against isolated databases in a disposable `pgvector/pg16` container;
+3. local Compose plus HiveForge `docker-single` and `docker-swarm` renders, including required-input failures and external-secret checks;
+4. one built-image smoke covering both auth-token sources, invalid auth configuration, public UI/health, REST/MCP auth, MCP-to-REST state, graph/projection operations, real pinned HTTPS repository indexing, rejected repository sources and refs, single-index concurrency, persistence, restart, interrupted-index recovery, SIGTERM, PostgreSQL outage/recovery, and the real-browser token lifecycle.
+
+The gate requires Docker, `curl`, `jq`, Ansible, Git, and network access to the pinned public acceptance repository. It installs the pinned Playwright Chromium build if it is not already cached. Every runtime and database created by the gate is disposable and isolated from developer data.
+
+Individual stages are available when diagnosing a failure:
+
+```bash
+npm run verify:postgres
+npm run verify:renders
+npm exec -- playwright install chromium
+npm run verify:image
+```
+
+Remote HiveForge/Swarm acceptance remains an operator step because it changes a shared test environment and uses an existing external Docker secret. Build/push with `npm run dev:hiveforge`, set the printed immutable `HIVEMAP_IMAGE` (prefer `tag@sha256` after resolving the registry digest), validate requirements, run HiveForge `update`, then verify the recorded compose, `1/1` runtime state, health/UI/auth boundaries, authorized REST/MCP/indexing, and persistence after a forced task replacement.
+
 ## Local Runtime
 
 These commands describe the current local Postgres-first runtime. A working single-image local Docker runtime now exists for the API, built web UI, and bundled Postgres.
@@ -85,6 +111,12 @@ Current HiveForge environment note:
   Docker secret `hivemap-auth-token`; the rendered stack passes only
   `HIVEMAP_AUTH_TOKEN_FILE=/run/secrets/hivemap-auth-token` and protects both
   REST and MCP.
+- A disposable test deployment may explicitly set
+  `HIVEMAP_PUBLIC_TEST_AUTH_TOKEN` to a known, non-secret value. In that mode
+  the rendered service receives direct `HIVEMAP_AUTH_TOKEN` and no secret
+  mount. Do not place a private credential in HiveForge runtime env.
+- The shared `hivemap-development` test deployment currently uses the public
+  bearer token `hivemap-test-only-2026-09-01-acceptance` through that override.
 - Any temporary path used by another local test stack is disposable infrastructure, not HiveMap's persistence contract.
 
 Local Forgejo/HiveForge dev snapshot loop:

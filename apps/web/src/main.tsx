@@ -113,20 +113,14 @@ export function App() {
   const [navigationDepth, setNavigationDepth] = useState(0);
 
   useEffect(() => {
+    const location = readProjectionLocation();
+    if (location.workspaceId !== null) {
+      setWorkspaceId(location.workspaceId);
+    }
     void run(async () => {
-      await refreshWorkspaceOptions();
-      const location = readProjectionLocation();
+      await refreshWorkspaceOptions(location.workspaceId ?? undefined);
       if (location.workspaceId !== null) {
-        setWorkspaceId(location.workspaceId);
-        const next = await refresh(location.workspaceId);
-        const projection = location.projectionId === null
-          ? selectInitialProjection(next)
-          : requireProjection(next, location.projectionId);
-        setSelectedProjection(projection);
-        setSelectedNodeId(projection?.rootNodeIds[0] ?? next.graph.nodes[0]?.id ?? null);
-        setEdgeFrom(next.graph.nodes[0]?.id ?? "");
-        setEdgeTo(next.graph.nodes[1]?.id ?? "");
-        replaceProjectionLocation(location.workspaceId, projection, 0);
+        await loadProjectionLocation();
       }
     });
   }, []);
@@ -204,6 +198,7 @@ export function App() {
     const positionsWithinGroup = new Map<string, number>();
     const orientationNote = selectedProjection?.layout?.orientationNote;
     const semanticOffsetY = orientationNote === undefined ? 0 : 250;
+    const findingsProjection = selectedProjection !== null && isFindingsOverviewProjection(selectedProjection);
 
     const semanticNodes: Node[] = state.graph.nodes
       .filter((node) => visibleNodeIds.has(node.id))
@@ -236,7 +231,11 @@ export function App() {
     const groupHeaderNodes: Node[] = (selectedProjection?.groups ?? []).map((group) => ({
       id: `__projection-group-${group.id}`,
       className: "projection-group-header-node",
-      data: { label: `${group.label}\n${group.nodeIds.length} ${group.nodeIds.length === 1 ? "finding" : "findings"}` },
+      data: {
+        label: `${group.label}\n${group.nodeIds.length} ${findingsProjection
+          ? group.nodeIds.length === 1 ? "finding" : "findings"
+          : group.nodeIds.length === 1 ? "item" : "items"}`,
+      },
       position: { x: groupStartX.get(group.id) ?? 80, y: orientationNote === undefined ? 10 : 250 },
       selectable: false,
       connectable: false,
@@ -305,6 +304,21 @@ export function App() {
     const workspaces = await listWorkspaces();
     setWorkspaceOptions(workspaces);
     if (preferredId !== undefined) setWorkspaceId(preferredId);
+  }
+
+  async function loadProjectionLocation(): Promise<void> {
+    const location = readProjectionLocation();
+    if (location.workspaceId === null) return;
+    setWorkspaceId(location.workspaceId);
+    const next = await refresh(location.workspaceId);
+    const projection = location.projectionId === null
+      ? selectInitialProjection(next)
+      : requireProjection(next, location.projectionId);
+    setSelectedProjection(projection);
+    setSelectedNodeId(projection?.rootNodeIds[0] ?? next.graph.nodes[0]?.id ?? null);
+    setEdgeFrom(next.graph.nodes[0]?.id ?? "");
+    setEdgeTo(next.graph.nodes[1]?.id ?? "");
+    replaceProjectionLocation(location.workspaceId, projection, 0);
   }
 
   function navigateToProjection(projection: Projection | null, mode: "push" | "replace"): void {
@@ -601,8 +615,11 @@ export function App() {
       return;
     }
     await run(async () => {
-      await refreshWorkspaceOptions();
-      if (workspaceId !== "") {
+      const location = readProjectionLocation();
+      await refreshWorkspaceOptions(location.workspaceId ?? undefined);
+      if (location.workspaceId !== null) {
+        await loadProjectionLocation();
+      } else if (workspaceId !== "") {
         await refresh(workspaceId);
       }
     });
