@@ -101,6 +101,14 @@ async function exerciseMcpAndRest(client) {
   assert.equal(projection.status, 201);
   assert(projection.json.projection.visibleNodeIds.includes("acceptance-node"));
 
+  for (let index = 2; index <= 8; index += 1) {
+    const additionalProjection = await request(`/workspaces/${workspaceId}/projections`, {
+      method: "POST",
+      body: { input: { id: `acceptance-projection-${index}`, name: `Acceptance Overview ${index}`, maxNodes: 10 } },
+    });
+    assert.equal(additionalProjection.status, 201);
+  }
+
   const persistedProjection = await request(`/workspaces/${workspaceId}/projections/acceptance-projection`);
   assert.equal(persistedProjection.status, 200);
   assert.equal(persistedProjection.json.projection.id, "acceptance-projection");

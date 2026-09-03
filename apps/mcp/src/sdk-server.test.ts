@@ -69,6 +69,7 @@ describe("HiveMap MCP SDK server", () => {
       "scan_finding_create",
       "finding_update",
       "scan_complete",
+      "scan_delete",
       "scan_compare",
     ]);
     expect(result.tools.find((tool) => tool.name === "scan_start")?.description).toContain("calibration-phase response");
@@ -404,6 +405,16 @@ describe("HiveMap MCP SDK server", () => {
           expect.objectContaining({ name: "boundaryMapRoots" }),
         ]),
       }),
+    });
+
+    const deleteScanResult = await client.callTool({
+      name: "scan_delete",
+      arguments: { workspaceId: "workspace-a", scanId: "scan-boundary" },
+    });
+    expect(deleteScanResult.structuredContent).toEqual({
+      ok: true,
+      tool: "scan_delete",
+      value: { deletedScanId: "scan-boundary", deletedFindingNodeIds: [], deletedEdgeIds: [], deletedProjectionIds: [] },
     });
 
     const embeddingResult = await client.callTool({

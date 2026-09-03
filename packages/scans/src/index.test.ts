@@ -14,10 +14,12 @@ import {
   toFindingEvidence,
   updateFindingNode,
   validateScanRun,
+  validateScanState,
   validateFindingNode,
   validateScanCoverage,
   validateScanProfile,
   type CompletedScanRun,
+  type InProgressScanRun,
 } from "./index.js";
 
 const sourceA: ProjectSourceRef = { role: "defines", source: "repo-doc", target: "docs/a.md", anchor: "Owner", revision: "a1" };
@@ -85,6 +87,116 @@ describe("repository scans", () => {
     expect(node.type).toBe("finding");
     expect(() => validateFindingNode(node)).not.toThrow();
     expect(toFindingEvidence(node).finding.fingerprint).toBe("owner-conflict");
+  });
+
+  it("requires finding ownership to match the owning scan in both directions", () => {
+    const finding = createFindingNode("scan-a", {
+      id: "finding-a",
+      label: "Unlisted finding",
+      notes: "The graph finding must be listed by its owning scan.",
+      fingerprint: "unlisted-finding",
+      kind: "authority-gap",
+      severity: "high",
+      confidence: "high",
+      criterionIds: ["contract-drift"],
+      sources: [{ sourceRef: sourceB, claim: "The finding ownership is inconsistent." }],
+      affectedNodeIds: [],
+    });
+    const run: InProgressScanRun = {
+      id: "scan-a",
+      profileId: CODE_QUALITY_PROFILE.id,
+      profileVersion: CODE_QUALITY_PROFILE.version,
+      repository: { root: "index:repo-a", repositoryIndexId: "repo-a", branch: "main", revision: "abc123" },
+      actor: { agentId: "agent-a", tool: "codex" },
+      startedAt: "2026-09-02T10:00:00.000Z",
+      status: "in_progress",
+      appliedCriteria: [],
+      declaredOutputs: [],
+      findingNodeIds: [],
+      calibrationDecisions: [],
+    };
+
+    expect(() => validateScanState([CODE_QUALITY_PROFILE], [run], { nodes: [finding], edges: [] }))
+      .toThrow("Finding finding-a is not listed by owning scan scan-a");
+    expect(() => validateScanState(
+      [CODE_QUALITY_PROFILE],
+      [{ ...run, findingNodeIds: [finding.id] }],
+      { nodes: [], edges: [] },
+    )).toThrow("Scan scan-a references missing finding: finding-a");
+  });
+
+  it("requires every affected finding node to remain in the active graph", () => {
+    const finding = createFindingNode("scan-a", {
+      id: "finding-a",
+      label: "Dangling affected node",
+      notes: "The affected concept was removed while the finding remained active.",
+      fingerprint: "dangling-affected-node",
+      kind: "architecture-risk",
+      severity: "high",
+      confidence: "high",
+      criterionIds: ["contract-drift"],
+      sources: [{ sourceRef: sourceB, claim: "The finding still references the removed concept." }],
+      affectedNodeIds: ["missing-concept"],
+    });
+    const run: InProgressScanRun = {
+      id: "scan-a",
+      profileId: CODE_QUALITY_PROFILE.id,
+      profileVersion: CODE_QUALITY_PROFILE.version,
+      repository: { root: "index:repo-a", repositoryIndexId: "repo-a", branch: "main", revision: "abc123" },
+      actor: { agentId: "agent-a", tool: "codex" },
+      startedAt: "2026-09-02T10:00:00.000Z",
+      status: "in_progress",
+      appliedCriteria: [],
+      declaredOutputs: [],
+      findingNodeIds: [finding.id],
+      calibrationDecisions: [],
+    };
+
+    expect(() => validateScanState([CODE_QUALITY_PROFILE], [run], { nodes: [finding], edges: [] }))
+      .toThrow("Finding finding-a references missing affected node: missing-concept");
+  });
+
+  it("rejects another finding as an affected node", () => {
+    const findingA = createFindingNode("scan-a", {
+      id: "finding-a",
+      label: "First finding",
+      notes: "The first finding must not become semantic input to another finding.",
+      fingerprint: "first-finding",
+      kind: "architecture-risk",
+      severity: "high",
+      confidence: "high",
+      criterionIds: ["contract-drift"],
+      sources: [{ sourceRef: sourceB, claim: "The first problem exists." }],
+      affectedNodeIds: [],
+    });
+    const findingB = createFindingNode("scan-a", {
+      id: "finding-b",
+      label: "Second finding",
+      notes: "This finding incorrectly treats another finding as an affected concept.",
+      fingerprint: "second-finding",
+      kind: "architecture-risk",
+      severity: "normal",
+      confidence: "medium",
+      criterionIds: ["contract-drift"],
+      sources: [{ sourceRef: sourceB, claim: "The second problem exists." }],
+      affectedNodeIds: [findingA.id],
+    });
+    const run: InProgressScanRun = {
+      id: "scan-a",
+      profileId: CODE_QUALITY_PROFILE.id,
+      profileVersion: CODE_QUALITY_PROFILE.version,
+      repository: { root: "index:repo-a", repositoryIndexId: "repo-a", branch: "main", revision: "abc123" },
+      actor: { agentId: "agent-a", tool: "codex" },
+      startedAt: "2026-09-02T10:00:00.000Z",
+      status: "in_progress",
+      appliedCriteria: [],
+      declaredOutputs: [],
+      findingNodeIds: [findingA.id, findingB.id],
+      calibrationDecisions: [],
+    };
+
+    expect(() => validateScanState([CODE_QUALITY_PROFILE], [run], { nodes: [findingA, findingB], edges: [] }))
+      .toThrow("Finding finding-b cannot reference another finding as an affected node: finding-a");
   });
 
   it("validates a typed boundary-map artifact", () => {

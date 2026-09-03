@@ -1,7 +1,7 @@
 /**
  * Responsibility: Persist and hydrate HiveMap state through the explicit Postgres adapter.
  * Must not: Own runtime semantics, transport behavior, in-memory test state, or hidden recovery.
- * Contract: Executes ordered schema migrations transactionally and preserves validated store contracts.
+ * Contract: Bootstraps only an empty database, requires the exact current schema version thereafter, and preserves validated store contracts.
  */
 import { Pool, type PoolClient, type PoolConfig } from "pg";
 
@@ -24,7 +24,7 @@ import { validateGraph, type GraphEdge, type GraphNode, type SemanticGraph } fro
 import { validateProjection, type Projection } from "@hivemap/projections";
 import { INITIAL_SCAN_PROFILES, validateScanState, type ScanProfile, type ScanRun } from "@hivemap/scans";
 import { parseScanProfileRecipe, toScanProfileRecipe } from "./scan-profile-recipe.js";
-import { POSTGRES_STORAGE_SCHEMA_VERSION, STORAGE_SCHEMA_VERSION } from "./schema.js";
+import { POSTGRES_STORAGE_SCHEMA_VERSION } from "./schema.js";
 import type {
   ConceptEmbeddingRecord,
   HiveMapStore,
@@ -43,21 +43,7 @@ import type {
   WorkspaceState,
 } from "./contracts.js";
 import { StorageError } from "./storage-error.js";
-import {
-  POSTGRES_SCHEMA_SQL,
-  POSTGRES_V5_TO_V6_SQL,
-  POSTGRES_V6_TO_V7_SQL,
-  POSTGRES_V7_TO_V8_SQL,
-  POSTGRES_V8_TO_V9_SQL,
-  POSTGRES_V9_TO_V10_SQL,
-  POSTGRES_V10_TO_V11_SQL,
-  POSTGRES_V11_TO_V12_SQL,
-  POSTGRES_V12_TO_V13_SQL,
-  POSTGRES_V13_TO_V14_SQL,
-  POSTGRES_V14_TO_V15_SQL,
-  POSTGRES_V15_TO_V16_PREPARE_SQL,
-  POSTGRES_V15_TO_V16_FINALIZE_SQL,
-} from "./postgres-schema-sql.js";
+import { POSTGRES_SCHEMA_SQL } from "./postgres-schema-sql.js";
 import {
   assertNonEmpty,
   assertRepositoryIndexContentOwnership,
@@ -251,82 +237,36 @@ export class PostgresHiveMapStore implements HiveMapStore {
 
   async initialize(): Promise<void> {
     await this.withTransaction(async (client) => {
-      await client.query(POSTGRES_SCHEMA_SQL);
-      const result = await client.query<{ value: string }>("SELECT value FROM schema_metadata WHERE key = 'schema_version'");
-      if (result.rowCount === 0) {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('hivemap-schema-initialize'))");
+      const metadataTable = await client.query<{ exists: boolean }>(
+        "SELECT to_regclass(current_schema() || '.schema_metadata') IS NOT NULL AS exists",
+      );
+      if (metadataTable.rows[0]?.exists !== true) {
+        const existingRelations = await client.query<{ exists: boolean }>(
+          `SELECT EXISTS (
+             SELECT 1
+             FROM pg_catalog.pg_class AS relation
+             JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+             WHERE namespace.nspname = current_schema()
+               AND relation.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
+           ) AS exists`,
+        );
+        if (existingRelations.rows[0]?.exists === true) {
+          throw new StorageError("Postgres database is not empty and has no HiveMap schema version; reset the database before starting HiveMap");
+        }
+        await client.query(POSTGRES_SCHEMA_SQL);
         await client.query("INSERT INTO schema_metadata (key, value) VALUES ('schema_version', $1)", [
           POSTGRES_STORAGE_SCHEMA_VERSION,
         ]);
         return;
       }
 
-      let schemaVersion = result.rows[0]?.value;
-      if (schemaVersion === "5") {
-        await client.query(POSTGRES_V5_TO_V6_SQL);
-        schemaVersion = "6";
-      }
-
-      if (schemaVersion === "6") {
-        await client.query(POSTGRES_V6_TO_V7_SQL);
-        schemaVersion = "7";
-      }
-
-      if (schemaVersion === "7") {
-        await client.query(POSTGRES_V7_TO_V8_SQL);
-        schemaVersion = "8";
-      }
-
-      if (schemaVersion === "8") {
-        await client.query(POSTGRES_V8_TO_V9_SQL);
-        schemaVersion = "9";
-      }
-
-      if (schemaVersion === "9") {
-        await client.query(POSTGRES_V9_TO_V10_SQL);
-        schemaVersion = "10";
-      }
-
-      if (schemaVersion === "10") {
-        await client.query(POSTGRES_V10_TO_V11_SQL);
-        schemaVersion = "11";
-      }
-
-      if (schemaVersion === "11") {
-        await client.query(POSTGRES_V11_TO_V12_SQL);
-        schemaVersion = "12";
-      }
-
-      if (schemaVersion === "12") {
-        await client.query(POSTGRES_V12_TO_V13_SQL);
-        schemaVersion = "13";
-      }
-
-      if (schemaVersion === "13") {
-        await client.query(POSTGRES_V13_TO_V14_SQL);
-        schemaVersion = "14";
-      }
-
-      if (schemaVersion === "14") {
-        await client.query(POSTGRES_V14_TO_V15_SQL);
-        schemaVersion = "15";
-      }
-
-      if (schemaVersion === "15") {
-        await client.query(POSTGRES_V15_TO_V16_PREPARE_SQL);
-        await this.backfillBuiltInScanProfileRecipes(client);
-        await client.query(POSTGRES_V15_TO_V16_FINALIZE_SQL);
-        schemaVersion = "16";
-      }
-
-      if (schemaVersion !== POSTGRES_STORAGE_SCHEMA_VERSION) {
-        throw new StorageError(`Unsupported Postgres storage schema version: ${schemaVersion}`);
-      }
-
-      const updateResult = await client.query("UPDATE schema_metadata SET value = $1 WHERE key = 'schema_version'", [
-        POSTGRES_STORAGE_SCHEMA_VERSION,
-      ]);
-      if (updateResult.rowCount !== 1) {
-        throw new StorageError("Failed to update Postgres storage schema version");
+      const result = await client.query<{ value: string }>("SELECT value FROM schema_metadata WHERE key = 'schema_version'");
+      if (result.rowCount !== 1 || result.rows[0]?.value !== POSTGRES_STORAGE_SCHEMA_VERSION) {
+        const schemaVersion = result.rowCount === 1 ? result.rows[0]?.value : "missing";
+        throw new StorageError(
+          `Postgres storage schema version ${schemaVersion} is not supported; reset the database for schema ${POSTGRES_STORAGE_SCHEMA_VERSION}`,
+        );
       }
     });
   }
@@ -447,43 +387,6 @@ export class PostgresHiveMapStore implements HiveMapStore {
         throw error;
       }
     });
-  }
-
-  private async backfillBuiltInScanProfileRecipes(client: PoolClient): Promise<void> {
-    for (const profile of INITIAL_SCAN_PROFILES) {
-      await client.query(
-        `UPDATE scan_profiles
-         SET profile_recipe = $1::jsonb
-         WHERE profile_recipe IS NULL
-           AND id = $2
-           AND version = $3
-           AND name = $4
-           AND description = $5
-           AND overlay_stem IS NOT DISTINCT FROM $6
-           AND instructions = $7::text[]
-           AND scope_include = $8::text[]
-           AND scope_exclude = $9::text[]
-           AND source_types = $10::text[]
-           AND criteria = $11::jsonb
-           AND ssot_order = $12::text[]
-           AND required_outputs::text[] = $13::text[]`,
-        [
-          JSON.stringify(toScanProfileRecipe(profile)),
-          profile.id,
-          profile.version,
-          profile.name,
-          profile.description,
-          profile.overlayStem ?? null,
-          profile.instructions,
-          profile.scope.include,
-          profile.scope.exclude,
-          profile.sourceTypes,
-          JSON.stringify(profile.criteria),
-          profile.ssotOrder,
-          profile.requiredOutputs,
-        ],
-      );
-    }
   }
 
   private async insertWorkspaceRecord(client: PoolClient, workspace: WorkspaceRecord): Promise<void> {

@@ -1,3 +1,8 @@
+/**
+ * Responsibility: Define the scan-domain profile, coverage, run, boundary-map, and comparison contracts and re-export owned scan subdomains.
+ * Must not: Crawl repositories, perform IO, persist state, apply graph mutations, or implement transport behavior.
+ * Contract: Validates immutable scan evidence and active graph ownership against docs/specs/repository-scan.md.
+ */
 import {
   validateProjectSourceRef,
   type GraphNode,
@@ -9,12 +14,45 @@ import {
   assertCanonicalRepositoryLocation,
   RepositoryLocationValidationError,
 } from "./repository-location.js";
+import {
+  FINDING_CONFIDENCE_VALUES,
+  FINDING_SEVERITY_VALUES,
+  toFindingEvidence,
+  validateFindingAffectedNodes,
+  validateFindingNode,
+  type FindingEvidence,
+  type FindingConfidence,
+  type FindingMetadata,
+  type FindingSeverity,
+} from "./finding-validation.js";
+import { ScanValidationError } from "./scan-validation-error.js";
 
 export {
   assertCanonicalRepositoryLocation,
   normalizeRepositoryLocation,
   RepositoryLocationValidationError,
 } from "./repository-location.js";
+export {
+  createFindingNode,
+  FINDING_CONFIDENCE_VALUES,
+  FINDING_KIND_VALUES,
+  FINDING_SEVERITY_VALUES,
+  FINDING_STATUS_VALUES,
+  toFindingEvidence,
+  updateFindingNode,
+  validateFindingAffectedNodes,
+  validateFindingNode,
+  type FindingClaim,
+  type FindingConfidence,
+  type FindingEvidence,
+  type FindingKind,
+  type FindingMetadata,
+  type FindingNodeInput,
+  type FindingNodeUpdate,
+  type FindingSeverity,
+  type FindingStatus,
+} from "./finding-validation.js";
+export { ScanValidationError } from "./scan-validation-error.js";
 
 export const SCAN_REQUIRED_OUTPUT_VALUES = ["document-inventory", "concept-map", "findings", "coverage-report", "boundary-map"] as const;
 export type ScanRequiredOutput = (typeof SCAN_REQUIRED_OUTPUT_VALUES)[number];
@@ -253,97 +291,6 @@ export type BoundaryMapArtifact = {
   relations: BoundaryMapRelation[];
 };
 
-export const FINDING_KIND_VALUES = [
-  "conflict",
-  "stale",
-  "missing",
-  "ambiguous",
-  "broken-reference",
-  "duplicate-authority",
-  "implementation-drift",
-  "quality-problem",
-  "architecture-risk",
-  "runtime-risk",
-  "authority-gap",
-  "test-gap",
-  "deployment-risk",
-] as const;
-export type FindingKind = (typeof FINDING_KIND_VALUES)[number];
-
-export const FINDING_SEVERITY_VALUES = ["low", "normal", "high", "critical"] as const;
-export type FindingSeverity = (typeof FINDING_SEVERITY_VALUES)[number];
-
-export const FINDING_CONFIDENCE_VALUES = ["low", "medium", "high"] as const;
-export type FindingConfidence = (typeof FINDING_CONFIDENCE_VALUES)[number];
-
-export const FINDING_STATUS_VALUES = [
-  "open",
-  "acknowledged",
-  "proposed-fix",
-  "resolved",
-  "accepted",
-  "unverifiable",
-] as const;
-export type FindingStatus = (typeof FINDING_STATUS_VALUES)[number];
-
-export type FindingClaim = {
-  sourceRefIndex: number;
-  claim: string;
-};
-
-export type FindingMetadata = {
-  fingerprint: string;
-  kind: FindingKind;
-  severity: FindingSeverity;
-  confidence: FindingConfidence;
-  status: FindingStatus;
-  originScanId: string;
-  criterionIds: string[];
-  claims: FindingClaim[];
-  affectedNodeIds: string[];
-  expectedOwner?: string;
-  recommendedAction?: string;
-  resolutionEvidence?: string;
-};
-
-export type FindingNodeInput = {
-  id: string;
-  label: string;
-  notes: string;
-  fingerprint: string;
-  kind: FindingKind;
-  severity: FindingSeverity;
-  confidence: FindingConfidence;
-  status?: FindingStatus;
-  criterionIds: string[];
-  sources: Array<{
-    sourceRef: ProjectSourceRef;
-    claim: string;
-  }>;
-  affectedNodeIds: string[];
-  expectedOwner?: string;
-  recommendedAction?: string;
-  resolutionEvidence?: string;
-};
-
-export type FindingNodeUpdate = {
-  notes?: string;
-  severity?: FindingSeverity;
-  confidence?: FindingConfidence;
-  status?: FindingStatus;
-  expectedOwner?: string;
-  recommendedAction?: string;
-  resolutionEvidence?: string;
-};
-
-export type FindingEvidence = {
-  nodeId: string;
-  label: string;
-  notes: string;
-  sourceRefs: ProjectSourceRef[];
-  finding: FindingMetadata;
-};
-
 export const SCAN_CALIBRATION_DECISION_VALUES = [
   "continue",
   "refine-overlay",
@@ -412,13 +359,6 @@ export type ScanComparison = {
   };
   verdict: "pass" | "fail";
 };
-
-export class ScanValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ScanValidationError";
-  }
-}
 
 export const DOCUMENTATION_CONFLICTS_PROFILE: ScanProfile = {
   id: "documentation-conflicts",
@@ -934,110 +874,6 @@ export function validateBoundaryMap(boundaryMap: BoundaryMapArtifact): void {
   }
 }
 
-export function createFindingNode(scanId: string, input: FindingNodeInput): GraphNode {
-  assertNonEmpty("scanId", scanId);
-  const sourceRefs = input.sources.map((source) => source.sourceRef);
-  const finding: FindingMetadata = {
-    fingerprint: input.fingerprint,
-    kind: input.kind,
-    severity: input.severity,
-    confidence: input.confidence,
-    status: input.status ?? "open",
-    originScanId: scanId,
-    criterionIds: input.criterionIds,
-    claims: input.sources.map((source, index) => ({ sourceRefIndex: index, claim: source.claim })),
-    affectedNodeIds: input.affectedNodeIds,
-  };
-  if (input.expectedOwner !== undefined) finding.expectedOwner = input.expectedOwner;
-  if (input.recommendedAction !== undefined) finding.recommendedAction = input.recommendedAction;
-  if (input.resolutionEvidence !== undefined) finding.resolutionEvidence = input.resolutionEvidence;
-
-  const node: GraphNode = {
-    id: input.id,
-    label: input.label,
-    type: "finding",
-    notes: input.notes,
-    metadata: { sourceRefs, finding },
-  };
-  validateFindingNode(node);
-  return node;
-}
-
-export function validateFindingNode(node: GraphNode): void {
-  if (node.type !== "finding") {
-    throw new ScanValidationError(`Finding node must use type finding: ${node.id}`);
-  }
-  assertNonEmpty("finding node id", node.id);
-  assertNonEmpty("finding node label", node.label);
-  assertNonEmpty("finding node notes", node.notes ?? "");
-  const metadata = node.metadata;
-  if (metadata === undefined || !isObject(metadata.finding)) {
-    throw new ScanValidationError(`Finding node ${node.id} must contain metadata.finding`);
-  }
-  const finding = metadata.finding as FindingMetadata;
-  assertNonEmpty("finding.fingerprint", finding.fingerprint);
-  if (!FINDING_KIND_VALUES.includes(finding.kind)) throw new ScanValidationError(`Unknown finding kind: ${finding.kind}`);
-  if (!FINDING_SEVERITY_VALUES.includes(finding.severity)) throw new ScanValidationError(`Unknown finding severity: ${finding.severity}`);
-  if (!FINDING_CONFIDENCE_VALUES.includes(finding.confidence)) throw new ScanValidationError(`Unknown finding confidence: ${finding.confidence}`);
-  if (!FINDING_STATUS_VALUES.includes(finding.status)) throw new ScanValidationError(`Unknown finding status: ${finding.status}`);
-  assertNonEmpty("finding.originScanId", finding.originScanId);
-  assertNonEmptyArray("finding.criterionIds", finding.criterionIds);
-  assertUnique("finding.criterionIds", finding.criterionIds);
-  validateStringArray("finding.affectedNodeIds", finding.affectedNodeIds);
-  const sourceRefs = metadata.sourceRefs ?? [];
-  if (sourceRefs.length === 0) throw new ScanValidationError(`Finding node ${node.id} must contain source references`);
-  sourceRefs.forEach(validateProjectSourceRef);
-  if (finding.claims.length === 0) throw new ScanValidationError(`Finding node ${node.id} must contain claims`);
-  const indexes = finding.claims.map((claim) => claim.sourceRefIndex);
-  assertUnique("finding claim source indexes", indexes);
-  for (const claim of finding.claims) {
-    if (!Number.isInteger(claim.sourceRefIndex) || claim.sourceRefIndex < 0 || claim.sourceRefIndex >= sourceRefs.length) {
-      throw new ScanValidationError(`Finding claim references invalid source index: ${claim.sourceRefIndex}`);
-    }
-    assertNonEmpty("finding claim", claim.claim);
-  }
-  if (finding.kind === "conflict" && finding.claims.length < 2) {
-    throw new ScanValidationError("Conflict finding must contain at least two source claims");
-  }
-  assertOptionalNonEmpty("finding.expectedOwner", finding.expectedOwner);
-  assertOptionalNonEmpty("finding.recommendedAction", finding.recommendedAction);
-  assertOptionalNonEmpty("finding.resolutionEvidence", finding.resolutionEvidence);
-  if (finding.status === "resolved" && finding.resolutionEvidence === undefined) {
-    throw new ScanValidationError("Resolved finding requires resolution evidence");
-  }
-}
-
-export function updateFindingNode(node: GraphNode, changes: FindingNodeUpdate): GraphNode {
-  validateFindingNode(node);
-  if (Object.keys(changes).length === 0) throw new ScanValidationError("Finding update must contain at least one change");
-  const current = node.metadata?.finding as FindingMetadata;
-  const finding: FindingMetadata = { ...current };
-  if (changes.severity !== undefined) finding.severity = changes.severity;
-  if (changes.confidence !== undefined) finding.confidence = changes.confidence;
-  if (changes.status !== undefined) finding.status = changes.status;
-  if (changes.expectedOwner !== undefined) finding.expectedOwner = changes.expectedOwner;
-  if (changes.recommendedAction !== undefined) finding.recommendedAction = changes.recommendedAction;
-  if (changes.resolutionEvidence !== undefined) finding.resolutionEvidence = changes.resolutionEvidence;
-  const updated: GraphNode = {
-    ...node,
-    notes: changes.notes ?? (node.notes as string),
-    metadata: { ...node.metadata, finding },
-  };
-  validateFindingNode(updated);
-  return updated;
-}
-
-export function toFindingEvidence(node: GraphNode): FindingEvidence {
-  validateFindingNode(node);
-  return {
-    nodeId: node.id,
-    label: node.label,
-    notes: node.notes as string,
-    sourceRefs: [...(node.metadata?.sourceRefs ?? [])],
-    finding: structuredClone(node.metadata?.finding as FindingMetadata),
-  };
-}
-
 export function validateScanRun(run: ScanRun, profiles: readonly ScanProfile[], graph?: SemanticGraph): void {
   assertNonEmpty("scan.id", run.id);
   assertNonEmpty("scan.profileId", run.profileId);
@@ -1112,10 +948,32 @@ export function validateScanState(profiles: readonly ScanProfile[], runs: readon
     runIds.add(run.id);
     validateScanRun(run, profiles, graph);
   }
+  const findingNodesById = new Map<string, GraphNode>();
+  const findingIdsByOriginScan = new Map<string, string[]>();
   for (const node of graph.nodes.filter((candidate) => candidate.type === "finding")) {
-    validateFindingNode(node);
+    validateFindingAffectedNodes(node, graph);
     const finding = node.metadata?.finding as FindingMetadata;
     if (!runIds.has(finding.originScanId)) throw new ScanValidationError(`Finding ${node.id} references missing scan: ${finding.originScanId}`);
+    findingNodesById.set(node.id, node);
+    const ownedFindingIds = findingIdsByOriginScan.get(finding.originScanId) ?? [];
+    ownedFindingIds.push(node.id);
+    findingIdsByOriginScan.set(finding.originScanId, ownedFindingIds);
+  }
+  for (const run of runs) {
+    const listedFindingIds = new Set(run.findingNodeIds);
+    for (const findingId of listedFindingIds) {
+      const node = findingNodesById.get(findingId);
+      if (node === undefined) throw new ScanValidationError(`Scan ${run.id} references missing finding: ${findingId}`);
+      const finding = node.metadata?.finding as FindingMetadata;
+      if (finding.originScanId !== run.id) {
+        throw new ScanValidationError(`Scan ${run.id} lists finding ${findingId} owned by scan ${finding.originScanId}`);
+      }
+    }
+    for (const findingId of findingIdsByOriginScan.get(run.id) ?? []) {
+      if (!listedFindingIds.has(findingId)) {
+        throw new ScanValidationError(`Finding ${findingId} is not listed by owning scan ${run.id}`);
+      }
+    }
   }
 }
 

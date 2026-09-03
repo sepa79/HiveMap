@@ -28,7 +28,7 @@ type Projection = {
 };
 ```
 
-`layout.orientationNote` is a projection-owned visual annotation with a non-empty `title`, `purpose`, and ordered `usage` steps. The UI renders it as a large note node. It explains a view without creating a fake semantic concept in the graph.
+`layout.orientationNote` is a projection-owned visual annotation with a non-empty `title`, `purpose`, and ordered `usage` steps. The UI exposes it as compact view help in the projection toolbar or inspector instead of manufacturing a semantic node or consuming map space with a pseudo-node.
 
 ```ts
 type ProjectionGroup = {

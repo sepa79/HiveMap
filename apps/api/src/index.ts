@@ -86,7 +86,7 @@ async function handleRequest(
     const method = request.method;
     const url = parseUrl(request);
     const pathname = url.pathname;
-    const segments = pathname.split("/").filter(Boolean);
+    const segments = pathname.split("/").filter(Boolean).map(decodePathSegment);
 
     if (method === "OPTIONS") {
       writeEmpty(response, 204);
@@ -363,6 +363,11 @@ async function handleRequest(
       return;
     }
 
+    if (method === "DELETE" && segments[2] === "scans" && segments[3] !== undefined && segments.length === 4) {
+      writeJson(response, 200, await runtime.deleteScan({ workspaceId, scanId: segments[3] }));
+      return;
+    }
+
     if (
       method === "POST" &&
       segments[2] === "scans" &&
@@ -478,6 +483,14 @@ async function handleRequest(
       return;
     }
     writeError(response, error);
+  }
+}
+
+function decodePathSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    throw new ApiHttpError(400, "INVALID_PATH_ENCODING", `Invalid percent-encoding in path segment: ${segment}`);
   }
 }
 

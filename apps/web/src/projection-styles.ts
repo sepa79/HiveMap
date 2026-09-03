@@ -4,7 +4,7 @@
  * Contract: Returns deterministic visual values from explicit node, severity, and group inputs.
  */
 import type { FindingMetadata, GraphNodeType } from "./api.js";
-import { MAP_CARD_HEIGHT } from "./MapCard.js";
+import { MAP_CARD_HEIGHT, MAP_CARD_WIDTH } from "./MapCard.js";
 
 export function nodeStyle(type: GraphNodeType, selected: boolean, findingSeverity?: "low" | "normal" | "high" | "critical") {
   const colors: Record<GraphNodeType, { background: string; border: string }> = {
@@ -34,28 +34,11 @@ export function nodeStyle(type: GraphNodeType, selected: boolean, findingSeverit
     borderRadius: 10,
     boxShadow: selected ? "0 0 20px rgba(51, 225, 255, 0.24)" : "0 12px 24px rgba(0, 0, 0, 0.22)",
     color: "rgba(255, 255, 255, 0.94)",
-    padding: 12,
+    padding: 14,
     height: MAP_CARD_HEIGHT,
-    width: 180,
+    width: MAP_CARD_WIDTH,
   };
 }
-export function orientationNoteStyle(groupCount: number) {
-  return {
-    background: "linear-gradient(135deg, rgba(51, 225, 255, 0.14), rgba(255, 193, 7, 0.08))",
-    border: "1px solid rgba(51, 225, 255, 0.52)",
-    borderRadius: 14,
-    boxShadow: "0 18px 42px rgba(0, 0, 0, 0.32)",
-    color: "rgba(255, 255, 255, 0.92)",
-    fontSize: 13,
-    lineHeight: 1.55,
-    minHeight: 160,
-    padding: 18,
-    textAlign: "left" as const,
-    whiteSpace: "pre-line" as const,
-    width: Math.max(620, groupCount * 260 - 20),
-  };
-}
-
 export function humanSeverity(severity: FindingMetadata["severity"] | undefined): string {
   if (severity === undefined) return "unknown";
   return severity === "normal" ? "medium" : severity;
@@ -73,14 +56,15 @@ export function projectionGroupHeaderStyle(groupId: string, width: number) {
     : { background: "rgba(51, 225, 255, 0.10)", border: "rgba(51, 225, 255, 0.45)", color: "#8cedff" };
   return {
     ...palette,
-    border: `1px solid ${palette.border}`,
-    borderRadius: 12,
-    fontSize: 16,
+    background: "transparent",
+    border: "0",
+    borderRadius: 0,
+    fontSize: 14,
     fontWeight: 900,
     letterSpacing: 0.5,
     lineHeight: 1.35,
-    minHeight: 64,
-    padding: 10,
+    minHeight: 48,
+    padding: 5,
     textTransform: "uppercase" as const,
     whiteSpace: "pre-line" as const,
     width,

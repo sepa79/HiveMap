@@ -620,6 +620,14 @@ export type CompleteScanRequest = {
 };
 export type CompleteScanResponse = { run: Extract<ScanRun, { status: "completed" }> };
 
+export type DeleteScanRequest = { workspaceId: string; scanId: string };
+export type DeleteScanResponse = {
+  deletedScanId: string;
+  deletedFindingNodeIds: string[];
+  deletedEdgeIds: string[];
+  deletedProjectionIds: string[];
+};
+
 export type CompareScansRequest = { workspaceId: string; beforeScanId: string; afterScanId: string };
 export type CompareScansResponse = { comparison: ScanComparison };
 
@@ -659,6 +667,7 @@ export type McpToolName =
   | "scan_finding_create"
   | "finding_update"
   | "scan_complete"
+  | "scan_delete"
   | "scan_compare";
 
 export type McpToolRequestMap = {
@@ -695,6 +704,7 @@ export type McpToolRequestMap = {
   scan_finding_create: CreateScanFindingRequest;
   finding_update: UpdateFindingRequest;
   scan_complete: CompleteScanRequest;
+  scan_delete: DeleteScanRequest;
   scan_compare: CompareScansRequest;
 };
 
@@ -960,6 +970,11 @@ export function validateCompleteScanRequest(request: CompleteScanRequest): void 
   } else if (request.boundaryMap !== undefined) {
     throw new ApiContractValidationError("boundaryMap requires declaredOutputs to include boundary-map");
   }
+}
+
+export function validateDeleteScanRequest(request: DeleteScanRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("scanId", request.scanId);
 }
 
 export function validateCompareScansRequest(request: CompareScansRequest): void {

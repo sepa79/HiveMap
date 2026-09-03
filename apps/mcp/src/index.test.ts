@@ -52,6 +52,7 @@ describe("MCP tool adapter", () => {
       "scan_finding_create",
       "finding_update",
       "scan_complete",
+      "scan_delete",
       "scan_compare",
     ]);
   });
@@ -104,6 +105,32 @@ describe("MCP tool adapter", () => {
           nodes: [{ id: "node-a", label: "Alpha", type: "concept" }],
           edges: [],
         },
+      },
+    });
+  });
+
+  it("rejects finding lifecycle mutations through generic MCP graph_command", async () => {
+    await handleMcpTool(runtime, "project_create", {
+      workspace: {
+        id: "workspace-a",
+        name: "Alpha",
+        createdAt: "2026-05-13T21:00:00.000Z",
+      },
+    });
+
+    await expect(handleMcpTool(runtime, "graph_command", {
+      workspaceId: "workspace-a",
+      commands: [{
+        id: "cmd-finding",
+        type: "node.create",
+        payload: { node: { id: "finding-a", label: "Finding A", type: "finding" } },
+      }],
+    })).resolves.toEqual({
+      ok: false,
+      tool: "graph_command",
+      error: {
+        code: "FINDING_LIFECYCLE_COMMAND_FORBIDDEN",
+        message: "Finding node finding-a must use scan_finding_create, finding_update, scan_delete, or approved proposal creation",
       },
     });
   });
@@ -678,6 +705,28 @@ describe("MCP tool adapter", () => {
         expect.stringContaining("Use the repository-index-derived coverage already attached to this run"),
       );
     }
+  });
+
+  it("deletes an empty scan draft through MCP", async () => {
+    await createWorkspaceWithNode();
+    await createCompletedRepositoryIndex();
+    await handleMcpTool(runtime, "scan_start", {
+      workspaceId: "workspace-a",
+      scan: {
+        id: "scan-delete",
+        profileId: "documentation-conflicts",
+        profileVersion: 1,
+        repositoryIndexId: "repo-index-scan",
+        actor: { agentId: "agent-a", tool: "codex" },
+        startedAt: "2026-07-17T10:00:00.000Z",
+      },
+    });
+
+    await expect(handleMcpTool(runtime, "scan_delete", { workspaceId: "workspace-a", scanId: "scan-delete" })).resolves.toEqual({
+      ok: true,
+      tool: "scan_delete",
+      value: { deletedScanId: "scan-delete", deletedFindingNodeIds: [], deletedEdgeIds: [], deletedProjectionIds: [] },
+    });
   });
 
   it("builds a candidate boundary map for an in-progress code scan through MCP", async () => {

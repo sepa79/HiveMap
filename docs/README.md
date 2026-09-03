@@ -39,6 +39,7 @@ Design HiveMap 1.0 around:
 - `ai/`: command, review, Jester, and HiveMind workflow rules.
 - `ai/KNOWLEDGE_MAP_WORKFLOW.md`: repeatable workflow for correlating concepts with docs, code, tests, assets, and HiveMind.
 - `specs/repository-scan.md`: repeatable agent scans, finding evidence, and before/after comparison.
+- `specs/web-workspace-ui.md`: browser workspace information architecture, projection controls, inspector, and visual acceptance.
 - `ai/REPOSITORY_SCAN_WORKFLOW.md`: agent procedure for executing, verifying, and repeating a scan in one environment.
 
 ## POC Boundary

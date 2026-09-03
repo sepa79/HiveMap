@@ -32,6 +32,7 @@ import {
   validateRejectProposalRequest,
   validateCompareScansRequest,
   validateCompleteScanRequest,
+  validateDeleteScanRequest,
   validateCreateScanFindingRequest,
   validateRecordScanCalibrationDecisionRequest,
   validateRecordScanCoverageRequest,
@@ -95,6 +96,8 @@ import {
   type CompareScansResponse,
   type CompleteScanRequest,
   type CompleteScanResponse,
+  type DeleteScanRequest,
+  type DeleteScanResponse,
   type CreateScanFindingRequest,
   type CreateScanFindingResponse,
   type ExecuteRepositoryIndexRequest,
@@ -172,6 +175,11 @@ import {
 } from "./repository-indexing.js";
 import { RuntimeError } from "./runtime-error.js";
 import {
+  assertGenericCommandsDoNotMutateFindings,
+  attachProposedFindingCreates,
+  requireAttachableFindingScan,
+} from "./finding-command-policy.js";
+import {
   createScanCoverageWarnings,
   deriveScanCoverage,
   summarizeRecordedCoverage,
@@ -187,6 +195,7 @@ import {
 import { createRepositoryEvidenceCandidates } from "./repository-evidence-candidates.js";
 import { matchesAnyGlob, normalizeRepositoryPath } from "./repository-path.js";
 import { OperationCoordinator } from "./operation-coordinator.js";
+import { deleteScanFromWorkspaceState } from "./scan-deletion.js";
 
 export { RepositoryIndexExecutionError, executeSafeRepositoryIndex, type RepositoryIndexExecutor } from "./repository-indexing.js";
 export { RuntimeError } from "./runtime-error.js";
@@ -738,6 +747,7 @@ export class HiveMapRuntime {
     validateApplyGraphCommandsRequest(request);
     return this.operations.run(workspaceMutationKey(request.workspaceId), async () => {
       const state = await this.store.loadWorkspaceState(request.workspaceId);
+      assertGenericCommandsDoNotMutateFindings(state.graph, request.commands);
       const nextState = { ...state, graph: applyGraphCommands(state.graph, request.commands) };
       await this.store.saveWorkspaceState(nextState);
       return { graph: nextState.graph };
@@ -816,9 +826,11 @@ export class HiveMapRuntime {
       const state = await this.store.loadWorkspaceState(request.workspaceId);
       const proposal = findById(state.proposals, request.proposalId, "Proposal");
       const result = applyApprovedProposal(state.graph, proposal);
+      const scanRuns = attachProposedFindingCreates(state, result.graph, proposal.graphCommands);
       const nextState = {
         ...state,
         graph: result.graph,
+        scanRuns,
         proposals: state.proposals.map((candidate) => (candidate.id === proposal.id ? result.proposal : candidate)),
       };
       await this.store.saveWorkspaceState(nextState);
@@ -1084,17 +1096,8 @@ export class HiveMapRuntime {
       throw new RuntimeError(`scan_finding_create requires delegated capture; current mode is ${state.capturePolicy.mode}`);
     }
     const run = findInProgressScan(state, request.scanId);
-    requireCalibrationDecision(run, "continue", "Creating scan findings");
-    const profile = run.effectiveProfile ?? findScanProfile(state, run.profileId, run.profileVersion);
-    for (const criterionId of request.finding.criterionIds) {
-      if (!profile.criteria.some((criterion) => criterion.id === criterionId)) {
-        throw new RuntimeError(`Finding references criterion outside scan profile: ${criterionId}`);
-      }
-    }
-    for (const nodeId of request.finding.affectedNodeIds) {
-      if (!state.graph.nodes.some((node) => node.id === nodeId)) throw new RuntimeError(`Finding references missing affected node: ${nodeId}`);
-    }
     const node = createFindingNode(run.id, request.finding);
+    requireAttachableFindingScan(state, state.graph, node);
     const graph = applyGraphCommands(state.graph, [
       { id: `scan-${run.id}-finding-${node.id}`, type: "node.create", payload: { node } },
     ]);
@@ -1189,6 +1192,30 @@ export class HiveMapRuntime {
     validateScanRun(completed, state.scanProfiles, state.graph);
     await this.store.saveWorkspaceState({ ...state, scanRuns: replaceById(state.scanRuns, completed) });
     return { run: completed };
+  }
+
+  async deleteScan(request: DeleteScanRequest): Promise<DeleteScanResponse> {
+    validateDeleteScanRequest(request);
+    return this.operations.run(workspaceMutationKey(request.workspaceId), () => this.deleteScanMutation(request));
+  }
+
+  private async deleteScanMutation(request: DeleteScanRequest): Promise<DeleteScanResponse> {
+    const state = await this.store.loadWorkspaceState(request.workspaceId);
+    const run = state.scanRuns.find((candidate) => candidate.id === request.scanId);
+    if (run === undefined) {
+      throw new RuntimeError(`Scan not found: ${request.scanId}`, {
+        code: "SCAN_NOT_FOUND",
+        details: { scanId: request.scanId },
+      });
+    }
+    const deletion = deleteScanFromWorkspaceState(state, run);
+    await this.store.saveWorkspaceState(deletion.state);
+    return {
+      deletedScanId: run.id,
+      deletedFindingNodeIds: deletion.deletedFindingNodeIds,
+      deletedEdgeIds: deletion.deletedEdgeIds,
+      deletedProjectionIds: deletion.deletedProjectionIds,
+    };
   }
 
   async compareScans(request: CompareScansRequest): Promise<CompareScansResponse> {

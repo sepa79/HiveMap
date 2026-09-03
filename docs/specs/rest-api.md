@@ -4,9 +4,12 @@ REST is the local UI/testing API for HiveMap alpha.
 
 MCP is the primary agent interface. REST must call the same command handlers as MCP tools and must not define separate graph, category, capture, projection, or proposal semantics.
 
+Generic graph-command requests cannot create, update, or delete nodes of type `finding`. Finding lifecycle uses the dedicated scan/finding operations; applying an approved proposal that creates a finding must atomically attach it to the referenced in-progress scan.
+
 ## Rules
 
 - Required ids must be explicit.
+- Dynamic path identifiers are standard percent-encoded URL segments. REST clients encode each identifier exactly once, and the HTTP boundary decodes each segment exactly once before typed request validation.
 - Missing workspaces, graph ids, category ids, projection ids, proposal ids, and feedback ids must fail clearly.
 - Graph mutation must use `GraphCommand`.
 - Feedback events must not mutate the graph directly.
@@ -99,6 +102,7 @@ POST /workspaces/:workspaceId/scans/:scanId/coverage
 POST /workspaces/:workspaceId/scans/:scanId/finding-validation
 POST /workspaces/:workspaceId/scans/:scanId/findings
 POST /workspaces/:workspaceId/scans/:scanId/complete
+DELETE /workspaces/:workspaceId/scans/:scanId
 POST /workspaces/:workspaceId/scan-comparisons
 POST /workspaces/:workspaceId/findings/:findingNodeId/update
 
@@ -129,6 +133,7 @@ Scan routes now start from one explicit completed repository index:
 - `POST /workspaces/:workspaceId/scans/:scanId/coverage` remains available only for explicit coverage correction or override; it is no longer required in the normal repository-index-backed start flow and should follow an explicit `correct-coverage` calibration decision.
 - `POST /workspaces/:workspaceId/scans/:scanId/finding-validation` accepts one explicit `criterionId` plus an optional reviewed `boundaryMap` artifact and classifies the suspected issue as `likely-real-finding`, `profile-gap`, `missing-evidence`, or `ambiguous-shape` before the caller creates a durable finding node.
 - `POST /workspaces/:workspaceId/scans/:scanId/complete` accepts `completedAt`, `appliedCriteria`, `declaredOutputs`, an optional typed `boundaryMap` artifact when `declaredOutputs` includes `boundary-map`, and optional `calibrationOverrideReason`. Findings-bearing completion requires an explicit prior `continue` calibration decision, and still fails on a non-ready calibration state unless that override reason is supplied explicitly. The typed artifact is semantically validated, not only shape-checked.
+- `DELETE /workspaces/:workspaceId/scans/:scanId` hard-deletes any scan run and atomically removes its owned finding nodes, incident graph edges, projection membership, projections made empty or rootless by the cascade, and category assignments targeting removed graph elements. The response reports the deleted scan, finding-node, edge, and projection ids.
 
 `GET /workspaces` returns lightweight workspace records for browser selection without loading every semantic graph. Records may include optional discovery metadata such as `slug`, `archived`, and `updatedAt`.
 

@@ -72,6 +72,8 @@ HIVEMAP_AUTH_TOKEN='replace-with-a-long-random-token' docker compose up --build
 
 That container path exposes protected REST and stateless Streamable HTTP MCP at `/mcp` through the same port and runtime. It is validated for workspace create, graph mutation, and projection create/read. It includes HiveMap's built-in repository indexing and scan handlers; there is no separate runtime plugin or bundled model-serving dependency. Postgres data is mounted at `./.local/hivemap-postgres` by the repository Compose file.
 
+The mounted database is reusable only by the exact current Postgres schema version. HiveMap contains no schema migrations. When the storage schema version changes, stop the old runtime, explicitly remove the HiveMap-owned database directory or volume, and start the new version on a clean database before creating new indexes and scans.
+
 Installed MCP endpoint:
 
 ```text

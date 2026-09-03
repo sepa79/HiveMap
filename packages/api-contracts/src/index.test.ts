@@ -10,6 +10,7 @@ import {
   validateAssignCategoryRequest,
   validateBuildScanBoundaryMapRequest,
   validateCompleteScanRequest,
+  validateDeleteScanRequest,
   validateCreateProposalRequest,
   validateGetRepositoryIndexRequest,
   validateCreateWorkspaceRequest,
@@ -317,6 +318,11 @@ describe("api contracts", () => {
         recordedAt: "2026-08-25T10:00:00.000Z",
       }),
     ).toThrow("Unknown scan calibration decision");
+  });
+
+  it("validates explicit scan deletion identifiers", () => {
+    expect(() => validateDeleteScanRequest({ workspaceId: "workspace-a", scanId: "scan-a" })).not.toThrow();
+    expect(() => validateDeleteScanRequest({ workspaceId: "workspace-a", scanId: " " })).toThrow("scanId");
   });
 
   it("validates criterion-scoped finding validation requests", () => {

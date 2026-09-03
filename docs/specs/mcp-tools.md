@@ -35,6 +35,7 @@ Draft MCP surface for agents. MCP is the primary HiveMap agent interface for alp
 - `scan_finding_create`
 - `finding_update`
 - `scan_complete`
+- `scan_delete`
 - `scan_compare`
 
 ## Rules
@@ -56,6 +57,8 @@ Draft MCP surface for agents. MCP is the primary HiveMap agent interface for alp
 ## Implementation Direction
 
 The MCP app exposes tool handlers over the shared HiveMap runtime. Transport-specific MCP server wiring must stay thin and must not reimplement graph, category, projection, feedback, or proposal behavior.
+
+`graph_command` cannot create, update, or delete nodes of type `finding`. Finding lifecycle uses `scan_finding_create`, `finding_update`, and `scan_delete`; proposal-based creation is attached to its originating in-progress scan atomically when the approved proposal is applied.
 
 The installed/container runtime exposes stateless Streamable HTTP MCP at `/mcp` in the same HTTP process and port as REST. It creates transport/server wiring per request while sharing the process-owned `HiveMapRuntime` and Postgres store with REST. The endpoint requires the same exact bearer token as REST through `Authorization: Bearer <token>`. The HTTP runtime accepts exactly one source for that token: direct `HIVEMAP_AUTH_TOKEN`/`--auth-token` or file-backed `HIVEMAP_AUTH_TOKEN_FILE`/`--auth-token-file`; HiveForge uses the file-backed external-secret path. The legacy stdio entrypoint remains available only for explicit local development and is not part of the installed runtime contract. Neither transport exposes import/export in the current phase.
 
@@ -92,10 +95,11 @@ Scan flow in the current repository-index-backed phase:
 7. `scan_boundary_map_build({ workspaceId, scanId })` derives one candidate typed `boundaryMap` artifact from the current scan coverage plus the selected completed repository index facts, plus a calibration assessment and decision guidance for the structural result. The caller should record `build-boundary-map` explicitly before this step.
 8. `scan_profile_overlay_suggest({ workspaceId, scanId, symptomId })` should follow `refine-overlay` when the caller wants the smallest repo-aware patch scaffold for one concrete calibration symptom instead of editing YAML ad hoc.
 9. `scan_finding_validate({ workspaceId, scanId, criterionId, boundaryMap? })` classifies one criterion-level suspected issue as `likely-real-finding`, `profile-gap`, `missing-evidence`, or `ambiguous-shape` before the caller creates a durable finding node.
-10. If calibration shows that the repository shape is wrong, the caller should refine the repository-local overlay or record one explicit coverage correction, then restart with a new scan id from the same completed repository index rather than forcing findings through the provisional run.
+10. If calibration shows that the repository shape is wrong, the caller should refine the repository-local overlay or record one explicit coverage correction, delete the obsolete empty draft with `scan_delete`, then restart with a new scan id from the same completed repository index rather than forcing findings through the provisional run.
 11. `scan_record_coverage({ workspaceId, scanId, coverage })` remains available only when the caller needs an explicit coverage override or correction, and should follow an explicit `correct-coverage` decision.
 12. `scan_complete({ workspaceId, scanId, completedAt, appliedCriteria, declaredOutputs, boundaryMap?, calibrationOverrideReason? })` may carry an optional typed `boundaryMap` artifact, but only when `declaredOutputs` includes `boundary-map`.
 13. Findings-bearing completion requires an explicit prior `continue` decision and still fails from a non-ready calibration state unless `calibrationOverrideReason` is supplied explicitly.
+14. `scan_delete({ workspaceId, scanId })` hard-deletes any run and atomically cascades through finding nodes owned by that scan, their incident graph edges, projection membership, and category assignments targeting removed graph elements. Its result reports the exact deleted ids.
 
 Overlay discovery rules in the current phase:
 

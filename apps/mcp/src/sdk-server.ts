@@ -60,6 +60,7 @@ const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   finding_update: "Update an active finding status or severity; resolved status requires explicit resolution evidence.",
   scan_complete:
     "Complete a scan only after coverage, every profile criterion, required output, and finding evidence validate. Findings-bearing completion from a non-ready calibration state requires an explicit calibrationOverrideReason.",
+  scan_delete: "Hard-delete one scan and atomically remove its owned finding nodes, incident edges, affected projection membership, and category assignments.",
   scan_compare: "Compare two completed runs of the same profile and return resolved, open, changed, new, regressed, or unverifiable evidence.",
 };
 
@@ -329,6 +330,11 @@ export function createHiveMapMcpServer(runtime: HiveMapRuntime): McpServer {
     declaredOutputs: z.array(z.enum(["document-inventory", "concept-map", "findings", "coverage-report", "boundary-map"])),
     boundaryMap: boundaryMapArtifactSchema.optional(),
     calibrationOverrideReason: z.string().optional(),
+  });
+
+  registerTool(server, runtime, "scan_delete", {
+    workspaceId: z.string(),
+    scanId: z.string(),
   });
 
   registerTool(server, runtime, "scan_compare", {

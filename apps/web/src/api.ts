@@ -11,6 +11,7 @@ import type {
   CreateProjectionResponse,
   CreateProposalResponse,
   CreateWorkspaceRequest,
+  DeleteScanResponse,
   GetWorkspaceResponse,
   ListWorkspacesResponse,
   RecordFeedbackResponse,
@@ -65,12 +66,16 @@ export async function createWorkspace(workspace: CreateWorkspaceRequest["workspa
 }
 
 export async function getWorkspace(workspaceId: string): Promise<WorkspaceState> {
-  const response = await request<GetWorkspaceResponse>(`/workspaces/${workspaceId}`);
+  const response = await request<GetWorkspaceResponse>(`/workspaces/${pathSegment(workspaceId)}`);
   return response.state;
 }
 
+export async function deleteScan(workspaceId: string, scanId: string): Promise<DeleteScanResponse> {
+  return request<DeleteScanResponse>(`/workspaces/${pathSegment(workspaceId)}/scans/${pathSegment(scanId)}`, { method: "DELETE" });
+}
+
 export async function createNode(workspaceId: string, node: GraphNode): Promise<SemanticGraph> {
-  const response = await request<ApplyGraphCommandsResponse>(`/workspaces/${workspaceId}/commands`, {
+  const response = await request<ApplyGraphCommandsResponse>(`/workspaces/${pathSegment(workspaceId)}/commands`, {
     method: "POST",
     body: {
       commands: [
@@ -86,7 +91,7 @@ export async function createNode(workspaceId: string, node: GraphNode): Promise<
 }
 
 export async function createEdge(workspaceId: string, edge: GraphEdge): Promise<SemanticGraph> {
-  const response = await request<ApplyGraphCommandsResponse>(`/workspaces/${workspaceId}/commands`, {
+  const response = await request<ApplyGraphCommandsResponse>(`/workspaces/${pathSegment(workspaceId)}/commands`, {
     method: "POST",
     body: {
       commands: [
@@ -102,7 +107,7 @@ export async function createEdge(workspaceId: string, edge: GraphEdge): Promise<
 }
 
 export async function createOverview(workspaceId: string, maxNodes: number): Promise<Projection> {
-  const response = await request<CreateProjectionResponse>(`/workspaces/${workspaceId}/projections`, {
+  const response = await request<CreateProjectionResponse>(`/workspaces/${pathSegment(workspaceId)}/projections`, {
     method: "POST",
     body: {
       input: {
@@ -116,7 +121,7 @@ export async function createOverview(workspaceId: string, maxNodes: number): Pro
 }
 
 export async function createDiveIn(workspaceId: string, rootNodeId: string): Promise<Projection> {
-  const response = await request<CreateProjectionResponse>(`/workspaces/${workspaceId}/projections`, {
+  const response = await request<CreateProjectionResponse>(`/workspaces/${pathSegment(workspaceId)}/projections`, {
     method: "POST",
     body: {
       input: {
@@ -135,7 +140,7 @@ export async function createProjectMap(
   visibleNodeIds: string[],
   options?: { name?: string; groups?: ProjectionGroup[]; layout?: Projection["layout"] },
 ): Promise<Projection> {
-  const response = await request<CreateProjectionResponse>(`/workspaces/${workspaceId}/projections`, {
+  const response = await request<CreateProjectionResponse>(`/workspaces/${pathSegment(workspaceId)}/projections`, {
     method: "POST",
     body: {
       input: {
@@ -153,7 +158,7 @@ export async function createProjectMap(
 }
 
 export async function recordFeedback(workspaceId: string, feedbackEvent: FeedbackEvent): Promise<FeedbackEvent[]> {
-  const response = await request<RecordFeedbackResponse>(`/workspaces/${workspaceId}/feedback`, {
+  const response = await request<RecordFeedbackResponse>(`/workspaces/${pathSegment(workspaceId)}/feedback`, {
     method: "POST",
     body: { feedbackEvent },
   });
@@ -165,7 +170,7 @@ export async function assignCategory(
   assignment: CategoryAssignment,
 ): Promise<CategoryAssignment[]> {
   const response = await request<AssignCategoryResponse>(
-    `/workspaces/${workspaceId}/category-assignments`,
+    `/workspaces/${pathSegment(workspaceId)}/category-assignments`,
     {
       method: "POST",
       body: { assignment },
@@ -175,7 +180,7 @@ export async function assignCategory(
 }
 
 export async function createProposal(workspaceId: string, proposal: GraphProposal): Promise<GraphProposal> {
-  const response = await request<CreateProposalResponse>(`/workspaces/${workspaceId}/proposals`, {
+  const response = await request<CreateProposalResponse>(`/workspaces/${pathSegment(workspaceId)}/proposals`, {
     method: "POST",
     body: { proposal },
   });
@@ -184,7 +189,7 @@ export async function createProposal(workspaceId: string, proposal: GraphProposa
 
 export async function approveProposal(workspaceId: string, proposalId: string): Promise<GraphProposal> {
   const response = await request<ApproveProposalResponse>(
-    `/workspaces/${workspaceId}/proposals/${proposalId}/approve`,
+    `/workspaces/${pathSegment(workspaceId)}/proposals/${pathSegment(proposalId)}/approve`,
     { method: "POST", body: {} },
   );
   return response.proposal;
@@ -192,7 +197,7 @@ export async function approveProposal(workspaceId: string, proposalId: string): 
 
 export async function applyProposal(workspaceId: string, proposalId: string): Promise<GraphProposal> {
   const response = await request<ApplyProposalResponse>(
-    `/workspaces/${workspaceId}/proposals/${proposalId}/apply`,
+    `/workspaces/${pathSegment(workspaceId)}/proposals/${pathSegment(proposalId)}/apply`,
     { method: "POST", body: {} },
   );
   return response.proposal;
@@ -200,7 +205,7 @@ export async function applyProposal(workspaceId: string, proposalId: string): Pr
 
 export async function rejectProposal(workspaceId: string, proposalId: string): Promise<GraphProposal> {
   const response = await request<RejectProposalResponse>(
-    `/workspaces/${workspaceId}/proposals/${proposalId}/reject`,
+    `/workspaces/${pathSegment(workspaceId)}/proposals/${pathSegment(proposalId)}/reject`,
     { method: "POST", body: {} },
   );
   return response.proposal;
@@ -233,6 +238,10 @@ function requestHeaders(extra: Record<string, string> = {}): Record<string, stri
   return authToken.length === 0
     ? extra
     : { ...extra, authorization: `Bearer ${authToken}` };
+}
+
+function pathSegment(value: string): string {
+  return encodeURIComponent(value);
 }
 
 async function responseError(response: Response): Promise<Error> {

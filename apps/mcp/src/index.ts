@@ -29,6 +29,7 @@ import type {
   SearchRepositoryIndexResponse,
   CompareScansResponse,
   CompleteScanResponse,
+  DeleteScanResponse,
   CreateScanFindingResponse,
   ListScanProfilesResponse,
   ListScanRunsResponse,
@@ -81,6 +82,7 @@ export const HIVEMAP_MCP_TOOL_NAMES: readonly McpToolName[] = [
   "scan_finding_create",
   "finding_update",
   "scan_complete",
+  "scan_delete",
   "scan_compare",
 ] as const;
 
@@ -118,6 +120,7 @@ export type McpToolResponseMap = {
   scan_finding_create: CreateScanFindingResponse;
   finding_update: UpdateFindingResponse;
   scan_complete: CompleteScanResponse;
+  scan_delete: DeleteScanResponse;
   scan_compare: CompareScansResponse;
 };
 
@@ -242,6 +245,8 @@ async function dispatchMcpTool<T extends McpToolName>(
       return (await runtime.updateFinding(request as McpToolRequestMap["finding_update"])) as McpToolResponseMap[T];
     case "scan_complete":
       return (await runtime.completeScan(request as McpToolRequestMap["scan_complete"])) as McpToolResponseMap[T];
+    case "scan_delete":
+      return (await runtime.deleteScan(request as McpToolRequestMap["scan_delete"])) as McpToolResponseMap[T];
     case "scan_compare":
       return (await runtime.compareScans(request as McpToolRequestMap["scan_compare"])) as McpToolResponseMap[T];
   }

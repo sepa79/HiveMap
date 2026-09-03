@@ -160,11 +160,14 @@ function mapRuntimeErrorStatus(error: RuntimeError): number {
     case "SCAN_REPOSITORY_INDEX_REQUIRED":
     case "CONCEPT_EMBEDDING_STALE":
       return 409;
+    case "SCAN_NOT_FOUND":
+      return 404;
     case "REPOSITORY_INDEX_MODE_UNAVAILABLE":
     case "LOCAL_REPOSITORY_SOURCE_NOT_ALLOWED":
     case "UNSAFE_REPOSITORY_URL":
     case "UNSAFE_REPOSITORY_REF":
     case "SCAN_PROFILE_OVERLAY_INVALID":
+    case "FINDING_LIFECYCLE_COMMAND_FORBIDDEN":
     case "UNSUPPORTED_EMBEDDING_NODE_TYPE":
     case "UNSUPPORTED_SIMILARITY_NODE_TYPE":
       return 400;

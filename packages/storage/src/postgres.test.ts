@@ -166,6 +166,26 @@ describeIfPostgres("PostgresHiveMapStore", () => {
     }
   });
 
+  it("rejects a non-current schema without changing its version or workspace data", async () => {
+    const workspaceId = `pg-${randomUUID()}`;
+    const state = createState(workspaceId);
+    await store.saveWorkspaceState(state);
+
+    try {
+      await introspectionPool.query("UPDATE schema_metadata SET value = '16' WHERE key = 'schema_version'");
+
+      await expect(store.initialize()).rejects.toThrow(
+        "Postgres storage schema version 16 is not supported; reset the database for schema 17",
+      );
+      await expect(introspectionPool.query<{ value: string }>("SELECT value FROM schema_metadata WHERE key = 'schema_version'"))
+        .resolves.toMatchObject({ rows: [{ value: "16" }] });
+      await expect(store.loadWorkspaceState(workspaceId)).resolves.toEqual(state);
+    } finally {
+      await introspectionPool.query("UPDATE schema_metadata SET value = '17' WHERE key = 'schema_version'");
+      await store.deleteWorkspace(workspaceId);
+    }
+  });
+
   it("round-trips completed scan boundary-map artifacts", async () => {
     const workspaceId = `pg-${randomUUID()}`;
     const state = createState(workspaceId);

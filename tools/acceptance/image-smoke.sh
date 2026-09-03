@@ -199,6 +199,7 @@ wait_for_health "${restart_container}" "${restart_port}"
 
 HIVEMAP_ACCEPTANCE_BASE_URL="http://127.0.0.1:${restart_port}" \
 HIVEMAP_ACCEPTANCE_AUTH_TOKEN="${token}" \
+HIVEMAP_ACCEPTANCE_PROJECTION_COUNT=8 \
 node tools/acceptance/browser-smoke.mjs
 
 printf 'image-smoke=passed image=%s\n' "${image}"

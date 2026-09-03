@@ -13,6 +13,7 @@ Upgrade HiveMap from the local-first SQLite alpha shape to a container-friendly 
 - [x] HiveMind is the default durable memory layer for meaningful HiveMap development work when available.
 - [x] Runtime storage direction is `Postgres + pgvector`.
 - [x] Runtime storage does not expose a migration/import/export bridge; future full-project portability is deferred.
+- [x] Runtime storage contains no Postgres schema migrations; a schema-version change requires an explicit database reset followed by new indexes and scans.
 - [x] Local Docker runtime comes before HiveForge integration.
 - [x] HiveForge integration comes before hosted Streamable HTTP MCP work.
 - [x] Embedding generation and vector-assisted product features were deferred from the base execution track and can be pulled forward afterward as a separate slice.
@@ -74,7 +75,7 @@ Upgrade HiveMap from the local-first SQLite alpha shape to a container-friendly 
 - [x] Make persistence optional through a mounted filesystem path for Postgres data.
 - [x] Keep local startup free of user-managed DB URLs or DB file paths.
 - [x] Add healthcheck behavior and explicit runtime env vars for the container-owned runtime only.
-- [x] Define startup/init/migration behavior for a fresh Postgres database inside the containerized runtime.
+- [x] Define clean startup/init behavior for a fresh Postgres database and fail-fast rejection of every non-current schema version; the runtime contains no schema migrations.
 - [x] Verify local container workflow for workspace create, graph operations, and projection create/read.
 - [x] Verify container restart behavior against a persisted Postgres volume without stale startup state.
 
@@ -117,11 +118,11 @@ Current state:
   pinning `HIVEMAP_IMAGE` to the immutable tag deployed the expected digest.
   The development-loop contract now requires that immutable image for each
   deploy/update.
-- The old test volume contained an unrecoverable schema-15 custom scan profile,
-  so the fail-fast schema-16 migration correctly refused startup. The 67 MB data
-  directory was preserved as `data.pre-schema16-20260828T2136Z`, a fresh
+- The old test volume used schema 15 and was intentionally not reused. The 67 MB
+  data directory was preserved as `data.pre-schema16-20260828T2136Z`, a fresh
   HiveMap-owned Postgres directory was initialized, and the service stabilized
-  at `1/1`.
+  at `1/1`. Current runtime policy is stricter: no Postgres schema migration code
+  exists, and any non-current version requires an explicit database reset.
 - Remote e2e passed public health/UI, REST and MCP `401` behavior, authenticated
   MCP mutation observed through REST, exact deployed image digest, and state
   persistence across a forced Swarm service restart.

@@ -206,6 +206,26 @@ describe("api server", () => {
     });
   });
 
+  it("rejects finding lifecycle mutations through the generic REST graph-command route", async () => {
+    await createWorkspace();
+
+    const response = await postJson("/workspaces/workspace-a/commands", {
+      commands: [{
+        id: "cmd-finding",
+        type: "node.create",
+        payload: { node: { id: "finding-a", label: "Finding A", type: "finding" } },
+      }],
+    });
+
+    expect(response.status).toBe(400);
+    expect(parseJson(response)).toEqual({
+      error: {
+        code: "FINDING_LIFECYCLE_COMMAND_FORBIDDEN",
+        message: "Finding node finding-a must use scan_finding_create, finding_update, scan_delete, or approved proposal creation",
+      },
+    });
+  });
+
   it("starts and reads repository index jobs through REST", async () => {
     await createWorkspace();
 
@@ -562,6 +582,18 @@ describe("api server", () => {
     });
   });
 
+  it("returns a stable 400 for malformed path encoding", async () => {
+    const response = await request(handleRequest, "/workspaces/workspace-a/scans/%not-encoded", { method: "DELETE" });
+
+    expect(response.status).toBe(400);
+    expect(parseJson(response)).toEqual({
+      error: {
+        code: "INVALID_PATH_ENCODING",
+        message: "Invalid percent-encoding in path segment: %not-encoded",
+      },
+    });
+  });
+
   it("records feedback without mutating the graph", async () => {
     await createWorkspace();
 
@@ -822,6 +854,40 @@ describe("api server", () => {
           included: ["docs/architecture.md"],
         },
       },
+    });
+  });
+
+  it("deletes an empty in-progress scan through REST", async () => {
+    await createWorkspace();
+    await createCompletedRepositoryIndex();
+    const scanId = "scan/delete?draft#1";
+    const encodedScanId = encodeURIComponent(scanId);
+    await postJson("/workspaces/workspace-a/scans", {
+      scan: {
+        id: scanId,
+        profileId: "documentation-conflicts",
+        profileVersion: 1,
+        repositoryIndexId: "repo-index-scan",
+        actor: { agentId: "agent-a", tool: "codex" },
+        startedAt: "2026-07-17T10:00:00.000Z",
+      },
+    });
+
+    const deleteResponse = await request(handleRequest, `/workspaces/workspace-a/scans/${encodedScanId}`, { method: "DELETE" });
+    expect(deleteResponse.status).toBe(200);
+    expect(parseJson(deleteResponse)).toEqual({
+      deletedScanId: scanId,
+      deletedFindingNodeIds: [],
+      deletedEdgeIds: [],
+      deletedProjectionIds: [],
+    });
+
+    const scansResponse = await request(handleRequest, "/workspaces/workspace-a/scans");
+    expect(parseJson(scansResponse)).toEqual({ runs: [] });
+    const repeatedDelete = await request(handleRequest, `/workspaces/workspace-a/scans/${encodedScanId}`, { method: "DELETE" });
+    expect(repeatedDelete.status).toBe(404);
+    expect(parseJson(repeatedDelete)).toEqual({
+      error: { code: "SCAN_NOT_FOUND", message: `Scan not found: ${scanId}`, details: { scanId } },
     });
   });
 

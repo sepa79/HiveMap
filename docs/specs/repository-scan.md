@@ -12,6 +12,7 @@ Repository scans are agent-executed, auditable work units that populate a HiveMa
 - Storage owns database IO and persisted scan evidence.
 - MCP/API validate every boundary and expose failures.
 - Direct `scan_finding_create` graph mutation requires delegated capture. Other capture modes must use the existing proposal/approval flow.
+- Finding-node lifecycle is scan-owned. Generic `graph_command` operations cannot create, update, or delete finding nodes. An approved proposal may create a finding only when applying it can atomically attach that node to its referenced in-progress scan; later changes use `finding_update`, and removal uses `scan_delete`.
 
 ## Scan Profile
 
@@ -83,9 +84,13 @@ Completion requires:
 - all required outputs to be declared;
 - every declared typed artifact output to carry its matching validated artifact payload;
 - every referenced finding to exist as a valid finding node originating in the run.
+- for every run, `findingNodeIds` to equal exactly the active graph finding-node ids whose `originScanId` is that run id; neither side may contain an unlisted or differently owned finding.
+- every active finding `affectedNodeIds` entry to resolve to an active non-finding node in the same semantic graph; commands and approved proposals that would leave a dangling reference or a finding-to-finding affected reference fail without persisting any part of the mutation.
 - when a findings-bearing completion still has non-ready calibration, an explicit override reason recorded on the completed run.
 
-Completed runs cannot be modified.
+Completed runs cannot be edited.
+
+Any scan run may be removed explicitly with `scan_delete`. Deletion removes the run and atomically cascades through the semantic finding nodes owned by that run, their incident edges, affected projection membership, and category assignments targeting removed nodes, edges, or projections. A projection that had visible nodes and becomes empty, or that had root nodes and loses all of them through this cascade, is removed. The response reports every removed finding node, edge, and projection id. Deletion is never automatic and does not depend on an inferred age threshold.
 
 ## Preliminary Calibration Gate
 
@@ -107,7 +112,7 @@ This gate exists to catch profile mismatches early, for example:
 - helper/test-only exports treated as public entrypoints;
 - contract, tool, and test boundaries that are not being linked coherently.
 
-If the preliminary pass shows that the repository shape is wrong, the agent must stop before filing final findings, refine the repository-local overlay or recorded coverage explicitly, and restart the scan from the same completed repository index with a new scan id. Do not silently continue from a mis-scoped preliminary pass into `scan_complete`.
+If the preliminary pass shows that the repository shape is wrong, the agent must stop before filing final findings, refine the repository-local overlay or recorded coverage explicitly, delete the now-obsolete run when it has no review value, and restart the scan from the same completed repository index with a new scan id. Do not silently continue from a mis-scoped preliminary pass into `scan_complete`.
 
 If a findings-bearing run is completed anyway while calibration remains `profile-gap`, `missing-evidence`, or `ambiguous-shape`, the completion must carry one explicit calibration override reason. The override is historical evidence that the run was frozen deliberately despite incomplete calibration; it is not a substitute for repository tuning.
 
@@ -211,11 +216,11 @@ Repository-scan overview projections are findings-first. The primary canvas grou
 
 Finding cards render the human title separately from machine-oriented tags. The title uses reading typography; finding kind and human severity use distinct monospace pills with severity-aware emphasis. Do not concatenate title, kind, and severity into one undifferentiated label string.
 
-The map header explains what the current projection contains and the next available interaction. Clicking a finding node opens its dive-in directly; selecting a raw node without changing the projection is not sufficient finding navigation.
+The map header explains what the current projection contains and the next available interaction. Clicking a finding node selects it and opens its evidence in the fixed inspector without changing the projection. Opening its persisted dive-in is a separate explicit inspector action.
 
-The findings overview and finding dive-in carry projection-owned orientation notes rendered as large note nodes. An overview note explains what the review map is for, how priority columns and finding kinds differ, how to open evidence, and how to return. It is persisted with the workspace.
+The findings overview and finding dive-in carry projection-owned orientation notes exposed as compact view help instead of large canvas nodes. An overview note explains what the review map is for, how priority columns and finding kinds differ, how to open evidence, and how to return. It is persisted with the workspace.
 
-Workspace and projection ids are encoded in browser history. Opening a finding pushes its dive-in URL; both the application Back button and browser Back restore the previous projection. A protected direct projection URL remains pending until the operator sets the tab-scoped token, then loads that exact workspace and projection. Direct projection URLs fail visibly when the workspace or projection does not exist.
+Workspace and projection ids are encoded in browser history. Explicitly opening a finding dive-in from the inspector pushes its URL; both the application Back button and browser Back restore the previous projection. A protected direct projection URL remains pending until the operator sets the tab-scoped token, then loads that exact workspace and projection. Direct projection URLs fail visibly when the workspace or projection does not exist.
 
 A finding dive-in uses `affectedNodeIds` to show the finding beside the bounded project concepts it affects. Claims, owners, recommendations, and document/code references remain detail annotations. The UI must not duplicate them as semantic nodes or edges merely to obtain a convenient layout.
 

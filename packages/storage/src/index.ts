@@ -24,6 +24,6 @@ export type {
 export { InMemoryHiveMapStore } from "./in-memory-store.js";
 export { describePostgresTarget } from "./postgres-target.js";
 export { PostgresHiveMapStore, openHiveMapStore } from "./postgres-store.js";
-export { POSTGRES_STORAGE_SCHEMA_VERSION, STORAGE_SCHEMA_VERSION } from "./schema.js";
+export { POSTGRES_STORAGE_SCHEMA_VERSION } from "./schema.js";
 export { StorageError } from "./storage-error.js";
 export { validateWorkspaceState } from "./store-support.js";

@@ -17,7 +17,7 @@ This spec is the source of truth for:
 
 This file is the intended long-term source of truth for the concrete Postgres runtime schema.
 
-The SQL below is the target Postgres schema contract. The current SQLite alpha implementation remains reference evidence only and is summarized at the end of this file.
+The SQL below is the target Postgres schema contract. The historical SQLite alpha direction remains decision evidence in ADR 0001 and repository history; no SQLite schema or migration contract is exported by the current storage package.
 
 ## Required Stores
 
@@ -43,7 +43,9 @@ The SQL below is the target Postgres schema contract. The current SQLite alpha i
 - Storage schema follows graph/capture/category/projection specs.
 - Storage failure must be visible.
 - No duplicate JSON shadow stores unless explicitly documented.
-- No hidden migration/fallback paths.
+- No runtime schema migrations or hidden fallback paths.
+- Postgres initialization supports only a fresh dedicated database or a database already marked with the exact current schema version. An existing different version is rejected before bootstrap DDL or data writes.
+- A release that changes the Postgres schema version requires the deployment/operator to remove the old database explicitly, initialize the current schema, and create new repository indexes and scans. HiveMap never converts or preserves data from an older runtime schema.
 - SQLite is not a parallel supported runtime backend for 1.0.
 - Storage initialization must create the schema explicitly.
 - Every runtime store adapter exposes an explicit live connection probe. The
@@ -70,15 +72,17 @@ The SQL below is the target Postgres schema contract. The current SQLite alpha i
 - Embedding writes require an explicit caller-supplied vector. HiveMap does not generate or silently regenerate embeddings on graph mutation in this slice.
 - Embeddings are not portable in the current runtime. A future snapshot must define whether compatible vectors travel or are regenerated explicitly.
 - The semantic graph remains the source of truth for findings. A finding is stored as a graph node with `type = 'finding'`, plus validated finding metadata inside `nodes.metadata`.
+- Each scan run's `finding_node_ids` must equal exactly the active graph finding-node ids whose `metadata.finding.originScanId` names that run. Workspace writes reject either an unlisted graph finding or a listed id owned by another run.
+- Every active finding `affectedNodeIds` entry must resolve to an active non-finding node in the same semantic graph. Any workspace command whose result would leave a dangling reference or a finding-to-finding affected reference is rejected atomically.
 - Scan comparisons are derived from completed scan runs and finding evidence. They do not get a dedicated runtime table.
 
 ## Target Postgres Schema Version
 
-The target Postgres runtime schema version is `16`.
+The target Postgres runtime schema version is `17`.
 
 The historical SQLite alpha implementation used schema version `4` and remains implementation evidence only, not a supported runtime or migration contract.
 
-`scan_profiles.profile_recipe` stores only the allowlisted, typed, profile-specific evidence recipe arrays defined by `ScanProfile` (for example duplicate-authority and missing-owner patterns). Reads reject unknown keys before hydrating a profile, so JSON data cannot override core identity, scope, criteria, ordering, or required outputs from their explicit columns. Schema 16 closes the prior Postgres round-trip gap where those recipe fields were discarded and a freshly created workspace then failed validation on its first mutation.
+`scan_profiles.profile_recipe` stores only the allowlisted, typed, profile-specific evidence recipe arrays defined by `ScanProfile` (for example duplicate-authority and missing-owner patterns). Reads reject unknown keys before hydrating a profile, so JSON data cannot override core identity, scope, criteria, ordering, or required outputs from their explicit columns.
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -92,7 +96,7 @@ CREATE TABLE schema_metadata (
 Required row for the Postgres runtime:
 
 - `key = 'schema_version'`
-- `value = '16'`
+- `value = '17'`
 
 ## Postgres Types
 
@@ -600,6 +604,8 @@ They are derived from:
 
 Comparisons remain persisted evidence and repeat-scan artifacts, not a second mutable source of runtime truth.
 
+The runtime may hard-delete any `scan_runs` row through an explicit scan-delete command. It must first remove the run's owned finding nodes, their incident edges, affected projection membership, projections made empty or rootless by the cascade, and category assignments targeting removed nodes, edges, or projections, then persist the valid resulting workspace state in the same serialized transaction. No store adapter performs an implicit or partial cascade.
+
 ## Repository Index Job Storage
 
 Repository index jobs do get a dedicated operational table.
@@ -710,13 +716,6 @@ It must exclude mutable repository-index execution/job state. It must also not e
 
 `workspaces.slug`, `workspaces.archived`, and `workspaces.updated_at` support lightweight workspace discovery without loading full graphs. They are metadata only; the semantic graph remains the source of truth for workspace contents.
 
-## Current SQLite Alpha Reference
+## Historical SQLite Alpha Reference
 
-The historical SQLite alpha implementation remains reference evidence only.
-
-Its concrete schema and migration behavior live in:
-
-- `packages/storage/src/index.ts`
-- `packages/storage/src/schema.ts`
-
-That implementation used schema version `4` and is not the target runtime destination or a supported migration source.
+The earlier SQLite direction remains historical evidence in `docs/adr/0001-alpha-product-direction.md` and repository history. It is not a runtime destination, exported storage version, schema contract, or supported migration source.

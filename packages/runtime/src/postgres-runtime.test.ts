@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { PostgresHiveMapStore } from "@hivemap/storage";
+import { CODE_QUALITY_PROFILE, createFindingNode, type InProgressScanRun } from "@hivemap/scans";
 
 import { HiveMapRuntime } from "./index.js";
 
@@ -168,6 +169,115 @@ describeIfPostgres("HiveMapRuntime on Postgres", () => {
       if (await store.workspaceExists(workspace.id)) {
         await store.deleteWorkspace(workspace.id);
       }
+    }
+  });
+
+  it("persists the complete finding-owned scan deletion cascade", async () => {
+    const workspaceId = `pg-runtime-${randomUUID()}`;
+    const workspace = {
+      id: workspaceId,
+      name: `Postgres Scan Cascade ${workspaceId}`,
+      createdAt: "2026-09-02T10:00:00.000Z",
+    };
+
+    try {
+      await runtime.createWorkspace({ workspace });
+      await runtime.applyGraphCommands({
+        workspaceId,
+        commands: [{
+          id: "cmd-component",
+          type: "node.create",
+          payload: { node: { id: "component-a", label: "Component A", type: "component" } },
+        }],
+      });
+      await store.upsertRepositoryIndex({
+        id: "repo-cascade",
+        workspaceId,
+        repositoryUrl: "https://example.com/hivemap/postgres-cascade.git",
+        requestedRef: "main",
+        resolvedCommit: "abc123",
+        mode: "safe",
+        stage: "completed",
+        requestedAt: "2026-09-02T10:00:00.000Z",
+        updatedAt: "2026-09-02T10:00:30.000Z",
+        completedAt: "2026-09-02T10:00:30.000Z",
+        actor: { agentId: "codex", tool: "test" },
+        stats: { fileCount: 1, chunkCount: 1, indexedBytes: 128 },
+      });
+      const finding = createFindingNode("scan-cascade", {
+        id: "finding-cascade",
+        label: "Cascade finding",
+        notes: "This finding and all of its owned presentation artifacts must be deleted atomically.",
+        fingerprint: "postgres-cascade-finding",
+        kind: "test-gap",
+        severity: "high",
+        confidence: "high",
+        criterionIds: ["missing-tests"],
+        sources: [{
+          sourceRef: { role: "verifies", source: "test", target: "packages/runtime/src/postgres-runtime.test.ts" },
+          claim: "The real PostgreSQL cascade requires direct coverage.",
+        }],
+        affectedNodeIds: ["component-a"],
+      });
+      const scan: InProgressScanRun = {
+        id: "scan-cascade",
+        profileId: CODE_QUALITY_PROFILE.id,
+        profileVersion: CODE_QUALITY_PROFILE.version,
+        repository: { root: "index:repo-cascade", repositoryIndexId: "repo-cascade", branch: "main", revision: "abc123" },
+        actor: { agentId: "codex", tool: "test" },
+        startedAt: "2026-09-02T10:01:00.000Z",
+        status: "in_progress",
+        appliedCriteria: [],
+        declaredOutputs: [],
+        findingNodeIds: [finding.id],
+        calibrationDecisions: [],
+      };
+      const seeded = await store.loadWorkspaceState(workspaceId);
+      await store.saveWorkspaceState({
+        ...seeded,
+        graph: { ...seeded.graph, nodes: [...seeded.graph.nodes, finding] },
+        scanRuns: [scan],
+      });
+      await runtime.applyGraphCommands({
+        workspaceId,
+        commands: [{
+          id: "cmd-finding-edge",
+          type: "edge.create",
+          payload: { edge: { id: "edge-finding-component", from: finding.id, to: "component-a", relation: "affects" } },
+        }],
+      });
+      await runtime.createProjection({
+        workspaceId,
+        input: { id: "projection-finding", name: "Finding dive-in", rootNodeId: finding.id },
+      });
+      await runtime.assignCategory({
+        workspaceId,
+        assignment: { id: "category-finding", targetType: "node", targetId: finding.id, categoryId: "risk", status: "active", provenance: "agent" },
+      });
+      await runtime.assignCategory({
+        workspaceId,
+        assignment: { id: "category-edge", targetType: "edge", targetId: "edge-finding-component", categoryId: "dependency", status: "active", provenance: "agent" },
+      });
+      await runtime.assignCategory({
+        workspaceId,
+        assignment: { id: "category-projection", targetType: "projection", targetId: "projection-finding", categoryId: "critique", status: "active", provenance: "agent" },
+      });
+
+      await expect(runtime.deleteScan({ workspaceId, scanId: scan.id })).resolves.toEqual({
+        deletedScanId: scan.id,
+        deletedFindingNodeIds: [finding.id],
+        deletedEdgeIds: ["edge-finding-component"],
+        deletedProjectionIds: ["projection-finding"],
+      });
+
+      await expect(store.loadWorkspaceState(workspaceId)).resolves.toMatchObject({
+        graph: { nodes: [{ id: "component-a" }], edges: [] },
+        scanRuns: [],
+        projections: [],
+        categoryAssignments: [],
+      });
+    } finally {
+      if (await store.workspaceExists(workspaceId)) await store.deleteWorkspace(workspaceId);
     }
   });
 

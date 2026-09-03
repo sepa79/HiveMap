@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { InMemoryHiveMapStore } from "@hivemap/storage";
-import { CODE_QUALITY_PROFILE, DOCUMENTATION_CONFLICTS_PROFILE } from "@hivemap/scans";
+import { CODE_QUALITY_PROFILE, DOCUMENTATION_CONFLICTS_PROFILE, createFindingNode } from "@hivemap/scans";
 
 import { type RepositoryIndexExecutor, HiveMapRuntime, RepositoryIndexExecutionError } from "./index.js";
 
@@ -104,6 +104,27 @@ describe("HiveMapRuntime", () => {
     });
 
     expect(projection.projection.visibleNodeIds).toEqual(["node-a"]);
+  });
+
+  it("rejects finding lifecycle mutations through generic graph commands", async () => {
+    await seedWorkspaceFixture();
+    const finding = createFindingNode("scan-a", {
+      id: "finding-a",
+      label: "Finding A",
+      notes: "This finding must use the scan-owned mutation path.",
+      fingerprint: "finding-a",
+      kind: "authority-gap",
+      severity: "high",
+      confidence: "high",
+      criterionIds: ["contract-drift"],
+      sources: [{ sourceRef: { role: "implements", source: "code", target: "src/a.ts" }, claim: "The boundary is bypassed." }],
+      affectedNodeIds: [],
+    });
+
+    await expect(runtime.applyGraphCommands({
+      workspaceId: "workspace-a",
+      commands: [{ id: "cmd-finding", type: "node.create", payload: { node: finding } }],
+    })).rejects.toMatchObject({ code: "FINDING_LIFECYCLE_COMMAND_FORBIDDEN" });
   });
 
   it("serializes concurrent whole-workspace mutations by workspace id", async () => {
@@ -1040,6 +1061,189 @@ describe("HiveMapRuntime", () => {
         instructions: expect.arrayContaining([expect.stringContaining("Calibration checkpoint: before creating findings")]),
       }),
     );
+  });
+
+  it("deletes an empty in-progress scan draft and frees its id", async () => {
+    await seedWorkspaceFixture();
+    await ensureCompletedRepositoryIndex("repo-index-delete-draft");
+    await startDocumentationScan("scan-delete-draft", "repo-index-delete-draft");
+    await runtime.recordScanCalibrationDecision({
+      workspaceId: "workspace-a",
+      scanId: "scan-delete-draft",
+      decision: "restart-scan",
+      rationale: "The provisional scan was superseded before any finding was created.",
+      recordedAt: "2026-08-20T18:47:00.000Z",
+    });
+
+    await expect(runtime.deleteScan({ workspaceId: "workspace-a", scanId: "scan-delete-draft" })).resolves.toEqual({
+      deletedScanId: "scan-delete-draft",
+      deletedFindingNodeIds: [],
+      deletedEdgeIds: [],
+      deletedProjectionIds: [],
+    });
+    await expect(runtime.listScanRuns({ workspaceId: "workspace-a" })).resolves.toEqual({ runs: [] });
+    await expect(startDocumentationScan("scan-delete-draft", "repo-index-delete-draft")).resolves.toBeUndefined();
+  });
+
+  it("deletes completed scans and atomically cascades through their graph-owned artifacts", async () => {
+    await seedWorkspaceFixture();
+    await ensureCompletedRepositoryIndex("repo-index-protected-scans");
+    await startDocumentationScan("scan-completed", "repo-index-protected-scans");
+    await completeDocumentationScan("scan-completed");
+
+    await expect(runtime.deleteScan({ workspaceId: "workspace-a", scanId: "scan-completed" })).resolves.toEqual({
+      deletedScanId: "scan-completed",
+      deletedFindingNodeIds: [],
+      deletedEdgeIds: [],
+      deletedProjectionIds: [],
+    });
+
+    await runtime.applyGraphCommands({
+      workspaceId: "workspace-a",
+      commands: [{ id: "concept-a", type: "node.create", payload: { node: { id: "concept-a", label: "Architecture", type: "concept" } } }],
+    });
+    await startDocumentationScan("scan-with-finding", "repo-index-protected-scans");
+    await runtime.recordScanCalibrationDecision({
+      workspaceId: "workspace-a",
+      scanId: "scan-with-finding",
+      decision: "continue",
+      rationale: "The scan is calibrated and can create its bounded finding.",
+      recordedAt: "2026-08-20T18:48:00.000Z",
+    });
+    await runtime.createScanFinding({
+      workspaceId: "workspace-a",
+      scanId: "scan-with-finding",
+      finding: {
+        id: "finding-protected",
+        label: "Stale architecture note",
+        notes: "The current architecture note contains stale behavior.",
+        fingerprint: "stale-architecture-note",
+        kind: "stale",
+        severity: "normal",
+        confidence: "medium",
+        criterionIds: ["stale-documentation"],
+        sources: [{
+          sourceRef: { role: "defines", source: "repo-doc", target: "docs/architecture.md" },
+          claim: "The documented behavior is stale.",
+        }],
+        affectedNodeIds: ["concept-a"],
+      },
+    });
+    await expect(runtime.applyGraphCommands({
+      workspaceId: "workspace-a",
+      commands: [{ id: "delete-affected-concept", type: "node.delete", payload: { id: "concept-a" } }],
+    })).rejects.toThrow("Finding finding-protected references missing affected node: concept-a");
+    expect((await runtime.getGraph({ workspaceId: "workspace-a" })).graph.nodes.map((node) => node.id))
+      .toEqual(["concept-a", "finding-protected"]);
+    await runtime.applyGraphCommands({
+      workspaceId: "workspace-a",
+      commands: [{
+        id: "edge-finding-concept",
+        type: "edge.create",
+        payload: { edge: { id: "edge-finding-concept", from: "finding-protected", to: "concept-a", relation: "affects" } },
+      }],
+    });
+    await runtime.createProjection({
+      workspaceId: "workspace-a",
+      input: {
+        id: "projection-finding-only",
+        name: "Finding dive-in",
+        rootNodeId: "finding-protected",
+      },
+    });
+    await runtime.assignCategory({
+      workspaceId: "workspace-a",
+      assignment: { id: "category-finding", targetType: "node", targetId: "finding-protected", categoryId: "risk", status: "active", provenance: "agent" },
+    });
+    await runtime.assignCategory({
+      workspaceId: "workspace-a",
+      assignment: { id: "category-edge", targetType: "edge", targetId: "edge-finding-concept", categoryId: "dependency", status: "active", provenance: "agent" },
+    });
+    await runtime.assignCategory({
+      workspaceId: "workspace-a",
+      assignment: { id: "category-projection", targetType: "projection", targetId: "projection-finding-only", categoryId: "critique", status: "active", provenance: "agent" },
+    });
+
+    await expect(runtime.deleteScan({ workspaceId: "workspace-a", scanId: "scan-with-finding" })).resolves.toEqual({
+      deletedScanId: "scan-with-finding",
+      deletedFindingNodeIds: ["finding-protected"],
+      deletedEdgeIds: ["edge-finding-concept"],
+      deletedProjectionIds: ["projection-finding-only"],
+    });
+    await expect(runtime.getWorkspace("workspace-a")).resolves.toMatchObject({
+      state: {
+        graph: { nodes: [{ id: "concept-a" }], edges: [] },
+        categoryAssignments: [],
+        projections: [],
+        scanRuns: [],
+      },
+    });
+  });
+
+  it("rejects cross-scan finding references so every scan remains deletable", async () => {
+    await seedWorkspaceFixture();
+    await ensureCompletedRepositoryIndex("repo-index-cross-scan-findings");
+    await runtime.applyGraphCommands({
+      workspaceId: "workspace-a",
+      commands: [{ id: "concept-cross-scan", type: "node.create", payload: { node: { id: "concept-cross-scan", label: "Architecture", type: "concept" } } }],
+    });
+    await startDocumentationScan("scan-a", "repo-index-cross-scan-findings");
+    await runtime.recordScanCalibrationDecision({
+      workspaceId: "workspace-a",
+      scanId: "scan-a",
+      decision: "continue",
+      rationale: "The scan is calibrated for its bounded finding.",
+      recordedAt: "2026-09-02T10:01:00.000Z",
+    });
+    await runtime.createScanFinding({
+      workspaceId: "workspace-a",
+      scanId: "scan-a",
+      finding: {
+        id: "finding-a",
+        label: "First scan finding",
+        notes: "The first scan owns this finding.",
+        fingerprint: "first-scan-finding",
+        kind: "stale",
+        severity: "normal",
+        confidence: "high",
+        criterionIds: ["stale-documentation"],
+        sources: [{ sourceRef: { role: "defines", source: "repo-doc", target: "docs/a.md" }, claim: "The documentation is stale." }],
+        affectedNodeIds: ["concept-cross-scan"],
+      },
+    });
+    await startDocumentationScan("scan-b", "repo-index-cross-scan-findings");
+    await runtime.recordScanCalibrationDecision({
+      workspaceId: "workspace-a",
+      scanId: "scan-b",
+      decision: "continue",
+      rationale: "The second scan is calibrated for its own bounded findings.",
+      recordedAt: "2026-09-02T10:02:00.000Z",
+    });
+
+    await expect(runtime.createScanFinding({
+      workspaceId: "workspace-a",
+      scanId: "scan-b",
+      finding: {
+        id: "finding-b",
+        label: "Invalid cross-scan finding",
+        notes: "A finding cannot treat another scan-owned finding as an affected concept.",
+        fingerprint: "invalid-cross-scan-finding",
+        kind: "stale",
+        severity: "normal",
+        confidence: "high",
+        criterionIds: ["stale-documentation"],
+        sources: [{ sourceRef: { role: "defines", source: "repo-doc", target: "docs/a.md" }, claim: "The second finding is invalid." }],
+        affectedNodeIds: ["finding-a"],
+      },
+    })).rejects.toThrow("Finding finding-b cannot reference another finding as an affected node: finding-a");
+
+    await expect(runtime.deleteScan({ workspaceId: "workspace-a", scanId: "scan-a" })).resolves.toMatchObject({
+      deletedScanId: "scan-a",
+      deletedFindingNodeIds: ["finding-a"],
+    });
+    await expect(runtime.listScanRuns({ workspaceId: "workspace-a" })).resolves.toMatchObject({
+      runs: [{ id: "scan-b" }],
+    });
   });
 
   it("rejects findings-bearing completion while calibration is still ambiguous", async () => {
@@ -2367,6 +2571,55 @@ describe("HiveMapRuntime", () => {
       "applied",
     );
     expect((await runtime.getGraph({ workspaceId: "workspace-a" })).graph.nodes).toHaveLength(1);
+  });
+
+  it("atomically attaches an approved proposed finding to its owning scan", async () => {
+    await seedWorkspaceFixture();
+    await ensureCompletedRepositoryIndex("repo-index-proposed-finding");
+    await startDocumentationScan("scan-proposed-finding", "repo-index-proposed-finding");
+    await runtime.recordScanCalibrationDecision({
+      workspaceId: "workspace-a",
+      scanId: "scan-proposed-finding",
+      decision: "continue",
+      rationale: "The proposed finding is based on calibrated bounded evidence.",
+      recordedAt: "2026-08-20T18:48:00.000Z",
+    });
+    const state = await store.loadWorkspaceState("workspace-a");
+    await store.saveWorkspaceState({ ...state, capturePolicy: { id: "capture-policy-default", mode: "proposed" } });
+    const finding = createFindingNode("scan-proposed-finding", {
+      id: "finding-proposed",
+      label: "Proposed stale documentation",
+      notes: "The proposed finding must remain attached to its scan.",
+      fingerprint: "proposed-stale-documentation",
+      kind: "stale",
+      severity: "normal",
+      confidence: "medium",
+      criterionIds: ["stale-documentation"],
+      sources: [{ sourceRef: { role: "defines", source: "repo-doc", target: "docs/a.md" }, claim: "The claim is stale." }],
+      affectedNodeIds: ["concept-proposed"],
+    });
+    await runtime.createProposal({
+      workspaceId: "workspace-a",
+      proposal: {
+        id: "proposal-finding",
+        createdAt: "2026-08-20T18:49:00.000Z",
+        sourceFeedbackIds: [],
+        graphCommands: [
+          { id: "cmd-proposed-concept", type: "node.create", payload: { node: { id: "concept-proposed", label: "Proposed concept", type: "concept" } } },
+          { id: "cmd-proposed-finding", type: "node.create", payload: { node: finding } },
+        ],
+        explanation: "Create the calibrated finding through approval.",
+        status: "pending",
+      },
+    });
+    await runtime.approveProposal({ workspaceId: "workspace-a", proposalId: "proposal-finding" });
+
+    await runtime.applyProposal({ workspaceId: "workspace-a", proposalId: "proposal-finding" });
+
+    const persisted = (await runtime.getWorkspace("workspace-a")).state;
+    expect(persisted.graph.nodes).toContainEqual(finding);
+    expect(persisted.graph.nodes).toContainEqual({ id: "concept-proposed", label: "Proposed concept", type: "concept" });
+    expect(persisted.scanRuns.find((run) => run.id === "scan-proposed-finding")?.findingNodeIds).toEqual([finding.id]);
   });
 
   it("runs two agent scans and compares resolved findings as evidence", async () => {
