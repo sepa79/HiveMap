@@ -4,6 +4,8 @@
 
 Accepted
 
+Schema-version policy amended on 2026-09-07: the first released database schema is `1`. Earlier development markers do not define supported release versions. Future versions may introduce explicit migrations; the original blanket reset-only policy is superseded.
+
 Portability-specific statements in this ADR were superseded on 2026-08-31: the ZIP implementation and every current import/export surface were removed. The Postgres runtime and container decisions remain accepted. Future full-project portability is deferred to a separately specified streaming NDJSON contract.
 
 ## Context
@@ -27,7 +29,7 @@ HiveMap 1.0 runtime direction moves to Postgres as the only supported runtime da
 
 HiveMap will not implement a direct live SQLite-to-Postgres migration path. The former ZIP migration boundary was removed; no application-level import/export bridge is currently supported.
 
-HiveMap also does not migrate Postgres runtime schemas in place. Storage initialization accepts only a fresh dedicated database or a database already carrying the exact current schema version. A release that changes that version requires an explicit database reset followed by new repository indexes and scans; startup against any older or otherwise different schema fails before bootstrap DDL or data writes.
+The first released Postgres schema is `1`. Its initializer accepts a fresh dedicated database or an existing schema `1` database; any other version fails before bootstrap DDL or data writes. Pre-release databases are not supported migration sources. Future releases may define and implement explicit versioned migrations with matching storage contracts and tests; no such migration chain is included in this release.
 
 The near-term local runtime target is one self-contained container that bundles the HiveMap API, built web assets, Postgres, and the built-in repository indexing and scan handlers. These handlers are normal application capabilities, not a runtime plugin system. Optional persistence may come from a mounted filesystem path for Postgres data, but the default user experience should be: run one container and HiveMap works.
 
@@ -56,7 +58,7 @@ The runtime/storage refactor must introduce an explicit storage interface so run
 - SQLite stops being a supported runtime destination instead of remaining a parallel backend.
 - Storage and runtime docs must stop presenting SQLite as the intended end state.
 - No application-level SQLite migration or workspace portability surface is carried into the current runtime.
-- No Postgres schema migration chain is carried in the runtime. Schema-version changes deliberately discard prior runtime data and require fresh indexes and scans.
+- The initial release has no preceding supported Postgres schema to migrate. Future migration support remains an explicit contract decision rather than being permanently forbidden.
 - The repository needs explicit container startup, initialization, and healthcheck behavior before HiveForge work.
 - Local runtime packaging prioritizes one self-contained container over user-managed multi-service local setup.
 - Repository indexing and scan handlers ship as built-in HiveMap capabilities without a plugin-loading contract.

@@ -43,9 +43,9 @@ The SQL below is the target Postgres schema contract. The historical SQLite alph
 - Storage schema follows graph/capture/category/projection specs.
 - Storage failure must be visible.
 - No duplicate JSON shadow stores unless explicitly documented.
-- No runtime schema migrations or hidden fallback paths.
+- The first released database schema is version `1`; there are no earlier supported release schemas. This release has no migration chain or hidden fallback paths.
 - Postgres initialization supports only a fresh dedicated database or a database already marked with the exact current schema version. An existing different version is rejected before bootstrap DDL or data writes.
-- A release that changes the Postgres schema version requires the deployment/operator to remove the old database explicitly, initialize the current schema, and create new repository indexes and scans. HiveMap never converts or preserves data from an older runtime schema.
+- Later schema versions may introduce explicit, versioned migrations after their contracts and verification are defined. This release neither implements those future migrations nor promises that every future version requires a reset. Pre-release development databases with other version markers are not migration sources for schema `1`; prepare a fresh dedicated database for this first release.
 - SQLite is not a parallel supported runtime backend for 1.0.
 - Storage initialization must create the schema explicitly.
 - Every runtime store adapter exposes an explicit live connection probe. The
@@ -78,9 +78,9 @@ The SQL below is the target Postgres schema contract. The historical SQLite alph
 
 ## Target Postgres Schema Version
 
-The target Postgres runtime schema version is `17`.
+The first released Postgres runtime schema version is `1`.
 
-The historical SQLite alpha implementation used schema version `4` and remains implementation evidence only, not a supported runtime or migration contract.
+Earlier SQLite and Postgres development version markers are implementation history only, not preceding released schemas or supported migration contracts.
 
 `scan_profiles.profile_recipe` stores only the allowlisted, typed, profile-specific evidence recipe arrays defined by `ScanProfile` (for example duplicate-authority and missing-owner patterns). Reads reject unknown keys before hydrating a profile, so JSON data cannot override core identity, scope, criteria, ordering, or required outputs from their explicit columns.
 
@@ -96,7 +96,7 @@ CREATE TABLE schema_metadata (
 Required row for the Postgres runtime:
 
 - `key = 'schema_version'`
-- `value = '17'`
+- `value = '1'`
 
 ## Postgres Types
 

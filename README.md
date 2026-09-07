@@ -6,11 +6,11 @@ HiveMap is a local, AI-assisted workspace for turning conversations, projects, i
 
 Repository review is one supported workflow, not the definition of the product. In that workflow an agent scans a repository; HiveMap supplies repeatable scan instructions, validates evidence, stores findings, and renders review projections. The same graph and projection model can also map an AI conversation, explore an idea, explain a system, or maintain a project knowledge map.
 
-The current alpha is intended for local evaluation on real repositories. It is not a hosted multi-user service.
+Version `0.2.0-alpha.1` is intended for local, single-operator evaluation on real repositories. It is not a hosted multi-user service. See [CHANGELOG.md](CHANGELOG.md) for changes and compatibility limits.
 
-The next implementation track moves HiveMap toward a self-contained Postgres-backed container runtime, validated locally in Docker and then through HiveForge. The repository now includes the Postgres runtime adapter, Postgres-only application entrypoints, focused Postgres integration coverage, and a working single-image local Docker runtime for the API, built web UI, and bundled Postgres.
+The base runtime is implemented and validated locally in Docker and through HiveForge: one image contains Postgres, the API, protected Streamable HTTP MCP, the built web UI, and repository indexing/scan handlers. REST and MCP share the same typed runtime operations.
 
-The intended local experience is one container that runs HiveMap with its bundled dependencies rather than a user-managed database/file-path setup.
+The local container starts its bundled database; a mounted data directory preserves state across restarts. The next feature track focuses on scan calibration, repository understanding, and repeatable finding validation.
 
 ## What You Can Test
 
@@ -88,7 +88,7 @@ HIVEMAP_AUTH_TOKEN='replace-with-a-long-random-token' docker compose up --build
 
 That path bundles Postgres with the REST API, stateless Streamable HTTP MCP endpoint, built web assets, and HiveMap's built-in repository indexing and scan handlers in one container, with optional Postgres persistence mounted at `./.local/hivemap-postgres`. Open `http://127.0.0.1:8787/` and enter the same token in the UI. The UI keeps it only for the current tab in `sessionStorage` and offers an explicit clear action. REST and MCP use `Authorization: Bearer <token>`; the public surface is limited to the UI assets and `GET /health`. The MCP endpoint is `http://127.0.0.1:8787/mcp`.
 
-HiveMap never migrates a persisted Postgres schema. A storage-schema version change requires stopping the old runtime, explicitly removing its HiveMap-owned database directory or volume, and starting the new version on a clean database; repository indexes and scans are then created again.
+This release starts the supported Postgres schema history at version `1`. Start with a fresh dedicated database, or reuse a database already on schema `1`. Earlier development databases are not supported migration sources. Future schema versions may add explicit migrations; none are needed or implemented for this first release. See [the storage contract](docs/specs/storage-format.md).
 
 The HTTP runtime accepts exactly one bearer-token source. Local commands and repository Compose use direct `HIVEMAP_AUTH_TOKEN` (or `--auth-token`); installed secret mounts use `HIVEMAP_AUTH_TOKEN_FILE` (or `--auth-token-file`). Supplying both sources, or an unreadable or empty token file, fails startup.
 
@@ -132,7 +132,7 @@ The active vector slice accepts explicit caller-supplied concept embeddings and 
 
 ## Legacy Local MCP Adapter
 
-The repo still carries a legacy local stdio MCP adapter for development workflows that explicitly need agent wiring before the hosted/container MCP shape exists. It is transitional and not part of the target local runtime contract. Replace the example path with an absolute path on your machine:
+The repo retains a legacy stdio MCP adapter for explicitly selected local development workflows. The installed runtime uses Streamable HTTP at `/mcp`; stdio is transitional. Replace the example path with an absolute path on your machine:
 
 ```json
 {

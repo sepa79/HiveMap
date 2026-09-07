@@ -26,16 +26,18 @@ Design HiveMap 1.0 around:
 ## Canonical Docs
 
 - `../AGENTS.md`: contributor rules and SSOT order.
+- `../CHANGELOG.md`: versioned changes and compatibility notes.
 - `ENGINEERING_RULES.md`: mandatory implementation boundaries, file shape, responsibility headers, and verification rules.
 - `architecture.md`: system shape and module boundaries.
 - `product/vision.md`: product intent and capture model.
 - `design/first-pass-design.md`: first-pass design based on POC learnings.
 - `design/interaction-model.md`: human/agent interaction model.
 - `design/technical-design.md`: first technical design.
-- `design/mvp-slice.md`: first implementation slice.
+- `design/mvp-slice.md`: first implementation slice, aligned to the current alpha runtime; not the full release scope.
 - `design/postgres-container-hiveforge-plan.md`: tracked delivery plan for the Postgres, container, and HiveForge upgrade path.
 - `specs/`: contracts that implementation must follow.
 - `evidence/`: bounded visual and interaction-review artifacts for changed UI behavior.
+- `evidence/release-0.2.0-alpha.1-acceptance.md`: release-candidate identity and local/HiveForge acceptance results.
 - `ai/`: command, review, Jester, and HiveMind workflow rules.
 - `ai/KNOWLEDGE_MAP_WORKFLOW.md`: repeatable workflow for correlating concepts with docs, code, tests, assets, and HiveMind.
 - `specs/repository-scan.md`: repeatable agent scans, finding evidence, and before/after comparison.

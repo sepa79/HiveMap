@@ -1,6 +1,6 @@
 # HiveMap First-Pass Design
 
-This document turns the POC learnings into a first product design for HiveMap.
+This document preserves the first product design derived from the POC. Its initial implementation sequence is historical; current runtime and public contracts are owned by `docs/architecture.md` and `docs/specs/*`.
 
 ## Product Thesis
 
@@ -26,7 +26,7 @@ HiveMap is not a transcript parser and not a diagram editor.
 3. Use categories to surface the extra project semantics: decisions, risks, rules, dependencies, stale concepts, and learnings.
 4. Default capture mode is delegated.
 5. MCP is the primary agent interface.
-6. SQLite is the first real persistence layer.
+6. SQLite was the first alpha persistence layer. The current runtime uses Postgres only; see [the storage contract](../specs/storage-format.md).
 7. Core packages and tests come before API/UI.
 
 ## Core User Experience

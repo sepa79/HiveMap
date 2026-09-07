@@ -1,6 +1,6 @@
 # MVP Slice
 
-This is the first implementation slice after the POC.
+This records the first implementation slice after the POC, with its runtime requirements aligned to the current alpha. The delivered Postgres/container scope and verification are tracked in [the runtime plan](postgres-container-hiveforge-plan.md); public behavior is owned by `docs/specs/*`.
 
 ## Goal
 
@@ -25,16 +25,18 @@ Build a local-first HiveMap alpha that proves:
 - Dive-in projection.
 - Proposal creation and apply/reject.
 - MCP tools for graph/projection/category/proposal operations.
-- SQLite local persistence.
+- Postgres persistence behind an explicit storage interface.
+- A self-contained local container for Postgres, REST, Streamable HTTP MCP, and the web UI.
+- One required bearer token shared by REST and MCP; public UI assets and health.
 
 ### Not Required
 
-- Authentication.
+- Multi-user authorization; the alpha uses one operator token.
 - Multi-user collaboration.
 - Cloud sync.
 - Automatic transcript ingestion.
 - Advanced layout AI.
-- Production deployment.
+- A hosted multi-user production service; local Docker and controlled HiveForge deployment are delivered in the runtime plan.
 - Full HiveMind integration.
 
 ## User Story

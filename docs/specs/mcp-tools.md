@@ -2,6 +2,8 @@
 
 Draft MCP surface for agents. MCP is the primary HiveMap agent interface for alpha.
 
+The MCP initialization response identifies the server as `hivemap` and reads its version from `apps/mcp/package.json`. The package metadata owns the release version; the SDK adapter must not maintain a separate version literal.
+
 ## Required Tools
 
 - `workspace_list`

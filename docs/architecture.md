@@ -81,6 +81,8 @@ Near-term engineering direction is:
 
 Workspace import/export is not part of the current runtime. HiveMap should not carry SQLite forward as a supported 1.0 runtime backend and does not provide an application-level migration bridge from the historical SQLite alpha.
 
+The first released Postgres schema is `1`. Earlier development markers are not supported release versions. Future schema versions may add explicit migrations under `docs/specs/storage-format.md`; the first release has no migration chain.
+
 The deferred portability direction is one versioned, incrementally validated NDJSON stream rather than an archive. A future full-project snapshot must carry canonical workspace state plus completed repository-index retrieval facts needed to continue agent work without repeating the semantic scan. Operational job state remains non-portable, and the editable repository checkout remains Git-owned: a receiving environment fetches the recorded immutable commit or receives a standard Git bundle through an explicit Git workflow.
 
 `pgvector` remains part of the target backend direction, but embedding generation and vector-powered product behavior are a deferred workstream rather than a blocker for the base runtime/container slice.

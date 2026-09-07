@@ -6,6 +6,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod/v4";
+import packageMetadata from "../package.json" with { type: "json" };
 
 import { SCAN_PROFILE_OVERLAY_SYMPTOM_VALUES } from "@hivemap/api-contracts";
 import { PROJECT_SOURCE_ROLE_VALUES, PROJECT_SOURCE_TYPE_VALUES } from "@hivemap/graph-core";
@@ -113,7 +114,7 @@ const boundaryMapArtifactSchema = z.object({
 export function createHiveMapMcpServer(runtime: HiveMapRuntime): McpServer {
   const server = new McpServer({
     name: "hivemap",
-    version: "0.1.0",
+    version: packageMetadata.version,
   });
 
   registerTool(server, runtime, "workspace_list", {

@@ -1,6 +1,6 @@
 # Technical Design First Pass
 
-This is a first technical design, not an implementation plan lock-in.
+This records the first technical design. Package boundaries remain useful design context; the illustrative API and implementation sequence below are historical, not current public contracts. Use [architecture](../architecture.md), [REST](../specs/rest-api.md), and [MCP](../specs/mcp-tools.md) for the current owners.
 
 ## Architecture Shape
 
@@ -72,7 +72,7 @@ Owns persistence adapters.
 
 Runtime direction is Postgres behind explicit interfaces.
 
-The current SQLite alpha implementation is transitional evidence, not the intended 1.0 backend destination.
+The historical SQLite alpha is evidence only. Postgres is the implemented runtime backend; no SQLite runtime adapter or migration bridge is supported.
 
 ### `api-contracts`
 
@@ -96,7 +96,7 @@ Browser UI for maps, projections, feedback, and proposal review.
 
 ## Storage First Pass
 
-Use explicit storage interfaces so the runtime can move to Postgres without transport or domain drift.
+The runtime uses explicit storage interfaces backed by Postgres, preserving the shared transport and domain behavior.
 
 Reasoning:
 

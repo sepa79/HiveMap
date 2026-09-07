@@ -172,16 +172,16 @@ describeIfPostgres("PostgresHiveMapStore", () => {
     await store.saveWorkspaceState(state);
 
     try {
-      await introspectionPool.query("UPDATE schema_metadata SET value = '16' WHERE key = 'schema_version'");
+      await introspectionPool.query("UPDATE schema_metadata SET value = '999' WHERE key = 'schema_version'");
 
       await expect(store.initialize()).rejects.toThrow(
-        "Postgres storage schema version 16 is not supported; reset the database for schema 17",
+        "Postgres storage schema version 999 is not supported; reset the database for schema 1",
       );
       await expect(introspectionPool.query<{ value: string }>("SELECT value FROM schema_metadata WHERE key = 'schema_version'"))
-        .resolves.toMatchObject({ rows: [{ value: "16" }] });
+        .resolves.toMatchObject({ rows: [{ value: "999" }] });
       await expect(store.loadWorkspaceState(workspaceId)).resolves.toEqual(state);
     } finally {
-      await introspectionPool.query("UPDATE schema_metadata SET value = '17' WHERE key = 'schema_version'");
+      await introspectionPool.query("UPDATE schema_metadata SET value = '1' WHERE key = 'schema_version'");
       await store.deleteWorkspace(workspaceId);
     }
   });

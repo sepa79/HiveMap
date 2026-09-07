@@ -1,6 +1,8 @@
 # Postgres, Container, HiveForge Plan
 
-Last updated: 2026-09-01
+Last updated: 2026-09-07
+
+Status: base runtime/container/HiveForge milestone complete. The unchecked embedding and post-base calibration items below are deferred feature work, not blockers for `0.2.0-alpha.1`. The original implementation checklist remains delivery history.
 
 Portability amendment: the former ZIP implementation and all current import/export surfaces were removed. Full-project portability is deferred to a separately specified streaming NDJSON contract and is not an active deliverable in this plan.
 
@@ -13,7 +15,7 @@ Upgrade HiveMap from the local-first SQLite alpha shape to a container-friendly 
 - [x] HiveMind is the default durable memory layer for meaningful HiveMap development work when available.
 - [x] Runtime storage direction is `Postgres + pgvector`.
 - [x] Runtime storage does not expose a migration/import/export bridge; future full-project portability is deferred.
-- [x] Runtime storage contains no Postgres schema migrations; a schema-version change requires an explicit database reset followed by new indexes and scans.
+- [x] The first released Postgres schema is `1`, with no preceding supported release schemas or migration chain. Later versions may introduce explicit migrations under the storage contract.
 - [x] Local Docker runtime comes before HiveForge integration.
 - [x] HiveForge integration comes before hosted Streamable HTTP MCP work.
 - [x] Embedding generation and vector-assisted product features were deferred from the base execution track and can be pulled forward afterward as a separate slice.
@@ -36,7 +38,7 @@ Upgrade HiveMap from the local-first SQLite alpha shape to a container-friendly 
 - [x] This tracked execution path covers Postgres runtime, containerization, local Docker validation, and HiveForge readiness.
 - [x] The base Postgres/container/HiveForge milestone does not include provider-backed embedding refresh/backfill or bundled model-serving. The removed experiment is archived as restorable evidence rather than active runtime scope.
 - [x] `pgvector` remains part of the target backend direction, but vector-powered behavior is not required to complete the base runtime/container milestone.
-- [x] Once the remaining Phase 4 and Phase 6 work is closed, the next deliberate feature track should help agents calibrate scans, understand unfamiliar repositories, and validate findings from repository-index structural facts rather than from PocketHive-specific heuristics.
+- [x] Phases 4 and 6 are closed. The next deliberate feature track helps agents calibrate scans, understand unfamiliar repositories, and validate findings from repository-index structural facts rather than from PocketHive-specific heuristics.
 
 ## Phase 0 — Workflow Baseline
 
@@ -75,7 +77,7 @@ Upgrade HiveMap from the local-first SQLite alpha shape to a container-friendly 
 - [x] Make persistence optional through a mounted filesystem path for Postgres data.
 - [x] Keep local startup free of user-managed DB URLs or DB file paths.
 - [x] Add healthcheck behavior and explicit runtime env vars for the container-owned runtime only.
-- [x] Define clean startup/init behavior for a fresh Postgres database and fail-fast rejection of every non-current schema version; the runtime contains no schema migrations.
+- [x] Define clean startup/init behavior for a fresh Postgres database and fail-fast rejection of unsupported schema versions. The initial release accepts only schema `1`; future migration support is a separate explicit contract change.
 - [x] Verify local container workflow for workspace create, graph operations, and projection create/read.
 - [x] Verify container restart behavior against a persisted Postgres volume without stale startup state.
 
@@ -121,8 +123,9 @@ Current state:
 - The old test volume used schema 15 and was intentionally not reused. The 67 MB
   data directory was preserved as `data.pre-schema16-20260828T2136Z`, a fresh
   HiveMap-owned Postgres directory was initialized, and the service stabilized
-  at `1/1`. Current runtime policy is stricter: no Postgres schema migration code
-  exists, and any non-current version requires an explicit database reset.
+  at `1/1`. Those numbers are historical development markers. The first released
+  schema is now `1`; this release requires a fresh database and does not migrate
+  development data. Future released versions may add explicit migrations.
 - Remote e2e passed public health/UI, REST and MCP `401` behavior, authenticated
   MCP mutation observed through REST, exact deployed image digest, and state
   persistence across a forced Swarm service restart.
