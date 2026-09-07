@@ -1,0 +1,1679 @@
+diff --git b/apps/api/src/index.test.ts a/apps/api/src/index.test.ts
+index e61c7dc..c54a07b 100644
+--- b/apps/api/src/index.test.ts
++++ a/apps/api/src/index.test.ts
+@@ -5,7 +5,7 @@ import { join } from "node:path";
+ import { Readable } from "node:stream";
+ import { afterEach, beforeEach, describe, expect, it } from "vitest";
+ 
+-import { type RepositoryIndexExecutor } from "@hivemap/runtime";
++import { type EmbeddingProvider, type RepositoryIndexExecutor } from "@hivemap/runtime";
+ import { InMemoryHiveMapStore } from "@hivemap/storage";
+ 
+ import { createApiRequestHandler, type ApiRequestHandler } from "./index.js";
+@@ -18,6 +18,7 @@ beforeEach(async () => {
+   await store.initialize();
+   handleRequest = createApiRequestHandler({
+     store,
++    embeddingProviders: { test: createTestEmbeddingProvider() },
+     repositoryIndexExecutor: createTestRepositoryIndexExecutor(),
+   });
+ });
+@@ -532,6 +533,71 @@ describe("api server", () => {
+     });
+   });
+ 
++  it("refreshes and backfills concept embeddings through REST", async () => {
++    await createWorkspaceWithNode();
++
++    await postJson("/workspaces/workspace-a/commands", {
++      commands: [
++        {
++          id: "cmd-b",
++          type: "node.create",
++          payload: { node: { id: "node-b", label: "Beta", notes: "near alpha", type: "concept" } },
++        },
++      ],
++    });
++
++    const refreshResponse = await postJson("/workspaces/workspace-a/concepts/node-a/embedding-refresh", {
++      model: "test:nomic-embed-text",
++    });
++    expect(refreshResponse.status).toBe(200);
++    expect(parseJson(refreshResponse)).toEqual({
++      embedding: {
++        workspaceId: "workspace-a",
++        nodeId: "node-a",
++        model: "test:nomic-embed-text",
++        dimensions: 2,
++        contentDigest: expect.any(String),
++        updatedAt: expect.any(String),
++      },
++      provider: "test",
++      status: "refreshed",
++    });
++
++    const backfillResponse = await postJson("/workspaces/workspace-a/concept-embeddings/backfill", {
++      model: "test:nomic-embed-text",
++    });
++    expect(backfillResponse.status).toBe(200);
++    expect(parseJson(backfillResponse)).toEqual({
++      workspaceId: "workspace-a",
++      model: "test:nomic-embed-text",
++      provider: "test",
++      summary: {
++        totalConcepts: 2,
++        selectedConcepts: 2,
++        refreshed: 1,
++        unchanged: 1,
++      },
++      results: [
++        {
++          nodeId: "node-a",
++          label: "Alpha",
++          status: "unchanged",
++          dimensions: 2,
++          contentDigest: expect.any(String),
++          updatedAt: expect.any(String),
++        },
++        {
++          nodeId: "node-b",
++          label: "Beta",
++          status: "refreshed",
++          dimensions: 2,
++          contentDigest: expect.any(String),
++          updatedAt: expect.any(String),
++        },
++      ],
++    });
++  });
++
+   it("fails clearly for invalid graph commands", async () => {
+     await createWorkspace();
+ 
+@@ -785,6 +851,15 @@ async function createCompletedRepositoryIndex(): Promise<void> {
+   expect(executeResponse.status).toBe(200);
+ }
+ 
++function createTestEmbeddingProvider(): EmbeddingProvider {
++  return {
++    id: "test",
++    async embed(request) {
++      return request.inputs.map((input) => (input.includes("Alpha") ? [1, 0] : [0.9, 0.1]));
++    },
++  };
++}
++
+ function createTestRepositoryIndexExecutor(): RepositoryIndexExecutor {
+   return async ({ workspaceId, indexId }) => ({
+     resolvedCommit: "0123456789abcdef0123456789abcdef01234567",
+diff --git b/apps/api/src/index.ts a/apps/api/src/index.ts
+index a247b76..5ff1287 100644
+--- b/apps/api/src/index.ts
++++ a/apps/api/src/index.ts
+@@ -4,6 +4,7 @@ import { extname, join, normalize, resolve } from "node:path";
+ 
+ import {
+   type ApplyGraphCommandsRequest,
++  type BackfillConceptEmbeddingsRequest,
+   type ListSimilarConceptsRequest,
+   type CreateProjectionRequest,
+   type CreateProposalRequest,
+@@ -11,6 +12,7 @@ import {
+   type ExecuteRepositoryIndexRequest,
+   type GetRepositoryIndexRequest,
+   type RecordFeedbackRequest,
++  type RefreshConceptEmbeddingRequest,
+   type CompleteScanRequest,
+   type CreateScanFindingRequest,
+   type ExportWorkspaceRequest,
+@@ -26,12 +28,13 @@ import {
+   type UpdateFindingRequest,
+   type ValidateScanFindingRequest,
+ } from "@hivemap/api-contracts";
+-import { HiveMapRuntime, RuntimeError, type RepositoryIndexExecutor } from "@hivemap/runtime";
++import { HiveMapRuntime, RuntimeError, type EmbeddingProviderRegistry, type RepositoryIndexExecutor } from "@hivemap/runtime";
+ import { StorageError, type HiveMapStore } from "@hivemap/storage";
+ 
+ export type ApiServerOptions = {
+   store: HiveMapStore;
+   staticRoot?: string;
++  embeddingProviders?: EmbeddingProviderRegistry;
+   repositoryIndexExecutor?: RepositoryIndexExecutor;
+ };
+ 
+@@ -44,6 +47,7 @@ export function createApiServer(options: ApiServerOptions): Server {
+ export function createApiRequestHandler(options: ApiServerOptions): ApiRequestHandler {
+   const runtime = new HiveMapRuntime({
+     store: options.store,
++    ...(options.embeddingProviders === undefined ? {} : { embeddingProviders: options.embeddingProviders }),
+     ...(options.repositoryIndexExecutor === undefined ? {} : { repositoryIndexExecutor: options.repositoryIndexExecutor }),
+   });
+   return (request, response) => {
+@@ -212,6 +216,24 @@ async function handleRequest(
+       return;
+     }
+ 
++    if (
++      method === "POST" &&
++      segments[2] === "concepts" &&
++      segments[3] !== undefined &&
++      segments[4] === "embedding-refresh" &&
++      segments.length === 5
++    ) {
++      const body = await readJson<Omit<RefreshConceptEmbeddingRequest, "workspaceId" | "nodeId">>(request);
++      writeJson(response, 200, await runtime.refreshConceptEmbedding({ workspaceId, nodeId: segments[3], ...body }));
++      return;
++    }
++
++    if (method === "POST" && segments[2] === "concept-embeddings" && segments[3] === "backfill" && segments.length === 4) {
++      const body = await readJson<Omit<BackfillConceptEmbeddingsRequest, "workspaceId">>(request);
++      writeJson(response, 200, await runtime.backfillConceptEmbeddings({ workspaceId, ...body }));
++      return;
++    }
++
+     if (
+       method === "GET" &&
+       segments[2] === "concepts" &&
+@@ -674,6 +696,7 @@ function mapRuntimeErrorStatus(error: RuntimeError): number {
+   switch (error.code) {
+     case "NODE_NOT_FOUND":
+     case "SIMILARITY_NODE_NOT_FOUND":
++    case "EMBEDDING_CONCEPT_NODE_NOT_FOUND":
+     case "SCAN_CRITERION_NOT_FOUND":
+     case "CONCEPT_EMBEDDING_MISSING":
+       return 404;
+@@ -687,6 +710,10 @@ function mapRuntimeErrorStatus(error: RuntimeError): number {
+     case "CONCEPT_EMBEDDING_STALE":
+       return 409;
+     case "REPOSITORY_INDEX_MODE_UNAVAILABLE":
++    case "EMBEDDING_MODEL_REF_INVALID":
++    case "OLLAMA_BASE_URL_INVALID":
++    case "OLLAMA_MODEL_INVALID":
++    case "OLLAMA_INPUTS_EMPTY":
+     case "SCAN_PROFILE_OVERLAY_INVALID":
+     case "UNSUPPORTED_EMBEDDING_NODE_TYPE":
+     case "UNSUPPORTED_SIMILARITY_NODE_TYPE":
+diff --git b/apps/api/src/server.ts a/apps/api/src/server.ts
+index d594b5b..9724aca 100644
+--- b/apps/api/src/server.ts
++++ a/apps/api/src/server.ts
+@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
+ import { dirname, resolve } from "node:path";
+ import { fileURLToPath } from "node:url";
+ 
++import { createEmbeddingProvidersFromEnvironment } from "@hivemap/runtime";
+ import { openHiveMapStore } from "@hivemap/storage";
+ 
+ import { createApiServer } from "./index.js";
+@@ -21,8 +22,11 @@ if (host.trim().length === 0) {
+ 
+ const store = openHiveMapStore(storeConfig);
+ await store.initialize();
++const embeddingProviders = createEmbeddingProvidersFromEnvironment(process.env);
++
+ const server = createApiServer({
+   store,
++  embeddingProviders,
+   ...(staticRoot === undefined ? {} : { staticRoot }),
+ });
+ server.listen(port, host, () => {
+diff --git b/apps/mcp/src/index.test.ts a/apps/mcp/src/index.test.ts
+index d0e2c0a..4eb8d61 100644
+--- b/apps/mcp/src/index.test.ts
++++ a/apps/mcp/src/index.test.ts
+@@ -1,6 +1,6 @@
+ import { beforeEach, describe, expect, it } from "vitest";
+ 
+-import { type RepositoryIndexExecutor, HiveMapRuntime } from "@hivemap/runtime";
++import { type EmbeddingProvider, type RepositoryIndexExecutor, HiveMapRuntime } from "@hivemap/runtime";
+ import { InMemoryHiveMapStore } from "@hivemap/storage";
+ 
+ import { HIVEMAP_MCP_TOOL_NAMES, assertKnownMcpTool, handleMcpTool } from "./index.js";
+@@ -12,6 +12,7 @@ beforeEach(async () => {
+   await store.initialize();
+   runtime = new HiveMapRuntime({
+     store,
++    embeddingProviders: { test: createTestEmbeddingProvider() },
+     repositoryIndexExecutor: createTestRepositoryIndexExecutor(),
+   });
+ });
+@@ -34,6 +35,8 @@ describe("MCP tool adapter", () => {
+       "scan_profile_overlay_help",
+       "scan_profile_overlay_suggest",
+       "concept_embedding_upsert",
++      "concept_embedding_refresh",
++      "concept_embedding_backfill",
+       "concept_similar_list",
+       "graph_command",
+       "category_assign",
+@@ -523,6 +526,82 @@ describe("MCP tool adapter", () => {
+     });
+   });
+ 
++  it("refreshes and backfills concept embeddings through MCP", async () => {
++    await createWorkspaceWithNode();
++    await handleMcpTool(runtime, "graph_command", {
++      workspaceId: "workspace-a",
++      commands: [
++        {
++          id: "cmd-b",
++          type: "node.create",
++          payload: { node: { id: "node-b", label: "Beta", notes: "near alpha", type: "concept" } },
++        },
++      ],
++    });
++
++    await expect(
++      handleMcpTool(runtime, "concept_embedding_refresh", {
++        workspaceId: "workspace-a",
++        nodeId: "node-a",
++        model: "test:nomic-embed-text",
++      }),
++    ).resolves.toEqual({
++      ok: true,
++      tool: "concept_embedding_refresh",
++      value: {
++        embedding: {
++          workspaceId: "workspace-a",
++          nodeId: "node-a",
++          model: "test:nomic-embed-text",
++          dimensions: 2,
++          contentDigest: expect.any(String),
++          updatedAt: expect.any(String),
++        },
++        provider: "test",
++        status: "refreshed",
++      },
++    });
++
++    await expect(
++      handleMcpTool(runtime, "concept_embedding_backfill", {
++        workspaceId: "workspace-a",
++        model: "test:nomic-embed-text",
++      }),
++    ).resolves.toEqual({
++      ok: true,
++      tool: "concept_embedding_backfill",
++      value: {
++        workspaceId: "workspace-a",
++        model: "test:nomic-embed-text",
++        provider: "test",
++        summary: {
++          totalConcepts: 2,
++          selectedConcepts: 2,
++          refreshed: 1,
++          unchanged: 1,
++        },
++        results: [
++          {
++            nodeId: "node-a",
++            label: "Alpha",
++            status: "unchanged",
++            dimensions: 2,
++            contentDigest: expect.any(String),
++            updatedAt: expect.any(String),
++          },
++          {
++            nodeId: "node-b",
++            label: "Beta",
++            status: "refreshed",
++            dimensions: 2,
++            contentDigest: expect.any(String),
++            updatedAt: expect.any(String),
++          },
++        ],
++      },
++    });
++  });
++
+   it("returns visible tool errors without silent fallback", async () => {
+     const result = await handleMcpTool(runtime, "graph_get", { workspaceId: "missing" });
+ 
+@@ -740,6 +819,15 @@ async function createCompletedRepositoryIndex(): Promise<void> {
+   });
+ }
+ 
++function createTestEmbeddingProvider(): EmbeddingProvider {
++  return {
++    id: "test",
++    async embed(request) {
++      return request.inputs.map((input) => (input.includes("Alpha") ? [1, 0] : [0.9, 0.1]));
++    },
++  };
++}
++
+ function createTestRepositoryIndexExecutor(): RepositoryIndexExecutor {
+   return async ({ workspaceId, indexId }) => ({
+     resolvedCommit: "0123456789abcdef0123456789abcdef01234567",
+diff --git b/apps/mcp/src/index.ts a/apps/mcp/src/index.ts
+index a99c44c..a109d03 100644
+--- b/apps/mcp/src/index.ts
++++ a/apps/mcp/src/index.ts
+@@ -1,6 +1,7 @@
+ import type {
+   McpToolName,
+   McpToolRequestMap,
++  BackfillConceptEmbeddingsResponse,
+   BuildScanBoundaryMapResponse,
+   ExecuteRepositoryIndexResponse,
+   GetScanProfileOverlayHelpResponse,
+@@ -31,6 +32,7 @@ import type {
+   ListScanRunsResponse,
+   RecordScanCalibrationDecisionResponse,
+   RecordScanCoverageResponse,
++  RefreshConceptEmbeddingResponse,
+   StartScanResponse,
+   UpdateFindingResponse,
+   UpsertConceptEmbeddingResponse,
+@@ -57,6 +59,8 @@ export const HIVEMAP_MCP_TOOL_NAMES: readonly McpToolName[] = [
+   "scan_profile_overlay_help",
+   "scan_profile_overlay_suggest",
+   "concept_embedding_upsert",
++  "concept_embedding_refresh",
++  "concept_embedding_backfill",
+   "concept_similar_list",
+   "graph_command",
+   "category_assign",
+@@ -96,6 +100,8 @@ export type McpToolResponseMap = {
+   scan_profile_overlay_help: GetScanProfileOverlayHelpResponse;
+   scan_profile_overlay_suggest: SuggestScanProfileOverlayResponse;
+   concept_embedding_upsert: UpsertConceptEmbeddingResponse;
++  concept_embedding_refresh: RefreshConceptEmbeddingResponse;
++  concept_embedding_backfill: BackfillConceptEmbeddingsResponse;
+   concept_similar_list: ListSimilarConceptsResponse;
+   graph_command: ApplyGraphCommandsResponse;
+   category_assign: AssignCategoryResponse;
+@@ -209,6 +215,10 @@ async function dispatchMcpTool<T extends McpToolName>(
+       )) as McpToolResponseMap[T];
+     case "concept_embedding_upsert":
+       return (await runtime.upsertConceptEmbedding(request as McpToolRequestMap["concept_embedding_upsert"])) as McpToolResponseMap[T];
++    case "concept_embedding_refresh":
++      return (await runtime.refreshConceptEmbedding(request as McpToolRequestMap["concept_embedding_refresh"])) as McpToolResponseMap[T];
++    case "concept_embedding_backfill":
++      return (await runtime.backfillConceptEmbeddings(request as McpToolRequestMap["concept_embedding_backfill"])) as McpToolResponseMap[T];
+     case "concept_similar_list":
+       return (await runtime.listSimilarConcepts(request as McpToolRequestMap["concept_similar_list"])) as McpToolResponseMap[T];
+     case "graph_command":
+diff --git b/apps/mcp/src/sdk-server.test.ts a/apps/mcp/src/sdk-server.test.ts
+index 181aef6..833c7d8 100644
+--- b/apps/mcp/src/sdk-server.test.ts
++++ a/apps/mcp/src/sdk-server.test.ts
+@@ -2,7 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+ import { afterEach, beforeEach, describe, expect, it } from "vitest";
+ 
+-import { type RepositoryIndexExecutor, HiveMapRuntime } from "@hivemap/runtime";
++import { type EmbeddingProvider, type RepositoryIndexExecutor, HiveMapRuntime } from "@hivemap/runtime";
+ import { InMemoryHiveMapStore } from "@hivemap/storage";
+ 
+ import { createHiveMapMcpServer } from "./sdk-server.js";
+@@ -17,6 +17,7 @@ beforeEach(async () => {
+   server = createHiveMapMcpServer(
+     new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: createTestRepositoryIndexExecutor(),
+     }),
+   );
+@@ -51,6 +52,8 @@ describe("HiveMap MCP SDK server", () => {
+       "scan_profile_overlay_help",
+       "scan_profile_overlay_suggest",
+       "concept_embedding_upsert",
++      "concept_embedding_refresh",
++      "concept_embedding_backfill",
+       "concept_similar_list",
+       "graph_command",
+       "category_assign",
+@@ -435,9 +438,42 @@ describe("HiveMap MCP SDK server", () => {
+       },
+     });
+ 
++    const refreshResult = await client.callTool({
++      name: "concept_embedding_refresh",
++      arguments: {
++        workspaceId: "workspace-a",
++        nodeId: "node-a",
++        model: "test:nomic-embed-text",
++      },
++    });
++    expect(refreshResult.structuredContent).toEqual({
++      ok: true,
++      tool: "concept_embedding_refresh",
++      value: {
++        embedding: {
++          workspaceId: "workspace-a",
++          nodeId: "node-a",
++          model: "test:nomic-embed-text",
++          dimensions: 2,
++          contentDigest: expect.any(String),
++          updatedAt: expect.any(String),
++        },
++        provider: "test",
++        status: "refreshed",
++      },
++    });
+   });
+ });
+ 
++function createTestEmbeddingProvider(): EmbeddingProvider {
++  return {
++    id: "test",
++    async embed(request) {
++      return request.inputs.map((input) => (input.includes("Alpha") ? [1, 0] : [0.9, 0.1]));
++    },
++  };
++}
++
+ function createTestRepositoryIndexExecutor(): RepositoryIndexExecutor {
+   return async ({ workspaceId, indexId }) => ({
+     resolvedCommit: "0123456789abcdef0123456789abcdef01234567",
+diff --git b/apps/mcp/src/sdk-server.ts a/apps/mcp/src/sdk-server.ts
+index e79ee1e..90dd31c 100644
+--- b/apps/mcp/src/sdk-server.ts
++++ a/apps/mcp/src/sdk-server.ts
+@@ -33,6 +33,8 @@ const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
+   scan_profile_overlay_suggest:
+     "Return the smallest repo-aware overlay YAML scaffold for one explicit calibration symptom, using the active effective profile and boundary-map config from the current in-progress scan.",
+   concept_embedding_upsert: "Store or refresh one explicit concept embedding for a workspace node and model.",
++  concept_embedding_refresh: "Generate or refresh one concept embedding through a configured provider:model ref.",
++  concept_embedding_backfill: "Backfill explicit concept embeddings for selected or all concept nodes through a configured provider:model ref.",
+   concept_similar_list: "Return bounded read-only similar-concept suggestions for one concept node and model.",
+   graph_command: "Apply explicit typed commands to the canonical semantic graph.",
+   category_assign: "Assign one validated semantic/visual category overlay.",
+@@ -213,6 +215,21 @@ export function createHiveMapMcpServer(runtime: HiveMapRuntime): McpServer {
+     }),
+   });
+ 
++  registerTool(server, runtime, "concept_embedding_refresh", {
++    workspaceId: z.string(),
++    nodeId: z.string(),
++    model: z.string(),
++    force: z.boolean().optional(),
++  });
++
++  registerTool(server, runtime, "concept_embedding_backfill", {
++    workspaceId: z.string(),
++    model: z.string(),
++    nodeIds: z.array(z.string()).optional(),
++    limit: z.number().int().positive().optional(),
++    force: z.boolean().optional(),
++  });
++
+   registerTool(server, runtime, "concept_similar_list", {
+     workspaceId: z.string(),
+     nodeId: z.string(),
+diff --git b/apps/mcp/src/stdio.ts a/apps/mcp/src/stdio.ts
+index b2e664a..80f9763 100644
+--- b/apps/mcp/src/stdio.ts
++++ a/apps/mcp/src/stdio.ts
+@@ -1,5 +1,5 @@
+ #!/usr/bin/env node
+-import { HiveMapRuntime } from "@hivemap/runtime";
++import { HiveMapRuntime, createEmbeddingProvidersFromEnvironment } from "@hivemap/runtime";
+ import { openHiveMapStore } from "@hivemap/storage";
+ 
+ import { connectHiveMapStdioServer } from "./sdk-server.js";
+@@ -7,7 +7,9 @@ import { connectHiveMapStdioServer } from "./sdk-server.js";
+ const storeConfig = readStoreConfig(process.argv, process.env);
+ const store = openHiveMapStore(storeConfig);
+ await store.initialize();
+-await connectHiveMapStdioServer(new HiveMapRuntime({ store }));
++const embeddingProviders = createEmbeddingProvidersFromEnvironment(process.env);
++
++await connectHiveMapStdioServer(new HiveMapRuntime({ store, embeddingProviders }));
+ console.error(`HiveMap MCP server running on stdio with ${describeStoreConfig(storeConfig)}`);
+ 
+ function readStoreConfig(
+diff --git b/packages/api-contracts/src/index.test.ts a/packages/api-contracts/src/index.test.ts
+index 122a5f7..0ab25ca 100644
+--- b/packages/api-contracts/src/index.test.ts
++++ a/packages/api-contracts/src/index.test.ts
+@@ -8,6 +8,7 @@ import {
+   validateApplyProposalRequest,
+   validateApproveProposalRequest,
+   validateAssignCategoryRequest,
++  validateBackfillConceptEmbeddingsRequest,
+   validateBuildScanBoundaryMapRequest,
+   validateCompleteScanRequest,
+   validateCreateProposalRequest,
+@@ -25,6 +26,7 @@ import {
+   validateListWorkspaceSummariesRequest,
+   validateRecordFeedbackRequest,
+   validateRecordScanCalibrationDecisionRequest,
++  validateRefreshConceptEmbeddingRequest,
+   validateResolveWorkspaceRequest,
+   validateSearchRepositoryIndexRequest,
+   validateStartRepositoryIndexRequest,
+@@ -341,6 +343,32 @@ describe("api contracts", () => {
+     );
+   });
+ 
++  it("validates provider-backed embedding refresh and backfill requests", () => {
++    expect(() =>
++      validateRefreshConceptEmbeddingRequest({
++        workspaceId: "workspace-a",
++        nodeId: "node-a",
++        model: "ollama:nomic-embed-text",
++      }),
++    ).not.toThrow();
++    expect(() =>
++      validateBackfillConceptEmbeddingsRequest({
++        workspaceId: "workspace-a",
++        model: "ollama:nomic-embed-text",
++        nodeIds: ["node-a"],
++        limit: 10,
++        force: true,
++      }),
++    ).not.toThrow();
++    expect(() =>
++      validateBackfillConceptEmbeddingsRequest({
++        workspaceId: "workspace-a",
++        model: "ollama:nomic-embed-text",
++        nodeIds: [],
++      }),
++    ).toThrow("nodeIds must contain at least one node id");
++  });
++
+   it("keeps MCP tool request map tied to explicit tool names", () => {
+     const toolName: McpToolName = "graph_command";
+     const request: McpToolRequestMap[typeof toolName] = {
+diff --git b/packages/api-contracts/src/index.ts a/packages/api-contracts/src/index.ts
+index 1a0b7b4..e81ddda 100644
+--- b/packages/api-contracts/src/index.ts
++++ a/packages/api-contracts/src/index.ts
+@@ -126,6 +126,54 @@ export type UpsertConceptEmbeddingResponse = {
+   };
+ };
+ 
++export type RefreshConceptEmbeddingRequest = {
++  workspaceId: string;
++  nodeId: string;
++  model: string;
++  force?: boolean;
++};
++
++export type RefreshConceptEmbeddingResponse = {
++  embedding: {
++    workspaceId: string;
++    nodeId: string;
++    model: string;
++    dimensions: number;
++    contentDigest: string;
++    updatedAt: string;
++  };
++  provider: string;
++  status: "refreshed" | "unchanged";
++};
++
++export type BackfillConceptEmbeddingsRequest = {
++  workspaceId: string;
++  model: string;
++  nodeIds?: string[];
++  limit?: number;
++  force?: boolean;
++};
++
++export type BackfillConceptEmbeddingsResponse = {
++  workspaceId: string;
++  model: string;
++  provider: string;
++  summary: {
++    totalConcepts: number;
++    selectedConcepts: number;
++    refreshed: number;
++    unchanged: number;
++  };
++  results: Array<{
++    nodeId: string;
++    label: string;
++    status: "refreshed" | "unchanged";
++    dimensions: number;
++    contentDigest: string;
++    updatedAt: string;
++  }>;
++};
++
+ export type ListSimilarConceptsRequest = {
+   workspaceId: string;
+   nodeId: string;
+@@ -642,6 +690,8 @@ export type McpToolName =
+   | "scan_profile_overlay_help"
+   | "scan_profile_overlay_suggest"
+   | "concept_embedding_upsert"
++  | "concept_embedding_refresh"
++  | "concept_embedding_backfill"
+   | "concept_similar_list"
+   | "graph_command"
+   | "category_assign"
+@@ -680,6 +730,8 @@ export type McpToolRequestMap = {
+   scan_profile_overlay_help: GetScanProfileOverlayHelpRequest;
+   scan_profile_overlay_suggest: SuggestScanProfileOverlayRequest;
+   concept_embedding_upsert: UpsertConceptEmbeddingRequest;
++  concept_embedding_refresh: RefreshConceptEmbeddingRequest;
++  concept_embedding_backfill: BackfillConceptEmbeddingsRequest;
+   concept_similar_list: ListSimilarConceptsRequest;
+   graph_command: ApplyGraphCommandsRequest;
+   category_assign: AssignCategoryRequest;
+@@ -863,6 +915,34 @@ export function validateUpsertConceptEmbeddingRequest(request: UpsertConceptEmbe
+   }
+ }
+ 
++export function validateRefreshConceptEmbeddingRequest(request: RefreshConceptEmbeddingRequest): void {
++  assertNonEmpty("workspaceId", request.workspaceId);
++  assertNonEmpty("nodeId", request.nodeId);
++  assertNonEmpty("model", request.model);
++  if (request.force !== undefined && typeof request.force !== "boolean") {
++    throw new ApiContractValidationError("force must be a boolean when provided");
++  }
++}
++
++export function validateBackfillConceptEmbeddingsRequest(request: BackfillConceptEmbeddingsRequest): void {
++  assertNonEmpty("workspaceId", request.workspaceId);
++  assertNonEmpty("model", request.model);
++  if (request.limit !== undefined && (!Number.isInteger(request.limit) || request.limit < 1)) {
++    throw new ApiContractValidationError("limit must be a positive integer");
++  }
++  if (request.force !== undefined && typeof request.force !== "boolean") {
++    throw new ApiContractValidationError("force must be a boolean when provided");
++  }
++  if (request.nodeIds !== undefined) {
++    if (request.nodeIds.length === 0) {
++      throw new ApiContractValidationError("nodeIds must contain at least one node id when provided");
++    }
++    for (const nodeId of request.nodeIds) {
++      assertNonEmpty("nodeIds[]", nodeId);
++    }
++  }
++}
++
+ export function validateListSimilarConceptsRequest(request: ListSimilarConceptsRequest): void {
+   assertNonEmpty("workspaceId", request.workspaceId);
+   assertNonEmpty("nodeId", request.nodeId);
+diff --git b/packages/runtime/src/embeddings.ts a/packages/runtime/src/embeddings.ts
+new file mode 100644
+index 0000000..efcde59
+--- /dev/null
++++ a/packages/runtime/src/embeddings.ts
+@@ -0,0 +1,149 @@
++export type EmbeddingProviderRequest = {
++  model: string;
++  inputs: string[];
++};
++
++export type EmbeddingProvider = {
++  id: string;
++  maxBatchSize?: number;
++  embed(request: EmbeddingProviderRequest): Promise<number[][]>;
++};
++
++export type EmbeddingProviderRegistry = Record<string, EmbeddingProvider>;
++
++export class EmbeddingProviderError extends Error {
++  readonly code: string;
++  readonly details?: unknown;
++
++  constructor(message: string, options?: { code?: string; details?: unknown }) {
++    super(message);
++    this.name = "EmbeddingProviderError";
++    this.code = options?.code ?? "EMBEDDING_PROVIDER_ERROR";
++    this.details = options?.details;
++  }
++}
++
++export type OllamaEmbeddingProviderOptions = {
++  baseUrl: string;
++  fetch?: typeof globalThis.fetch;
++  maxBatchSize?: number;
++};
++
++export class OllamaEmbeddingProvider implements EmbeddingProvider {
++  readonly id = "ollama";
++  readonly maxBatchSize?: number;
++
++  private readonly baseUrl: string;
++  private readonly fetchImpl: typeof globalThis.fetch;
++
++  constructor(options: OllamaEmbeddingProviderOptions) {
++    if (options.baseUrl.trim().length === 0) {
++      throw new EmbeddingProviderError("Ollama provider requires a non-empty baseUrl", {
++        code: "OLLAMA_BASE_URL_INVALID",
++      });
++    }
++
++    this.baseUrl = options.baseUrl;
++    this.fetchImpl = options.fetch ?? globalThis.fetch;
++    if (options.maxBatchSize !== undefined) {
++      this.maxBatchSize = options.maxBatchSize;
++    }
++  }
++
++  async embed(request: EmbeddingProviderRequest): Promise<number[][]> {
++    if (request.model.trim().length === 0) {
++      throw new EmbeddingProviderError("Ollama provider requires a non-empty model", {
++        code: "OLLAMA_MODEL_INVALID",
++      });
++    }
++    if (request.inputs.length === 0) {
++      throw new EmbeddingProviderError("Ollama provider requires at least one input", {
++        code: "OLLAMA_INPUTS_EMPTY",
++      });
++    }
++
++    const response = await this.fetchImpl(new URL("/api/embed", this.baseUrl), {
++      method: "POST",
++      headers: { "content-type": "application/json" },
++      body: JSON.stringify({
++        model: request.model,
++        input: request.inputs.length === 1 ? request.inputs[0] : request.inputs,
++      }),
++    });
++
++    if (!response.ok) {
++      throw new EmbeddingProviderError(`Ollama embedding request failed with ${response.status}`, {
++        code: "OLLAMA_REQUEST_FAILED",
++        details: { status: response.status, statusText: response.statusText },
++      });
++    }
++
++    let payload: unknown;
++    try {
++      payload = await response.json();
++    } catch (error) {
++      throw new EmbeddingProviderError("Ollama embedding response must be valid JSON", {
++        code: "OLLAMA_RESPONSE_INVALID_JSON",
++        details: error instanceof Error ? { cause: error.message } : undefined,
++      });
++    }
++
++    return validateEmbeddingResponse(payload, request.inputs.length);
++  }
++}
++
++export function createEmbeddingProvidersFromEnvironment(env: NodeJS.ProcessEnv): EmbeddingProviderRegistry {
++  const providers: EmbeddingProviderRegistry = {};
++  const ollamaBaseUrl = env.HIVEMAP_OLLAMA_BASE_URL;
++  if (ollamaBaseUrl !== undefined && ollamaBaseUrl.trim().length > 0) {
++    providers.ollama = new OllamaEmbeddingProvider({ baseUrl: ollamaBaseUrl });
++  }
++  return providers;
++}
++
++function validateEmbeddingResponse(payload: unknown, expectedCount: number): number[][] {
++  if (typeof payload !== "object" || payload === null || !("embeddings" in payload)) {
++    throw new EmbeddingProviderError("Ollama embedding response must include embeddings", {
++      code: "OLLAMA_RESPONSE_INVALID",
++    });
++  }
++
++  const embeddings = (payload as { embeddings: unknown }).embeddings;
++  if (!Array.isArray(embeddings) || embeddings.length !== expectedCount) {
++    throw new EmbeddingProviderError("Ollama embedding response returned an unexpected embeddings count", {
++      code: "OLLAMA_RESPONSE_COUNT_MISMATCH",
++      details: { expectedCount },
++    });
++  }
++
++  const vectors = embeddings.map((vector) => validateEmbeddingVector(vector));
++  const dimensions = vectors[0]?.length ?? 0;
++  for (const vector of vectors) {
++    if (vector.length !== dimensions) {
++      throw new EmbeddingProviderError("Ollama embeddings must all have the same dimensions", {
++        code: "OLLAMA_RESPONSE_DIMENSION_MISMATCH",
++      });
++    }
++  }
++
++  return vectors;
++}
++
++function validateEmbeddingVector(vector: unknown): number[] {
++  if (!Array.isArray(vector) || vector.length === 0) {
++    throw new EmbeddingProviderError("Ollama embedding vectors must be non-empty arrays", {
++      code: "OLLAMA_VECTOR_INVALID",
++    });
++  }
++
++  const values = vector.map((value) => {
++    if (typeof value !== "number" || !Number.isFinite(value)) {
++      throw new EmbeddingProviderError("Ollama embedding vectors must contain only finite numbers", {
++        code: "OLLAMA_VECTOR_INVALID",
++      });
++    }
++    return value;
++  });
++
++  return values;
++}
+diff --git b/packages/runtime/src/index.test.ts a/packages/runtime/src/index.test.ts
+index 0ef35c0..0a2a282 100644
+--- b/packages/runtime/src/index.test.ts
++++ a/packages/runtime/src/index.test.ts
+@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it } from "vitest";
+ import { InMemoryHiveMapStore } from "@hivemap/storage";
+ import { CODE_QUALITY_PROFILE, DOCUMENTATION_CONFLICTS_PROFILE } from "@hivemap/scans";
+ 
+-import { type RepositoryIndexExecutor, HiveMapRuntime, RepositoryIndexExecutionError } from "./index.js";
++import { type EmbeddingProvider, type RepositoryIndexExecutor, HiveMapRuntime, RepositoryIndexExecutionError } from "./index.js";
+ 
+ let store: InMemoryHiveMapStore;
+ let runtime: HiveMapRuntime;
+@@ -16,6 +16,7 @@ beforeEach(async () => {
+   await store.initialize();
+   runtime = new HiveMapRuntime({
+     store,
++    embeddingProviders: { test: createTestEmbeddingProvider() },
+     repositoryIndexExecutor: createTestRepositoryIndexExecutor(),
+     now: () => "2026-08-19T23:00:00.000Z",
+   });
+@@ -324,6 +325,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const evidenceRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryEvidenceIndexResult(workspaceId, indexId),
+       now: () => "2026-08-19T23:00:00.000Z",
+     });
+@@ -467,6 +469,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const structuralRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryStructuralEvidenceIndexResult(workspaceId, indexId),
+       now: () => "2026-08-20T18:00:00.000Z",
+     });
+@@ -525,6 +528,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const structuralRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: async ({ workspaceId, indexId }) =>
+         createRepositoryStructuralPrecisionIndexResult(workspaceId, indexId),
+       now: () => "2026-08-20T18:15:00.000Z",
+@@ -576,6 +580,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const structuralRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: async ({ workspaceId, indexId }) =>
+         createRepositoryStructuralPrecisionOverlayIndexResult(workspaceId, indexId),
+       now: () => "2026-08-25T17:20:00.000Z",
+@@ -623,6 +628,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const structuralRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryStructuralTopologyIndexResult(workspaceId, indexId),
+       now: () => "2026-08-20T18:30:00.000Z",
+     });
+@@ -674,6 +680,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const structuralRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryStructuralTopologyIndexResult(workspaceId, indexId),
+       now: () => "2026-08-20T18:45:00.000Z",
+     });
+@@ -905,6 +912,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const overlayRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryOverlayEvidenceIndexResult(workspaceId, indexId),
+       now: () => "2026-08-20T19:05:00.000Z",
+     });
+@@ -973,6 +981,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const overlayRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryBoundaryMapUnmappedRootIndexResult(workspaceId, indexId),
+       now: () => "2026-08-20T19:10:00.000Z",
+     });
+@@ -1024,6 +1033,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const overlayRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: async ({ workspaceId, indexId }) =>
+         createRepositoryBoundaryMapUnknownTestFamilyIndexResult(workspaceId, indexId),
+       now: () => "2026-08-20T19:12:00.000Z",
+@@ -1096,6 +1106,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const overlayRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: async ({ workspaceId, indexId }) =>
+         createRepositoryBoundaryMapCustomMarkerOverlayIndexResult(workspaceId, indexId),
+       now: () => "2026-08-20T19:14:00.000Z",
+@@ -1188,6 +1199,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const overlayRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryOverlayEvidenceIndexResult(workspaceId, indexId),
+       now: () => "2026-08-20T19:00:00.000Z",
+     });
+@@ -1293,6 +1305,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const structuralRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryStructuralEvidenceIndexResult(workspaceId, indexId),
+       now: () => "2026-08-25T11:00:00.000Z",
+     });
+@@ -1346,6 +1359,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const structuralRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryStructuralEvidenceIndexResult(workspaceId, indexId),
+       now: () => "2026-08-25T11:10:00.000Z",
+     });
+@@ -1433,6 +1447,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const overlayRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryInvalidOverlayIndexResult(workspaceId, indexId),
+       now: () => "2026-08-20T19:00:00.000Z",
+     });
+@@ -1476,6 +1491,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const precisionRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryEvidenceNoiseResult(workspaceId, indexId),
+       now: () => "2026-08-19T23:00:00.000Z",
+     });
+@@ -1552,6 +1568,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const invariantRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryEvidenceSemanticInvariantResult(workspaceId, indexId),
+       now: () => "2026-08-19T23:00:00.000Z",
+     });
+@@ -1594,6 +1611,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const invariantRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryEvidenceSemanticInvariantOverlayResult(workspaceId, indexId),
+       now: () => "2026-08-19T23:00:00.000Z",
+     });
+@@ -1644,6 +1662,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const staleRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryEvidenceStaleResult(workspaceId, indexId),
+       now: () => "2026-08-19T23:00:00.000Z",
+     });
+@@ -1696,6 +1715,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const staleRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryEvidenceLegacyAuthorityResult(workspaceId, indexId),
+       now: () => "2026-08-19T23:00:00.000Z",
+     });
+@@ -1738,6 +1758,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const staleRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryEvidenceLegacyAuthorityOverlayResult(workspaceId, indexId),
+       now: () => "2026-08-19T23:00:00.000Z",
+     });
+@@ -1788,6 +1809,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const unicodeRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryEvidenceUnicodeHeadingResult(workspaceId, indexId),
+       now: () => "2026-08-19T23:00:00.000Z",
+     });
+@@ -1830,6 +1852,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const rootLinkRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryEvidenceRootLinkResult(workspaceId, indexId),
+       now: () => "2026-08-19T23:00:00.000Z",
+     });
+@@ -1872,6 +1895,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const ownershipRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryEvidenceOwnershipScopeResult(workspaceId, indexId),
+       now: () => "2026-08-19T23:00:00.000Z",
+     });
+@@ -1914,6 +1938,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const ownershipRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: async ({ workspaceId, indexId }) => createRepositoryEvidenceOwnershipScopeOverlayResult(workspaceId, indexId),
+       now: () => "2026-08-19T23:00:00.000Z",
+     });
+@@ -1965,6 +1990,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const rerunRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: createSequenceRepositoryIndexExecutor([
+         createRepositoryIndexResult("1111111111111111111111111111111111111111", "Original ownership evidence."),
+         new RepositoryIndexExecutionError("GIT_COMMAND_FAILED", "checkout failed"),
+@@ -2109,6 +2135,123 @@ describe("HiveMapRuntime", () => {
+     await expect(runtime.getGraph({ workspaceId: "workspace-a" })).resolves.toEqual(graphBefore);
+   });
+ 
++  it("refreshes and backfills concept embeddings through a configured provider without mutating graph semantics", async () => {
++    await seedWorkspaceFixture();
++    await runtime.applyGraphCommands({
++      workspaceId: "workspace-a",
++      commands: [
++        {
++          id: "cmd-a",
++          type: "node.create",
++          payload: { node: { id: "node-a", label: "Alpha", notes: "roadmap planning", type: "concept" } },
++        },
++        {
++          id: "cmd-b",
++          type: "node.create",
++          payload: { node: { id: "node-b", label: "Beta", notes: "roadmap execution", type: "concept" } },
++        },
++        {
++          id: "cmd-c",
++          type: "node.create",
++          payload: { node: { id: "node-c", label: "Gamma", notes: "kitchen inventory", type: "concept" } },
++        },
++      ],
++    });
++
++    const graphBefore = await runtime.getGraph({ workspaceId: "workspace-a" });
++
++    await expect(
++      runtime.refreshConceptEmbedding({
++        workspaceId: "workspace-a",
++        nodeId: "node-a",
++        model: "test:nomic-embed-text",
++      }),
++    ).resolves.toEqual({
++      embedding: {
++        workspaceId: "workspace-a",
++        nodeId: "node-a",
++        model: "test:nomic-embed-text",
++        dimensions: 2,
++        contentDigest: expect.any(String),
++        updatedAt: "2026-08-19T23:00:00.000Z",
++      },
++      provider: "test",
++      status: "refreshed",
++    });
++
++    await expect(
++      runtime.backfillConceptEmbeddings({
++        workspaceId: "workspace-a",
++        model: "test:nomic-embed-text",
++      }),
++    ).resolves.toEqual({
++      workspaceId: "workspace-a",
++      model: "test:nomic-embed-text",
++      provider: "test",
++      summary: {
++        totalConcepts: 3,
++        selectedConcepts: 3,
++        refreshed: 2,
++        unchanged: 1,
++      },
++      results: [
++        {
++          nodeId: "node-a",
++          label: "Alpha",
++          status: "unchanged",
++          dimensions: 2,
++          contentDigest: expect.any(String),
++          updatedAt: "2026-08-19T23:00:00.000Z",
++        },
++        {
++          nodeId: "node-b",
++          label: "Beta",
++          status: "refreshed",
++          dimensions: 2,
++          contentDigest: expect.any(String),
++          updatedAt: "2026-08-19T23:00:00.000Z",
++        },
++        {
++          nodeId: "node-c",
++          label: "Gamma",
++          status: "refreshed",
++          dimensions: 2,
++          contentDigest: expect.any(String),
++          updatedAt: "2026-08-19T23:00:00.000Z",
++        },
++      ],
++    });
++
++    await expect(
++      runtime.listSimilarConcepts({
++        workspaceId: "workspace-a",
++        nodeId: "node-a",
++        model: "test:nomic-embed-text",
++        limit: 2,
++        minScore: 0,
++      }),
++    ).resolves.toEqual({
++      sourceNodeId: "node-a",
++      model: "test:nomic-embed-text",
++      matches: [
++        {
++          nodeId: "node-b",
++          label: "Beta",
++          score: expect.any(Number),
++          updatedAt: "2026-08-19T23:00:00.000Z",
++        },
++        {
++          nodeId: "node-c",
++          label: "Gamma",
++          score: expect.any(Number),
++          updatedAt: "2026-08-19T23:00:00.000Z",
++        },
++      ],
++    });
++
++    await expect(runtime.getGraph({ workspaceId: "workspace-a" })).resolves.toEqual(graphBefore);
++  });
++
+   it("approves and applies proposals explicitly", async () => {
+     await seedWorkspaceFixture();
+     await runtime.createProposal({
+@@ -2379,6 +2522,7 @@ describe("HiveMapRuntime", () => {
+     await seedWorkspaceFixture();
+     const overlayRuntime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       repositoryIndexExecutor: async ({ workspaceId, indexId }) =>
+         createRepositoryEvidenceSemanticInvariantOverlayResult(workspaceId, indexId),
+       now: () => "2026-08-25T10:05:00.000Z",
+@@ -2514,6 +2658,24 @@ async function completeDocumentationScan(id: string): Promise<void> {
+   });
+ }
+ 
++function createTestEmbeddingProvider(): EmbeddingProvider {
++  return {
++    id: "test",
++    maxBatchSize: 2,
++    async embed(request) {
++      return request.inputs.map((input) => {
++        if (input.includes("Alpha")) {
++          return [1, 0];
++        }
++        if (input.includes("Beta")) {
++          return [0.9, 0.1];
++        }
++        return [0, 1];
++      });
++    },
++  };
++}
++
+ function createTestRepositoryIndexExecutor(): RepositoryIndexExecutor {
+   return async ({ workspaceId, indexId }) => createRepositoryIndexResult(
+     "0123456789abcdef0123456789abcdef01234567",
+diff --git b/packages/runtime/src/index.ts a/packages/runtime/src/index.ts
+index 3f918f1..eca4b5b 100644
+--- b/packages/runtime/src/index.ts
++++ a/packages/runtime/src/index.ts
+@@ -1,6 +1,7 @@
+ import { createHash } from "node:crypto";
+ import { posix as pathPosix } from "node:path";
+ import {
++  validateBackfillConceptEmbeddingsRequest,
+   validateExecuteRepositoryIndexRequest,
+   validateBuildScanBoundaryMapRequest,
+   validateGetScanProfileOverlayHelpRequest,
+@@ -17,6 +18,7 @@ import {
+   validateApplyProposalRequest,
+   validateApproveProposalRequest,
+   validateAssignCategoryRequest,
++  validateRefreshConceptEmbeddingRequest,
+   validateStartRepositoryIndexRequest,
+   validateUpsertConceptEmbeddingRequest,
+   validateCreateProposalRequest,
+@@ -44,6 +46,8 @@ import {
+   type ApproveProposalResponse,
+   type AssignCategoryRequest,
+   type AssignCategoryResponse,
++  type BackfillConceptEmbeddingsRequest,
++  type BackfillConceptEmbeddingsResponse,
+   type BuildScanBoundaryMapRequest,
+   type BuildScanBoundaryMapResponse,
+   type CreateProjectionRequest,
+@@ -116,6 +120,8 @@ import {
+   type RecordScanCalibrationDecisionResponse,
+   type RecordScanCoverageRequest,
+   type RecordScanCoverageResponse,
++  type RefreshConceptEmbeddingRequest,
++  type RefreshConceptEmbeddingResponse,
+   type ResolveWorkspaceRequest,
+   type ResolveWorkspaceResponse,
+   type SearchRepositoryIndexRequest,
+@@ -174,13 +180,16 @@ import {
+   type WorkspaceState,
+ } from "@hivemap/storage";
+ 
++import { EmbeddingProviderError, type EmbeddingProviderRegistry } from "./embeddings.js";
+ import { buildBoundaryMapArtifact } from "./repository-boundary-map.js";
+ import { RepositoryIndexExecutionError, executeSafeRepositoryIndex, type RepositoryIndexExecutor } from "./repository-indexing.js";
+ 
++export * from "./embeddings.js";
+ export { RepositoryIndexExecutionError, executeSafeRepositoryIndex, type RepositoryIndexExecutor } from "./repository-indexing.js";
+ 
+ export type HiveMapRuntimeOptions = {
+   store: HiveMapStore;
++  embeddingProviders?: EmbeddingProviderRegistry;
+   repositoryIndexExecutor?: RepositoryIndexExecutor;
+   now?: () => string;
+ };
+@@ -199,11 +208,13 @@ export class RuntimeError extends Error {
+ 
+ export class HiveMapRuntime {
+   private readonly store: HiveMapStore;
++  private readonly embeddingProviders: EmbeddingProviderRegistry;
+   private readonly repositoryIndexExecutor: RepositoryIndexExecutor;
+   private readonly now: () => string;
+ 
+   constructor(options: HiveMapRuntimeOptions) {
+     this.store = options.store;
++    this.embeddingProviders = options.embeddingProviders ?? {};
+     this.repositoryIndexExecutor = options.repositoryIndexExecutor ?? executeSafeRepositoryIndex;
+     this.now = options.now ?? (() => new Date().toISOString());
+   }
+@@ -644,6 +655,176 @@ export class HiveMapRuntime {
+     };
+   }
+ 
++  async refreshConceptEmbedding(request: RefreshConceptEmbeddingRequest): Promise<RefreshConceptEmbeddingResponse> {
++    validateRefreshConceptEmbeddingRequest(request);
++    const state = await this.store.loadWorkspaceState(request.workspaceId);
++    const node = findNodeById(state.graph, request.nodeId);
++    if (node.type !== "concept") {
++      throw new RuntimeError(`Embeddings currently support concept nodes only: ${request.nodeId}`, {
++        code: "UNSUPPORTED_EMBEDDING_NODE_TYPE",
++      });
++    }
++
++    const modelRef = resolveEmbeddingModelRef(this.embeddingProviders, request.model);
++    const source = createConceptEmbeddingSource(node);
++    const existing = await this.store.getConceptEmbedding(request.workspaceId, request.nodeId, request.model);
++    if (request.force !== true && existing !== undefined && existing.contentDigest === source.contentDigest) {
++      return {
++        embedding: {
++          workspaceId: existing.workspaceId,
++          nodeId: existing.nodeId,
++          model: existing.model,
++          dimensions: existing.embedding.length,
++          contentDigest: existing.contentDigest,
++          updatedAt: existing.updatedAt,
++        },
++        provider: modelRef.provider.id,
++        status: "unchanged",
++      };
++    }
++
++    const [embedding] = await embedWithProvider(modelRef.provider.id, request.model, () =>
++      modelRef.provider.embed({
++        model: modelRef.providerModel,
++        inputs: [source.contentText],
++      }),
++    );
++    if (embedding === undefined) {
++      throw new RuntimeError(`Embedding provider returned no vector for node ${request.nodeId}`, {
++        code: "EMBEDDING_PROVIDER_EMPTY_RESULT",
++      });
++    }
++    const updatedAt = this.now();
++    await this.store.upsertConceptEmbedding({
++      workspaceId: request.workspaceId,
++      nodeId: request.nodeId,
++      model: request.model,
++      contentDigest: source.contentDigest,
++      embedding,
++      createdAt: existing?.createdAt ?? updatedAt,
++      updatedAt,
++    });
++
++    return {
++      embedding: {
++        workspaceId: request.workspaceId,
++        nodeId: request.nodeId,
++        model: request.model,
++        dimensions: embedding.length,
++        contentDigest: source.contentDigest,
++        updatedAt,
++      },
++      provider: modelRef.provider.id,
++      status: "refreshed",
++    };
++  }
++
++  async backfillConceptEmbeddings(request: BackfillConceptEmbeddingsRequest): Promise<BackfillConceptEmbeddingsResponse> {
++    validateBackfillConceptEmbeddingsRequest(request);
++    const state = await this.store.loadWorkspaceState(request.workspaceId);
++    const modelRef = resolveEmbeddingModelRef(this.embeddingProviders, request.model);
++    const concepts = state.graph.nodes.filter(isConceptNode);
++    const conceptById = new Map(concepts.map((node) => [node.id, node] as const));
++    const selectedNodes = selectConceptNodes(concepts, conceptById, request.nodeIds, request.limit);
++    const existingEmbeddings = new Map(
++      await Promise.all(
++        selectedNodes.map(async (node) => [
++          node.id,
++          await this.store.getConceptEmbedding(request.workspaceId, node.id, request.model),
++        ] as const),
++      ),
++    );
++
++    const unchangedResults: BackfillConceptEmbeddingsResponse["results"] = [];
++    const refreshQueue: Array<{ node: (typeof selectedNodes)[number]; source: ReturnType<typeof createConceptEmbeddingSource> }> = [];
++    for (const node of selectedNodes) {
++      const source = createConceptEmbeddingSource(node);
++      const existing = existingEmbeddings.get(node.id);
++      if (request.force !== true && existing !== undefined && existing.contentDigest === source.contentDigest) {
++        unchangedResults.push({
++          nodeId: node.id,
++          label: node.label,
++          status: "unchanged",
++          dimensions: existing.embedding.length,
++          contentDigest: existing.contentDigest,
++          updatedAt: existing.updatedAt,
++        });
++        continue;
++      }
++
++      refreshQueue.push({ node, source });
++    }
++
++    const refreshedResults: BackfillConceptEmbeddingsResponse["results"] = [];
++    for (const batch of chunkEmbeddingInputs(refreshQueue, modelRef.provider.maxBatchSize)) {
++      const embeddings = await embedWithProvider(modelRef.provider.id, request.model, () =>
++        modelRef.provider.embed({
++          model: modelRef.providerModel,
++          inputs: batch.map((item) => item.source.contentText),
++        }),
++      );
++      const updatedAt = this.now();
++
++      for (const [index, item] of batch.entries()) {
++        const embedding = embeddings[index];
++        if (embedding === undefined) {
++          throw new RuntimeError(`Embedding provider returned no vector for concept node ${item.node.id}`, {
++            code: "EMBEDDING_PROVIDER_EMPTY_RESULT",
++          });
++        }
++        const existing = existingEmbeddings.get(item.node.id);
++        await this.store.upsertConceptEmbedding({
++          workspaceId: request.workspaceId,
++          nodeId: item.node.id,
++          model: request.model,
++          contentDigest: item.source.contentDigest,
++          embedding,
++          createdAt: existing?.createdAt ?? updatedAt,
++          updatedAt,
++        });
++        refreshedResults.push({
++          nodeId: item.node.id,
++          label: item.node.label,
++          status: "refreshed",
++          dimensions: embedding.length,
++          contentDigest: item.source.contentDigest,
++          updatedAt,
++        });
++      }
++    }
++
++    const resultByNodeId = new Map<string, BackfillConceptEmbeddingsResponse["results"][number]>();
++    for (const item of refreshedResults) {
++      resultByNodeId.set(item.nodeId, item);
++    }
++    for (const item of unchangedResults) {
++      resultByNodeId.set(item.nodeId, item);
++    }
++
++    const results = selectedNodes.map((node) => {
++      const result = resultByNodeId.get(node.id);
++      if (result === undefined) {
++        throw new RuntimeError(`Backfill result missing for concept node ${node.id}`, {
++          code: "EMBEDDING_BACKFILL_RESULT_MISSING",
++        });
++      }
++      return result;
++    });
++
++    return {
++      workspaceId: request.workspaceId,
++      model: request.model,
++      provider: modelRef.provider.id,
++      summary: {
++        totalConcepts: concepts.length,
++        selectedConcepts: selectedNodes.length,
++        refreshed: refreshedResults.length,
++        unchanged: unchangedResults.length,
++      },
++      results,
++    };
++  }
++
+   async listSimilarConcepts(request: ListSimilarConceptsRequest): Promise<ListSimilarConceptsResponse> {
+     validateListSimilarConceptsRequest(request);
+     const state = await this.store.loadWorkspaceState(request.workspaceId);
+@@ -3660,6 +3841,86 @@ function createConceptEmbeddingSource(node: { id: string; label: string; type: s
+   };
+ }
+ 
++function resolveEmbeddingModelRef(
++  providers: EmbeddingProviderRegistry,
++  modelRef: string,
++): { provider: EmbeddingProviderRegistry[string]; providerModel: string } {
++  const separatorIndex = modelRef.indexOf(":");
++  if (separatorIndex < 1 || separatorIndex === modelRef.length - 1) {
++    throw new RuntimeError(`Provider-backed embedding refresh requires a model ref in provider:model form: ${modelRef}`, {
++      code: "EMBEDDING_MODEL_REF_INVALID",
++    });
++  }
++
++  const providerId = modelRef.slice(0, separatorIndex);
++  const providerModel = modelRef.slice(separatorIndex + 1);
++  const provider = providers[providerId];
++  if (provider === undefined) {
++    throw new RuntimeError(`Embedding provider is not configured: ${providerId}`, {
++      code: "EMBEDDING_PROVIDER_NOT_CONFIGURED",
++      details: { providerId, modelRef },
++    });
++  }
++
++  return { provider, providerModel };
++}
++
++function selectConceptNodes(
++  concepts: Array<{ id: string; label: string; type: "concept"; notes?: string }>,
++  conceptById: Map<string, { id: string; label: string; type: "concept"; notes?: string }>,
++  requestedNodeIds: string[] | undefined,
++  limit: number | undefined,
++) {
++  const selected = requestedNodeIds === undefined ? concepts : requestedNodeIds.map((nodeId) => findRequestedConceptNode(conceptById, nodeId));
++  return limit === undefined ? selected : selected.slice(0, limit);
++}
++
++function findRequestedConceptNode(
++  conceptById: Map<string, { id: string; label: string; type: "concept"; notes?: string }>,
++  nodeId: string,
++) {
++  const node = conceptById.get(nodeId);
++  if (node === undefined) {
++    throw new RuntimeError(`Concept node not found for embedding refresh: ${nodeId}`, {
++      code: "EMBEDDING_CONCEPT_NODE_NOT_FOUND",
++    });
++  }
++  return node;
++}
++
++function isConceptNode(node: WorkspaceState["graph"]["nodes"][number]): node is WorkspaceState["graph"]["nodes"][number] & { type: "concept" } {
++  return node.type === "concept";
++}
++
++function chunkEmbeddingInputs<T>(items: T[], maxBatchSize: number | undefined): T[][] {
++  if (items.length === 0) {
++    return [];
++  }
++  if (maxBatchSize === undefined || maxBatchSize < 1 || maxBatchSize >= items.length) {
++    return [items];
++  }
++
++  const chunks: T[][] = [];
++  for (let index = 0; index < items.length; index += maxBatchSize) {
++    chunks.push(items.slice(index, index + maxBatchSize));
++  }
++  return chunks;
++}
++
++async function embedWithProvider<T>(providerId: string, modelRef: string, fn: () => Promise<T>): Promise<T> {
++  try {
++    return await fn();
++  } catch (error) {
++    if (error instanceof EmbeddingProviderError) {
++      throw new RuntimeError(`Embedding provider ${providerId} failed for model ${modelRef}: ${error.message}`, {
++        code: error.code,
++        details: error.details,
++      });
++    }
++    throw error;
++  }
++}
++
+ function toSimilarConceptMatch(
+   candidate: SimilarConceptMatchRecord,
+   conceptNodes: Map<string, { id: string; label: string }>,
+diff --git b/packages/runtime/src/postgres-runtime.test.ts a/packages/runtime/src/postgres-runtime.test.ts
+index 9187a00..2fee3cc 100644
+--- b/packages/runtime/src/postgres-runtime.test.ts
++++ a/packages/runtime/src/postgres-runtime.test.ts
+@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
+ 
+ import { PostgresHiveMapStore } from "@hivemap/storage";
+ 
+-import { HiveMapRuntime } from "./index.js";
++import { type EmbeddingProvider, HiveMapRuntime } from "./index.js";
+ 
+ const POSTGRES_TEST_URL = process.env.HIVEMAP_TEST_POSTGRES_URL;
+ const describeIfPostgres = POSTGRES_TEST_URL === undefined ? describe.skip : describe;
+@@ -18,6 +18,7 @@ describeIfPostgres("HiveMapRuntime on Postgres", () => {
+     await store.initialize();
+     runtime = new HiveMapRuntime({
+       store,
++      embeddingProviders: { test: createTestEmbeddingProvider() },
+       now: () => "2026-08-19T23:10:00.000Z",
+     });
+   });
+@@ -214,4 +215,99 @@ describeIfPostgres("HiveMapRuntime on Postgres", () => {
+     }
+   });
+ 
++  it("refreshes and backfills provider-generated concept embeddings on Postgres", async () => {
++    const workspaceId = `pg-runtime-${randomUUID()}`;
++    const workspace = {
++      id: workspaceId,
++      slug: `${workspaceId}-slug`,
++      name: `Postgres Runtime Backfill ${workspaceId}`,
++      createdAt: "2026-08-19T23:05:00.000Z",
++      updatedAt: "2026-08-19T23:05:00.000Z",
++    };
++
++    try {
++      await runtime.createWorkspace({ workspace });
++      await runtime.applyGraphCommands({
++        workspaceId: workspace.id,
++        commands: [
++          {
++            id: "cmd-alpha",
++            type: "node.create",
++            payload: { node: { id: "alpha", label: "Alpha", notes: "roadmap planning", type: "concept" } },
++          },
++          {
++            id: "cmd-beta",
++            type: "node.create",
++            payload: { node: { id: "beta", label: "Beta", notes: "roadmap execution", type: "concept" } },
++          },
++        ],
++      });
++
++      await expect(
++        runtime.refreshConceptEmbedding({
++          workspaceId: workspace.id,
++          nodeId: "alpha",
++          model: "test:nomic-embed-text",
++        }),
++      ).resolves.toMatchObject({
++        provider: "test",
++        status: "refreshed",
++        embedding: {
++          workspaceId: workspace.id,
++          nodeId: "alpha",
++          model: "test:nomic-embed-text",
++          dimensions: 2,
++          updatedAt: "2026-08-19T23:10:00.000Z",
++        },
++      });
++
++      await expect(
++        runtime.backfillConceptEmbeddings({
++          workspaceId: workspace.id,
++          model: "test:nomic-embed-text",
++        }),
++      ).resolves.toEqual({
++        workspaceId: workspace.id,
++        model: "test:nomic-embed-text",
++        provider: "test",
++        summary: {
++          totalConcepts: 2,
++          selectedConcepts: 2,
++          refreshed: 1,
++          unchanged: 1,
++        },
++        results: [
++          {
++            nodeId: "alpha",
++            label: "Alpha",
++            status: "unchanged",
++            dimensions: 2,
++            contentDigest: expect.any(String),
++            updatedAt: "2026-08-19T23:10:00.000Z",
++          },
++          {
++            nodeId: "beta",
++            label: "Beta",
++            status: "refreshed",
++            dimensions: 2,
++            contentDigest: expect.any(String),
++            updatedAt: "2026-08-19T23:10:00.000Z",
++          },
++        ],
++      });
++    } finally {
++      if (await store.workspaceExists(workspace.id)) {
++        await store.deleteWorkspace(workspace.id);
++      }
++    }
++  });
+ });
++
++function createTestEmbeddingProvider(): EmbeddingProvider {
++  return {
++    id: "test",
++    async embed(request) {
++      return request.inputs.map((input) => (input.includes("Alpha") ? [1, 0] : [0.9, 0.1]));
++    },
++  };
++}

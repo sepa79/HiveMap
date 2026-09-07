@@ -13,8 +13,9 @@ const GRAPH_NODE_TYPE_VALUES = [
 
 export type GraphNodeType = (typeof GRAPH_NODE_TYPE_VALUES)[number];
 
-const PROJECT_SOURCE_ROLE_VALUES = [
+export const PROJECT_SOURCE_ROLE_VALUES = [
   "defines",
+  "depends-on",
   "implements",
   "verifies",
   "illustrates",
@@ -23,7 +24,7 @@ const PROJECT_SOURCE_ROLE_VALUES = [
   "tracks",
 ] as const;
 
-const PROJECT_SOURCE_TYPE_VALUES = ["repo-doc", "code", "test", "asset", "hivemind"] as const;
+export const PROJECT_SOURCE_TYPE_VALUES = ["repo-doc", "code", "test", "asset", "hivemind"] as const;
 
 export type ProjectSourceRole = (typeof PROJECT_SOURCE_ROLE_VALUES)[number];
 export type ProjectSourceType = (typeof PROJECT_SOURCE_TYPE_VALUES)[number];

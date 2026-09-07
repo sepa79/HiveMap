@@ -1,208 +1,64 @@
-const API_BASE_URL = import.meta.env.VITE_HIVEMAP_API_URL ?? "http://127.0.0.1:8787";
+/**
+ * Responsibility: Expose the typed browser client for HiveMap REST operations.
+ * Must not: Render UI, own semantic state, or persist authentication credentials.
+ * Contract: Sends explicit REST requests and exposes canonical typed response shapes.
+ */
+import type {
+  ApplyGraphCommandsResponse,
+  ApplyProposalResponse,
+  ApproveProposalResponse,
+  AssignCategoryResponse,
+  CreateProjectionResponse,
+  CreateProposalResponse,
+  CreateWorkspaceRequest,
+  DeleteScanResponse,
+  GetWorkspaceResponse,
+  ListWorkspacesResponse,
+  RecordFeedbackResponse,
+  RejectProposalResponse,
+} from "@hivemap/api-contracts";
+import type { FeedbackEvent, GraphProposal } from "@hivemap/capture";
+import type { CategoryAssignment } from "@hivemap/categories";
+import type {
+  GraphEdge,
+  GraphNode,
+  GraphNodeType,
+  ProjectSourceRef,
+  SemanticGraph,
+} from "@hivemap/graph-core";
+import type { Projection, ProjectionGroup } from "@hivemap/projections";
+import type { FindingMetadata, ScanProfile, ScanRun } from "@hivemap/scans";
+import type { WorkspaceRecord, WorkspaceState } from "@hivemap/storage";
 
-export type GraphNodeType =
-  | "concept"
-  | "decision"
-  | "risk"
-  | "question"
-  | "evidence"
-  | "component"
-  | "system"
-  | "role"
-  | "pattern"
-  | "finding";
+import { getAuthToken } from "./auth-token.js";
 
-export type GraphNode = {
-  id: string;
-  label: string;
-  type: GraphNodeType;
-  notes?: string;
-  metadata?: Record<string, unknown> & {
-    sourceRefs?: ProjectSourceRef[];
-    finding?: FindingMetadata;
-  };
+const API_BASE_URL = import.meta.env.VITE_HIVEMAP_API_URL
+  ?? (import.meta.env.DEV ? "http://127.0.0.1:8787" : window.location.origin);
+
+export type {
+  CategoryAssignment,
+  FeedbackEvent,
+  FindingMetadata,
+  GraphEdge,
+  GraphNode,
+  GraphNodeType,
+  GraphProposal,
+  Projection,
+  ProjectionGroup,
+  ProjectSourceRef,
+  ScanProfile,
+  ScanRun,
+  SemanticGraph,
+  WorkspaceRecord,
+  WorkspaceState,
 };
-
-export type FindingMetadata = {
-  fingerprint: string;
-  kind:
-    | "conflict"
-    | "stale"
-    | "missing"
-    | "ambiguous"
-    | "broken-reference"
-    | "duplicate-authority"
-    | "implementation-drift"
-    | "quality-problem"
-    | "architecture-risk"
-    | "runtime-risk"
-    | "authority-gap"
-    | "test-gap"
-    | "deployment-risk";
-  severity: "low" | "normal" | "high" | "critical";
-  confidence: "low" | "medium" | "high";
-  status: "open" | "acknowledged" | "proposed-fix" | "resolved" | "accepted" | "unverifiable";
-  originScanId: string;
-  criterionIds: string[];
-  claims: Array<{ sourceRefIndex: number; claim: string }>;
-  affectedNodeIds: string[];
-  expectedOwner?: string;
-  recommendedAction?: string;
-  resolutionEvidence?: string;
-};
-
-export type ScanProfile = {
-  id: string;
-  version: number;
-  name: string;
-  description: string;
-};
-
-export type ScanRun = {
-  id: string;
-  profileId: string;
-  profileVersion: number;
-  status: "in_progress" | "completed";
-  startedAt: string;
-  completedAt?: string;
-  findingNodeIds: string[];
-  coverage?: {
-    discovered: string[];
-    included: string[];
-    excluded: Array<{ target: string; reason: string }>;
-    failed: Array<{ target: string; reason: string }>;
-  };
-};
-
-export type ProjectSourceRef = {
-  role: "defines" | "implements" | "verifies" | "illustrates" | "decides" | "discusses" | "tracks";
-  source: "repo-doc" | "code" | "test" | "asset" | "hivemind";
-  target: string;
-  anchor?: string;
-  revision?: string;
-  label?: string;
-};
-
-export type GraphEdge = {
-  id: string;
-  from: string;
-  to: string;
-  relation: string;
-  label?: string;
-};
-
-export type SemanticGraph = {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-};
-
-export type Projection = {
-  id: string;
-  name: string;
-  type: "conversation-map" | "project-map" | "overview" | "dive-in" | "snapshot";
-  rootNodeIds: string[];
-  visibleNodeIds: string[];
-  visibleEdgeIds: string[];
-  groups?: Array<{
-    id: string;
-    label: string;
-    nodeIds: string[];
-    categoryIds?: string[];
-  }>;
-  layout?: {
-    orientationNote?: {
-      title: string;
-      purpose: string;
-      usage: string[];
-    };
-    [key: string]: unknown;
-  };
-};
-
-export type ProjectionGroup = NonNullable<Projection["groups"]>[number];
-
-export type CategoryAssignment = {
-  id: string;
-  targetType: "node" | "edge" | "projection";
-  targetId: string;
-  categoryId: string;
-  status: "active" | "superseded";
-  provenance: "human" | "agent" | "system";
-  notes?: string;
-};
-
-export type FeedbackEvent = {
-  id: string;
-  createdAt: string;
-  type:
-    | "node_moved"
-    | "node_marked"
-    | "edge_marked"
-    | "map_comment"
-    | "group_requested"
-    | "dive_in_requested"
-    | "proposal_requested";
-  payload: Record<string, unknown>;
-  projectionId?: string;
-};
-
-export type GraphCommand =
-  | {
-      id: string;
-      type: "node.create";
-      payload: { node: GraphNode };
-    }
-  | {
-      id: string;
-      type: "edge.create";
-      payload: { edge: GraphEdge };
-    };
-
-export type GraphProposal = {
-  id: string;
-  createdAt: string;
-  sourceFeedbackIds: string[];
-  graphCommands: GraphCommand[];
-  explanation: string;
-  riskCategoryImpact?: string;
-  status: "pending" | "approved" | "rejected" | "applied" | "superseded";
-};
-
-export type SnapshotRecord = {
-  id: string;
-  createdAt: string;
-  projectionId?: string;
-  graph: SemanticGraph;
-  projection: Projection;
-};
-
-export type WorkspaceState = {
-  workspace: {
-    id: string;
-    slug?: string;
-    name: string;
-    archived?: boolean;
-    createdAt: string;
-    updatedAt?: string;
-  };
-  graph: SemanticGraph;
-  categoryAssignments: CategoryAssignment[];
-  feedbackEvents: FeedbackEvent[];
-  proposals: GraphProposal[];
-  projections: Projection[];
-  snapshots: SnapshotRecord[];
-  scanProfiles: ScanProfile[];
-  scanRuns: ScanRun[];
-};
-
-export type WorkspaceRecord = WorkspaceState["workspace"];
 
 export async function listWorkspaces(): Promise<WorkspaceRecord[]> {
-  const response = await request<{ workspaces: WorkspaceRecord[] }>("/workspaces");
+  const response = await request<ListWorkspacesResponse>("/workspaces");
   return response.workspaces;
 }
 
-export async function createWorkspace(workspace: WorkspaceState["workspace"]): Promise<void> {
+export async function createWorkspace(workspace: CreateWorkspaceRequest["workspace"]): Promise<void> {
   await request("/workspaces", {
     method: "POST",
     body: { workspace },
@@ -210,35 +66,16 @@ export async function createWorkspace(workspace: WorkspaceState["workspace"]): P
 }
 
 export async function getWorkspace(workspaceId: string): Promise<WorkspaceState> {
-  const response = await request<{ state: WorkspaceState }>(`/workspaces/${workspaceId}`);
+  const response = await request<GetWorkspaceResponse>(`/workspaces/${pathSegment(workspaceId)}`);
   return response.state;
 }
 
-export async function downloadWorkspaceBundle(workspaceId: string, exportedAt: string): Promise<Blob> {
-  const response = await fetch(`${API_BASE_URL}/workspaces/${encodeURIComponent(workspaceId)}/export-bundle`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ exportedAt }),
-  });
-  if (!response.ok) throw await responseError(response);
-  return response.blob();
-}
-
-export async function importWorkspaceBundle(
-  file: File,
-  mode: "new" | "replace",
-): Promise<WorkspaceRecord> {
-  const response = await fetch(`${API_BASE_URL}/workspace-import-bundles?mode=${mode}`, {
-    method: "POST",
-    headers: { "content-type": "application/zip" },
-    body: file,
-  });
-  if (!response.ok) throw await responseError(response);
-  return ((await response.json()) as { workspace: WorkspaceRecord }).workspace;
+export async function deleteScan(workspaceId: string, scanId: string): Promise<DeleteScanResponse> {
+  return request<DeleteScanResponse>(`/workspaces/${pathSegment(workspaceId)}/scans/${pathSegment(scanId)}`, { method: "DELETE" });
 }
 
 export async function createNode(workspaceId: string, node: GraphNode): Promise<SemanticGraph> {
-  const response = await request<{ graph: SemanticGraph }>(`/workspaces/${workspaceId}/commands`, {
+  const response = await request<ApplyGraphCommandsResponse>(`/workspaces/${pathSegment(workspaceId)}/commands`, {
     method: "POST",
     body: {
       commands: [
@@ -254,7 +91,7 @@ export async function createNode(workspaceId: string, node: GraphNode): Promise<
 }
 
 export async function createEdge(workspaceId: string, edge: GraphEdge): Promise<SemanticGraph> {
-  const response = await request<{ graph: SemanticGraph }>(`/workspaces/${workspaceId}/commands`, {
+  const response = await request<ApplyGraphCommandsResponse>(`/workspaces/${pathSegment(workspaceId)}/commands`, {
     method: "POST",
     body: {
       commands: [
@@ -270,7 +107,7 @@ export async function createEdge(workspaceId: string, edge: GraphEdge): Promise<
 }
 
 export async function createOverview(workspaceId: string, maxNodes: number): Promise<Projection> {
-  const response = await request<{ projection: Projection }>(`/workspaces/${workspaceId}/projections`, {
+  const response = await request<CreateProjectionResponse>(`/workspaces/${pathSegment(workspaceId)}/projections`, {
     method: "POST",
     body: {
       input: {
@@ -284,7 +121,7 @@ export async function createOverview(workspaceId: string, maxNodes: number): Pro
 }
 
 export async function createDiveIn(workspaceId: string, rootNodeId: string): Promise<Projection> {
-  const response = await request<{ projection: Projection }>(`/workspaces/${workspaceId}/projections`, {
+  const response = await request<CreateProjectionResponse>(`/workspaces/${pathSegment(workspaceId)}/projections`, {
     method: "POST",
     body: {
       input: {
@@ -303,7 +140,7 @@ export async function createProjectMap(
   visibleNodeIds: string[],
   options?: { name?: string; groups?: ProjectionGroup[]; layout?: Projection["layout"] },
 ): Promise<Projection> {
-  const response = await request<{ projection: Projection }>(`/workspaces/${workspaceId}/projections`, {
+  const response = await request<CreateProjectionResponse>(`/workspaces/${pathSegment(workspaceId)}/projections`, {
     method: "POST",
     body: {
       input: {
@@ -321,7 +158,7 @@ export async function createProjectMap(
 }
 
 export async function recordFeedback(workspaceId: string, feedbackEvent: FeedbackEvent): Promise<FeedbackEvent[]> {
-  const response = await request<{ feedbackEvents: FeedbackEvent[] }>(`/workspaces/${workspaceId}/feedback`, {
+  const response = await request<RecordFeedbackResponse>(`/workspaces/${pathSegment(workspaceId)}/feedback`, {
     method: "POST",
     body: { feedbackEvent },
   });
@@ -332,8 +169,8 @@ export async function assignCategory(
   workspaceId: string,
   assignment: CategoryAssignment,
 ): Promise<CategoryAssignment[]> {
-  const response = await request<{ assignments: CategoryAssignment[] }>(
-    `/workspaces/${workspaceId}/category-assignments`,
+  const response = await request<AssignCategoryResponse>(
+    `/workspaces/${pathSegment(workspaceId)}/category-assignments`,
     {
       method: "POST",
       body: { assignment },
@@ -343,7 +180,7 @@ export async function assignCategory(
 }
 
 export async function createProposal(workspaceId: string, proposal: GraphProposal): Promise<GraphProposal> {
-  const response = await request<{ proposal: GraphProposal }>(`/workspaces/${workspaceId}/proposals`, {
+  const response = await request<CreateProposalResponse>(`/workspaces/${pathSegment(workspaceId)}/proposals`, {
     method: "POST",
     body: { proposal },
   });
@@ -351,47 +188,37 @@ export async function createProposal(workspaceId: string, proposal: GraphProposa
 }
 
 export async function approveProposal(workspaceId: string, proposalId: string): Promise<GraphProposal> {
-  const response = await request<{ proposal: GraphProposal }>(
-    `/workspaces/${workspaceId}/proposals/${proposalId}/approve`,
+  const response = await request<ApproveProposalResponse>(
+    `/workspaces/${pathSegment(workspaceId)}/proposals/${pathSegment(proposalId)}/approve`,
     { method: "POST", body: {} },
   );
   return response.proposal;
 }
 
 export async function applyProposal(workspaceId: string, proposalId: string): Promise<GraphProposal> {
-  const response = await request<{ proposal: GraphProposal }>(
-    `/workspaces/${workspaceId}/proposals/${proposalId}/apply`,
+  const response = await request<ApplyProposalResponse>(
+    `/workspaces/${pathSegment(workspaceId)}/proposals/${pathSegment(proposalId)}/apply`,
     { method: "POST", body: {} },
   );
   return response.proposal;
 }
 
 export async function rejectProposal(workspaceId: string, proposalId: string): Promise<GraphProposal> {
-  const response = await request<{ proposal: GraphProposal }>(
-    `/workspaces/${workspaceId}/proposals/${proposalId}/reject`,
+  const response = await request<RejectProposalResponse>(
+    `/workspaces/${pathSegment(workspaceId)}/proposals/${pathSegment(proposalId)}/reject`,
     { method: "POST", body: {} },
   );
   return response.proposal;
 }
 
-export async function createSnapshot(
-  workspaceId: string,
-  snapshot: { id: string; createdAt: string; projectionId: string },
-): Promise<SnapshotRecord> {
-  const response = await request<{ snapshot: SnapshotRecord }>(`/workspaces/${workspaceId}/snapshots`, {
-    method: "POST",
-    body: { snapshot },
-  });
-  return response.snapshot;
-}
-
 async function request<T>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
   const init: RequestInit = {
     method: options.method ?? "GET",
+    headers: requestHeaders(),
   };
 
   if (options.body !== undefined) {
-    init.headers = { "content-type": "application/json" };
+    init.headers = requestHeaders({ "content-type": "application/json" });
     init.body = JSON.stringify(options.body);
   }
 
@@ -404,6 +231,17 @@ async function request<T>(path: string, options: { method?: string; body?: unkno
   }
 
   return body as T;
+}
+
+function requestHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const authToken = getAuthToken();
+  return authToken.length === 0
+    ? extra
+    : { ...extra, authorization: `Bearer ${authToken}` };
+}
+
+function pathSegment(value: string): string {
+  return encodeURIComponent(value);
 }
 
 async function responseError(response: Response): Promise<Error> {

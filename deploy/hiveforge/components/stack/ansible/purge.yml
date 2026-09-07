@@ -1,0 +1,9 @@
+---
+- name: Purge HiveMap stack
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Reject purge until HiveForge owns Docker purge execution
+      ansible.builtin.fail:
+        msg: "HiveMap purge requires HiveForge-owned Docker purge execution; project Ansible has no Docker access in contract 0.5."

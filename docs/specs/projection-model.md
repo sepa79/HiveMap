@@ -8,7 +8,6 @@ Projections are visual/readable views over the semantic graph.
 - `project-map`
 - `overview`
 - `dive-in`
-- `snapshot`
 
 ## Projection Rule
 
@@ -20,7 +19,7 @@ A projection may hide, group, position, or annotate graph data. It must not beco
 type Projection = {
   id: string;
   name: string;
-  type: "conversation-map" | "project-map" | "overview" | "dive-in" | "snapshot";
+  type: "conversation-map" | "project-map" | "overview" | "dive-in";
   rootNodeIds: string[];
   visibleNodeIds: string[];
   visibleEdgeIds: string[];
@@ -29,7 +28,7 @@ type Projection = {
 };
 ```
 
-`layout.orientationNote` is a projection-owned visual annotation with a non-empty `title`, `purpose`, and ordered `usage` steps. The UI renders it as a large note node. It explains a view without creating a fake semantic concept in the graph.
+`layout.orientationNote` is a projection-owned visual annotation with a non-empty `title`, `purpose`, and ordered `usage` steps. The UI exposes it as compact view help in the projection toolbar or inspector instead of manufacturing a semantic node or consuming map space with a pseudo-node.
 
 ```ts
 type ProjectionGroup = {
@@ -56,6 +55,7 @@ Dive-in projection:
 - includes directly connected neighbor nodes,
 - includes edges touching the root node,
 - may include category annotations as projection groups.
+- renders generic projection group counts as items; only findings-overview groups use finding counts.
 
 Finding dive-in projection:
 

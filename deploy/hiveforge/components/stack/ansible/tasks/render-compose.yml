@@ -1,0 +1,29 @@
+- name: Check HiveMap Compose template
+  ansible.builtin.stat:
+    path: "{{ hivemap_compose_template }}"
+  register: hivemap_compose_template_stat
+
+- name: Require HiveMap Compose template
+  ansible.builtin.assert:
+    that:
+      - hivemap_compose_template_stat.stat.exists
+      - hivemap_compose_template_stat.stat.isreg
+    fail_msg: "HiveMap Compose template is missing: {{ hivemap_compose_template }}"
+
+- name: Ensure HiveMap state directory exists
+  ansible.builtin.file:
+    path: "{{ hivemap_state_root }}/data"
+    state: directory
+    mode: "0755"
+
+- name: Ensure HiveMap rendered compose directory exists
+  ansible.builtin.file:
+    path: "{{ hivemap_compose_file | dirname }}"
+    state: directory
+    mode: "0755"
+
+- name: Render HiveMap Compose file
+  ansible.builtin.template:
+    src: "{{ hivemap_compose_template }}"
+    dest: "{{ hivemap_compose_file }}"
+    mode: "0644"

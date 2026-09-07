@@ -8,16 +8,27 @@ import {
   validateApplyProposalRequest,
   validateApproveProposalRequest,
   validateAssignCategoryRequest,
+  validateBuildScanBoundaryMapRequest,
+  validateCompleteScanRequest,
+  validateDeleteScanRequest,
   validateCreateProposalRequest,
-  validateCreateSnapshotRequest,
+  validateGetRepositoryIndexRequest,
   validateCreateWorkspaceRequest,
+  validateExecuteRepositoryIndexRequest,
+  validateGetScanProfileOverlayHelpRequest,
+  validateSuggestScanProfileOverlayRequest,
+  validateListRepositoryEvidenceCandidatesRequest,
   validateGetWorkspaceSummaryRequest,
   validateGetProjectionRequest,
-  validateExportWorkspaceBundleRequest,
-  validateImportWorkspaceBundleRequest,
+  validateListRepositoryIndexesRequest,
+  normalizeRepositoryUrlIdentifier,
   validateListWorkspaceSummariesRequest,
   validateRecordFeedbackRequest,
+  validateRecordScanCalibrationDecisionRequest,
   validateResolveWorkspaceRequest,
+  validateSearchRepositoryIndexRequest,
+  validateStartRepositoryIndexRequest,
+  validateValidateScanFindingRequest,
   type McpToolName,
   type McpToolRequestMap,
 } from "./index.js";
@@ -58,6 +69,277 @@ describe("api contracts", () => {
         ],
       }),
     ).toThrow(ApiContractValidationError);
+  });
+
+  it("validates repository index requests", () => {
+    expect(normalizeRepositoryUrlIdentifier(" HTTPS://EXAMPLE.COM/org/repo.git ")).toBe(
+      "https://example.com/org/repo.git",
+    );
+    expect(() => validateListRepositoryIndexesRequest({ workspaceId: "workspace-a" })).not.toThrow();
+    expect(() => validateGetRepositoryIndexRequest({ workspaceId: "workspace-a", indexId: "repo-index-a" })).not.toThrow();
+    expect(() =>
+      validateStartRepositoryIndexRequest({
+        workspaceId: "workspace-a",
+        index: {
+          id: "repo-index-a",
+          repositoryUrl: "https://example.com/org/repo.git",
+          requestedRef: "main",
+          mode: "safe",
+          requestedAt: "2026-08-20T12:00:00.000Z",
+          actor: {
+            agentId: "codex",
+            tool: "mcp",
+          },
+        },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateStartRepositoryIndexRequest({
+        workspaceId: "workspace-a",
+        index: {
+          id: "repo-index-a",
+          repositoryUrl: " ",
+          mode: "safe",
+          requestedAt: "2026-08-20T12:00:00.000Z",
+          actor: {
+            agentId: "codex",
+            tool: "mcp",
+          },
+        },
+      }),
+    ).toThrow("index.repositoryUrl must be non-empty");
+    expect(() =>
+      validateStartRepositoryIndexRequest({
+        workspaceId: "workspace-a",
+        index: {
+          id: "repo-index-secret",
+          repositoryUrl: "https://operator:secret@example.com/org/repo.git",
+          mode: "safe",
+          requestedAt: "2026-08-20T12:00:00.000Z",
+          actor: { agentId: "codex", tool: "test" },
+        },
+      }),
+    ).toThrow("index.repositoryUrl must not contain embedded credentials");
+    expect(() =>
+      validateStartRepositoryIndexRequest({
+        workspaceId: "workspace-a",
+        index: {
+          id: "repo-index-control-character",
+          repositoryUrl: "https://example.com/org/repo.git`\nInjected",
+          mode: "safe",
+          requestedAt: "2026-08-20T12:00:00.000Z",
+          actor: { agentId: "codex", tool: "test" },
+        },
+      }),
+    ).toThrow("index.repositoryUrl must not contain ASCII control characters or backticks");
+    expect(() =>
+      validateStartRepositoryIndexRequest({
+        workspaceId: "workspace-a",
+        index: {
+          id: "repo-index-ssh",
+          repositoryUrl: "ssh://git@example.com/org/repo.git",
+          mode: "safe",
+          requestedAt: "2026-08-20T12:00:00.000Z",
+          actor: { agentId: "codex", tool: "test" },
+        },
+      }),
+    ).toThrow("index.repositoryUrl must use HTTPS for remote repositories");
+    expect(() =>
+      validateStartRepositoryIndexRequest({
+        workspaceId: "workspace-a",
+        index: {
+          id: "repo-index-query",
+          repositoryUrl: "https://example.com/org/repo.git?access_token=secret",
+          mode: "safe",
+          requestedAt: "2026-08-20T12:00:00.000Z",
+          actor: { agentId: "codex", tool: "test" },
+        },
+      }),
+    ).toThrow("index.repositoryUrl must not contain query parameters or fragments");
+    expect(() =>
+      validateStartRepositoryIndexRequest({
+        workspaceId: "workspace-a",
+        index: {
+          id: "repo-index-fragment",
+          repositoryUrl: "https://example.com/org/repo.git#fragment",
+          mode: "safe",
+          requestedAt: "2026-08-20T12:00:00.000Z",
+          actor: { agentId: "codex", tool: "test" },
+        },
+      }),
+    ).toThrow("index.repositoryUrl must not contain query parameters or fragments");
+    expect(() =>
+      validateStartRepositoryIndexRequest({
+        workspaceId: "workspace-a",
+        index: {
+          id: "repo-index-option-ref",
+          repositoryUrl: "https://example.com/org/repo.git",
+          requestedRef: "--upload-pack=malicious",
+          mode: "safe",
+          requestedAt: "2026-08-20T12:00:00.000Z",
+          actor: { agentId: "codex", tool: "test" },
+        },
+      }),
+    ).toThrow("index.requestedRef must not begin with '-'");
+    expect(() =>
+      validateStartRepositoryIndexRequest({
+        workspaceId: "workspace-a",
+        index: {
+          id: "repo-index-uppercase-secret",
+          repositoryUrl: "HTTPS://operator:secret@example.com/org/repo.git",
+          mode: "safe",
+          requestedAt: "2026-08-20T12:00:00.000Z",
+          actor: { agentId: "codex", tool: "test" },
+        },
+      }),
+    ).toThrow("index.repositoryUrl must not contain embedded credentials");
+    expect(() => validateExecuteRepositoryIndexRequest({ workspaceId: "workspace-a", indexId: "repo-index-a" })).not.toThrow();
+    expect(() =>
+      validateSearchRepositoryIndexRequest({
+        workspaceId: "workspace-a",
+        indexId: "repo-index-a",
+        query: "ownership docs",
+        limit: 5,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateListRepositoryEvidenceCandidatesRequest({
+        workspaceId: "workspace-a",
+        indexId: "repo-index-a",
+        profileId: "documentation-conflicts",
+        profileVersion: 1,
+        criterionId: "broken-references",
+        limit: 5,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateGetScanProfileOverlayHelpRequest({
+        workspaceId: "workspace-a",
+        profileId: "code-quality-review",
+        profileVersion: 1,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateSuggestScanProfileOverlayRequest({
+        workspaceId: "workspace-a",
+        scanId: "scan-a",
+        symptomId: "scope-roots",
+      }),
+    ).not.toThrow();
+    expect(() => validateBuildScanBoundaryMapRequest({ workspaceId: "workspace-a", scanId: "scan-a" })).not.toThrow();
+  });
+
+  it("rejects unknown overlay suggestion symptoms", () => {
+    expect(() =>
+      validateSuggestScanProfileOverlayRequest({
+        workspaceId: "workspace-a",
+        scanId: "scan-a",
+        symptomId: "bad-symptom" as "scope-roots",
+      }),
+    ).toThrow("Unknown scan profile overlay symptom");
+  });
+
+  it("rejects semantically invalid boundary-map payloads on scan completion", () => {
+    expect(() =>
+      validateCompleteScanRequest({
+        workspaceId: "workspace-a",
+        scanId: "scan-a",
+        completedAt: "2026-08-24T12:00:00.000Z",
+        appliedCriteria: ["contract-drift"],
+        declaredOutputs: ["findings", "boundary-map"],
+        boundaryMap: {
+          boundaries: [
+            {
+              id: "boundary-runtime",
+              label: "Runtime",
+              kind: "module",
+              ownedPaths: ["packages/runtime/src/index.ts"],
+              ownedSymbolKeys: ["runtime:index"],
+              publicEntrypoints: [],
+              contractSourceRefs: [{ role: "defines", source: "repo-doc", target: "docs/architecture.md" }],
+              testSourceRefs: [{ role: "verifies", source: "test", target: "packages/runtime/src/index.test.ts" }],
+              confidence: "medium",
+            },
+            {
+              id: "boundary-shared",
+              label: "Shared",
+              kind: "module",
+              ownedPaths: ["packages/shared/src/index.ts"],
+              ownedSymbolKeys: ["shared:index"],
+              publicEntrypoints: [],
+              contractSourceRefs: [{ role: "defines", source: "repo-doc", target: "docs/shared.md" }],
+              testSourceRefs: [{ role: "verifies", source: "test", target: "packages/shared/src/index.test.ts" }],
+              confidence: "medium",
+            },
+          ],
+          relations: [
+            {
+              id: "runtime-depends-on-shared",
+              fromBoundaryId: "boundary-runtime",
+              toBoundaryId: "boundary-shared",
+              kind: "depends-on",
+              sourceRefs: [{ role: "implements", source: "code", target: "packages/runtime/src/index.ts" }],
+            },
+          ],
+        },
+      }),
+    ).toThrow("depends-on");
+  });
+
+  it("rejects an empty calibration override reason on scan completion", () => {
+    expect(() =>
+      validateCompleteScanRequest({
+        workspaceId: "workspace-a",
+        scanId: "scan-a",
+        completedAt: "2026-08-24T12:00:00.000Z",
+        appliedCriteria: ["contract-drift"],
+        declaredOutputs: ["findings"],
+        calibrationOverrideReason: "  ",
+      }),
+    ).toThrow("calibrationOverrideReason");
+  });
+
+  it("validates explicit calibration decisions for in-progress scans", () => {
+    expect(() =>
+      validateRecordScanCalibrationDecisionRequest({
+        workspaceId: "workspace-a",
+        scanId: "scan-a",
+        decision: "build-boundary-map",
+        rationale: "The provisional pass needs a structural check before findings.",
+        recordedAt: "2026-08-25T10:00:00.000Z",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateRecordScanCalibrationDecisionRequest({
+        workspaceId: "workspace-a",
+        scanId: "scan-a",
+        decision: "bad-decision" as "continue",
+        rationale: "nope",
+        recordedAt: "2026-08-25T10:00:00.000Z",
+      }),
+    ).toThrow("Unknown scan calibration decision");
+  });
+
+  it("validates explicit scan deletion identifiers", () => {
+    expect(() => validateDeleteScanRequest({ workspaceId: "workspace-a", scanId: "scan-a" })).not.toThrow();
+    expect(() => validateDeleteScanRequest({ workspaceId: "workspace-a", scanId: " " })).toThrow("scanId");
+  });
+
+  it("validates criterion-scoped finding validation requests", () => {
+    expect(() =>
+      validateValidateScanFindingRequest({
+        workspaceId: "workspace-a",
+        scanId: "scan-a",
+        criterionId: "duplicate-responsibility",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateValidateScanFindingRequest({
+        workspaceId: "workspace-a",
+        scanId: "scan-a",
+        criterionId: " ",
+      }),
+    ).toThrow("criterionId");
   });
 
   it("rejects empty graph command batches", () => {
@@ -137,31 +419,6 @@ describe("api contracts", () => {
   it("rejects proposal approve without proposal id", () => {
     expect(() => validateApproveProposalRequest({ workspaceId: "workspace-a", proposalId: "" })).toThrow(
       ApiContractValidationError,
-    );
-  });
-
-  it("validates snapshot creation requests", () => {
-    expect(() =>
-      validateCreateSnapshotRequest({
-        workspaceId: "workspace-a",
-        snapshot: {
-          id: "snapshot-a",
-          createdAt: "2026-05-13T21:00:00.000Z",
-          projectionId: "projection-a",
-        },
-      }),
-    ).not.toThrow();
-  });
-
-  it("validates browser ZIP bundle boundaries", () => {
-    expect(() =>
-      validateExportWorkspaceBundleRequest({
-        workspaceId: "workspace-a",
-        exportedAt: "2026-07-17T12:00:00.000Z",
-      }),
-    ).not.toThrow();
-    expect(() => validateImportWorkspaceBundleRequest({ bytes: new Uint8Array(), mode: "new" })).toThrow(
-      "bytes must contain a ZIP bundle",
     );
   });
 

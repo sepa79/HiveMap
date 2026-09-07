@@ -1,6 +1,6 @@
 # HiveMap First-Pass Design
 
-This document turns the POC learnings into a first product design for HiveMap.
+This document preserves the first product design derived from the POC. Its initial implementation sequence is historical; current runtime and public contracts are owned by `docs/architecture.md` and `docs/specs/*`.
 
 ## Product Thesis
 
@@ -26,7 +26,7 @@ HiveMap is not a transcript parser and not a diagram editor.
 3. Use categories to surface the extra project semantics: decisions, risks, rules, dependencies, stale concepts, and learnings.
 4. Default capture mode is delegated.
 5. MCP is the primary agent interface.
-6. SQLite is the first real persistence layer.
+6. SQLite was the first alpha persistence layer. The current runtime uses Postgres only; see [the storage contract](../specs/storage-format.md).
 7. Core packages and tests come before API/UI.
 
 ## Core User Experience
@@ -209,7 +209,7 @@ The first non-throwaway version should support:
 6. Open dive-in projection.
 7. Record feedback events.
 8. Let agent read feedback and apply or propose graph updates according to policy.
-9. Save snapshots.
+9. Retain immutable workspace evidence when a frozen checkpoint is needed.
 
 Authentication, collaboration, advanced layout optimization, and deep HiveMind integration are not required for the first product slice.
 
@@ -224,7 +224,7 @@ HiveMap 1.0-alpha succeeds if:
 - categories make trust/risk/uncertainty obvious,
 - delegated capture can keep up with a real conversation,
 - feedback events help the agent improve the map,
-- snapshots preserve useful demo/review states.
+- a future portable snapshot may preserve useful demo/review states, but no import/export surface exists in the current runtime.
 
 ## Non-Goals For First Implementation
 

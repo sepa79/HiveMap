@@ -20,10 +20,40 @@ npm run verify
 
 This is the same test, typecheck, and build sequence used by GitHub Actions.
 
-## Local Runtime
+## Full Local Acceptance
 
 ```bash
-npm run dev:api -- --db "$PWD/.hivemap/local.sqlite" --port 8787
+npm run verify:acceptance
+```
+
+This no-argument gate runs, in order:
+
+1. the normal build, typecheck, container-script, and workspace test suite;
+2. every PostgreSQL-gated storage, runtime, REST, and MCP suite against isolated databases in a disposable `pgvector/pg16` container;
+3. local Compose plus HiveForge `docker-single` and `docker-swarm` renders, including required-input failures and external-secret checks;
+4. one built-image smoke covering both auth-token sources, invalid auth configuration, public UI/health, REST/MCP auth, MCP-to-REST state, graph/projection operations, real pinned HTTPS repository indexing, rejected repository sources and refs, single-index concurrency, persistence, restart, interrupted-index recovery, SIGTERM, PostgreSQL outage/recovery, and the real-browser token lifecycle.
+
+The gate requires Docker, `curl`, `jq`, Ansible, Git, and network access to the pinned public acceptance repository. It installs the pinned Playwright Chromium build if it is not already cached. Every runtime and database created by the gate is disposable and isolated from developer data.
+
+Individual stages are available when diagnosing a failure:
+
+```bash
+npm run verify:postgres
+npm run verify:renders
+npm exec -- playwright install chromium
+npm run verify:image
+```
+
+Remote HiveForge/Swarm acceptance remains an operator step because it changes a shared test environment and uses an existing external Docker secret. Build/push with `npm run dev:hiveforge`, set the printed immutable `HIVEMAP_IMAGE` (prefer `tag@sha256` after resolving the registry digest), validate requirements, run HiveForge `update`, then verify the recorded compose, `1/1` runtime state, health/UI/auth boundaries, authorized REST/MCP/indexing, and persistence after a forced task replacement.
+
+## Local Runtime
+
+These commands describe the current local Postgres-first runtime. A working single-image local Docker runtime now exists for the API, built web UI, and bundled Postgres.
+
+```bash
+HIVEMAP_AUTH_TOKEN='replace-with-a-long-random-token' \
+HIVEMAP_POSTGRES_URL='postgres://postgres:postgres@127.0.0.1:5432/hivemap' \
+npm run dev:api -- --port 8787
 ```
 
 API: `http://127.0.0.1:8787`
@@ -34,11 +64,83 @@ npm run dev:web
 
 Web: `http://127.0.0.1:5175`
 
+Single-image container path:
+
 ```bash
-npm run start:mcp -- --db "$PWD/.hivemap/local.sqlite"
+HIVEMAP_AUTH_TOKEN='replace-with-a-long-random-token' docker compose up --build
 ```
 
-For an MCP client configuration, run the already-built `apps/mcp/dist/stdio.js` entry point directly as documented in the root `README.md`. This avoids npm lifecycle output on the stdio transport.
+That container path exposes protected REST and stateless Streamable HTTP MCP at `/mcp` through the same port and runtime. It is validated for workspace create, graph mutation, and projection create/read. It includes HiveMap's built-in repository indexing and scan handlers; there is no separate runtime plugin or bundled model-serving dependency. Postgres data is mounted at `./.local/hivemap-postgres` by the repository Compose file.
+
+The first released Postgres schema is `1`. A mounted database is reusable only when it already has that schema version. Pre-release development databases require a fresh dedicated database for this release; stop their runtime and preserve any wanted development evidence before preparing the new data directory. No migration chain is included now; later versions may add explicit migrations under the storage contract.
+
+Installed MCP endpoint:
+
+```text
+URL: http://127.0.0.1:8787/mcp
+Authorization: Bearer <HIVEMAP_AUTH_TOKEN>
+```
+
+Legacy local stdio adapter only when explicitly needed:
+
+```bash
+npm run build -w @hivemap/mcp
+npm exec -w @hivemap/mcp -- hivemap-mcp --postgres-url 'postgres://postgres:postgres@127.0.0.1:5432/hivemap'
+```
+
+For an MCP client configuration, run the already-built `apps/mcp/dist/stdio.js` entry point directly as documented in the root `README.md`. This avoids npm lifecycle output on the stdio transport. The stdio adapter is transitional and not the target local runtime shape.
+
+HiveForge scaffold smoke for the stack profiles:
+
+```bash
+ANSIBLE_LOCAL_TEMP=/tmp/ansible-local \
+ANSIBLE_REMOTE_TEMP=/tmp/ansible-remote \
+HIVEFORGE_PROFILE=docker-single \
+HIVEMAP_IMAGE=ghcr.io/sepa79/hivemap:test \
+ansible-playbook deploy/hiveforge/components/stack/ansible/deploy.yml -e hiveforge_root=/tmp/hf
+
+docker compose -f /tmp/hf/stacks/compose.yml config
+```
+
+Current HiveForge environment note:
+
+- Trusted-LAN Forgejo is `http://192.168.88.50:3001/`.
+- Shared HiveForge environment is `swarm`, so remote deploy validation should use the `docker-swarm` project profile, not `docker-single`.
+- The shared stack playbooks now accept both `docker-single` and `docker-swarm`.
+- For `docker-swarm`, require `HIVEMAP_DATA_BIND_SOURCE` as the exact HiveMap-owned local Postgres data path on the swarm node, for example `/opt/hivemap/postgres`.
+- For `docker-swarm`, also require `HIVEMAP_SWARM_PLACEMENT_CONSTRAINT`, for example `node.hostname == docker-swarm-mgr-1`, so HiveMap cannot move away from its node-local Postgres bind mount.
+- Local Compose requires `HIVEMAP_AUTH_TOKEN`. HiveForge requires the external
+  Docker secret `hivemap-auth-token`; the rendered stack passes only
+  `HIVEMAP_AUTH_TOKEN_FILE=/run/secrets/hivemap-auth-token` and protects both
+  REST and MCP.
+- A disposable test deployment may explicitly set
+  `HIVEMAP_PUBLIC_TEST_AUTH_TOKEN` to a known, non-secret value. In that mode
+  the rendered service receives direct `HIVEMAP_AUTH_TOKEN` and no secret
+  mount. Do not place a private credential in HiveForge runtime env.
+- The shared `hivemap-development` test deployment currently uses the public
+  bearer token `hivemap-test-only-2026-09-01-acceptance` through that override.
+- Any temporary path used by another local test stack is disposable infrastructure, not HiveMap's persistence contract.
+
+Local Forgejo/HiveForge dev snapshot loop:
+
+```bash
+npm run dev:hiveforge
+```
+
+That command:
+
+- snapshots the current working tree into a temporary clone under `/tmp/hivemap-hiveforge-dev-loop`,
+- reads the current remote SHA and force-pushes the stable Forgejo branch
+  `hivemap-dev-loop` with an explicit lease, so a concurrent remote update fails
+  instead of being overwritten,
+- builds and pushes both `192.168.88.50:3001/hiveforge/hivemap:dev-latest` and an immutable timestamped tag,
+- prints the exact `gitRef` and immutable image value to feed into the next HiveForge deploy/update action.
+
+Current boundary:
+
+- the repo-local command prepares Git and image artifacts; HiveForge MCP remains the operator boundary for runtime-env and lifecycle changes;
+- before every deploy/update, set `HIVEMAP_IMAGE` for `projectId=hivemap-development` and profile `docker-swarm` to the printed immutable image, then run the normal `deploy` or `update` for component `stack` and `gitRef=hivemap-dev-loop`;
+- do not use `dev-latest` as deployment identity: Portainer/Swarm may retain the previously resolved digest when a service is updated with the same moving tag.
 
 ## POC Install
 
@@ -78,8 +180,12 @@ npm test -w @hivemap/projections
 npm test -w @hivemap/scans
 npm test -w @hivemap/runtime
 npm test -w @hivemap/storage
+HIVEMAP_TEST_POSTGRES_URL=postgres://... npm test -w @hivemap/storage
+HIVEMAP_TEST_POSTGRES_URL=postgres://... npm test -w @hivemap/runtime
 npm test -w @hivemap/api
+HIVEMAP_TEST_POSTGRES_URL=postgres://... npm test -w @hivemap/api
 npm test -w @hivemap/mcp
+HIVEMAP_TEST_POSTGRES_URL=postgres://... npm test -w @hivemap/mcp
 npm test -w @hivemap/web
 npm run typecheck -w @hivemap/api-contracts
 npm run typecheck -w @hivemap/graph-core

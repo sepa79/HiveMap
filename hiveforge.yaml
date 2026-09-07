@@ -1,0 +1,33 @@
+kind: project
+version: "0.5"
+project:
+  name: hivemap
+  repository: https://github.com/sepa79/HiveMap.git
+  actions:
+    - deploy
+    - remove
+    - purge
+    - update
+    - upgrade
+  vars:
+    imageRepository.project: ghcr.io/sepa79/hivemap
+    extRepository.docker: docker.io
+    extRepository.ghcr: ghcr.io
+  profiles:
+    - id: docker-single
+      runtime: docker-single
+      serviceSet: single
+      requires:
+        managedRoot:
+          required: true
+          shared: true
+    - id: docker-swarm
+      runtime: docker-swarm
+      serviceSet: single
+      requires:
+        managedRoot:
+          required: true
+          shared: true
+components:
+  - name: stack
+    manifest: deploy/hiveforge/components/stack/hiveforge.yaml

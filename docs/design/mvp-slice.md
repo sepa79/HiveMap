@@ -1,6 +1,6 @@
 # MVP Slice
 
-This is the first implementation slice after the POC.
+This records the first implementation slice after the POC, with its runtime requirements aligned to the current alpha. The delivered Postgres/container scope and verification are tracked in [the runtime plan](postgres-container-hiveforge-plan.md); public behavior is owned by `docs/specs/*`.
 
 ## Goal
 
@@ -25,16 +25,18 @@ Build a local-first HiveMap alpha that proves:
 - Dive-in projection.
 - Proposal creation and apply/reject.
 - MCP tools for graph/projection/category/proposal operations.
-- SQLite local persistence.
+- Postgres persistence behind an explicit storage interface.
+- A self-contained local container for Postgres, REST, Streamable HTTP MCP, and the web UI.
+- One required bearer token shared by REST and MCP; public UI assets and health.
 
 ### Not Required
 
-- Authentication.
+- Multi-user authorization; the alpha uses one operator token.
 - Multi-user collaboration.
 - Cloud sync.
 - Automatic transcript ingestion.
 - Advanced layout AI.
-- Production deployment.
+- A hosted multi-user production service; local Docker and controlled HiveForge deployment are delivered in the runtime plan.
 - Full HiveMind integration.
 
 ## User Story
@@ -48,7 +50,7 @@ Build a local-first HiveMap alpha that proves:
 7. Agent applies a delegated update or creates a proposal if the policy requires review.
 8. Projection updates.
 9. User switches to Project Map semantics when the conversation is about a project.
-10. Snapshot is saved.
+10. Reviewed state remains persisted in the originating workspace; portability is deferred.
 
 ## Definition Of Done
 
@@ -59,7 +61,7 @@ Build a local-first HiveMap alpha that proves:
 - Overview projection hides detail by default.
 - Dive-in projection reveals local detail.
 - Categories are displayed and persisted.
-- POC snapshots remain available for comparison.
+- POC exported evidence remains available for comparison.
 - Core behavior has focused tests.
 
 ## Suggested Milestones
@@ -95,7 +97,7 @@ Build a local-first HiveMap alpha that proves:
 
 ### Milestone 5 — Demo Hardening
 
-- saved snapshots,
-- import POC demo snapshots,
+- document deferred project portability without implementing it,
+- keep POC demo evidence as reference-only files,
 - README run instructions,
 - final smoke test.

@@ -3,17 +3,23 @@ import { describe, expect, it } from "vitest";
 import type { ProjectSourceRef } from "@hivemap/graph-core";
 
 import {
+  validateBoundaryMap,
   CODE_QUALITY_PROFILE,
   DOCUMENTATION_CONFLICTS_PROFILE,
   ScanValidationError,
+  applyScanProfileOverlay,
   compareCompletedScans,
+  createBoundaryMapBuildConfig,
   createFindingNode,
   toFindingEvidence,
   updateFindingNode,
+  validateScanRun,
+  validateScanState,
   validateFindingNode,
   validateScanCoverage,
   validateScanProfile,
   type CompletedScanRun,
+  type InProgressScanRun,
 } from "./index.js";
 
 const sourceA: ProjectSourceRef = { role: "defines", source: "repo-doc", target: "docs/a.md", anchor: "Owner", revision: "a1" };
@@ -81,6 +87,379 @@ describe("repository scans", () => {
     expect(node.type).toBe("finding");
     expect(() => validateFindingNode(node)).not.toThrow();
     expect(toFindingEvidence(node).finding.fingerprint).toBe("owner-conflict");
+  });
+
+  it("requires finding ownership to match the owning scan in both directions", () => {
+    const finding = createFindingNode("scan-a", {
+      id: "finding-a",
+      label: "Unlisted finding",
+      notes: "The graph finding must be listed by its owning scan.",
+      fingerprint: "unlisted-finding",
+      kind: "authority-gap",
+      severity: "high",
+      confidence: "high",
+      criterionIds: ["contract-drift"],
+      sources: [{ sourceRef: sourceB, claim: "The finding ownership is inconsistent." }],
+      affectedNodeIds: [],
+    });
+    const run: InProgressScanRun = {
+      id: "scan-a",
+      profileId: CODE_QUALITY_PROFILE.id,
+      profileVersion: CODE_QUALITY_PROFILE.version,
+      repository: { root: "index:repo-a", repositoryIndexId: "repo-a", branch: "main", revision: "abc123" },
+      actor: { agentId: "agent-a", tool: "codex" },
+      startedAt: "2026-09-02T10:00:00.000Z",
+      status: "in_progress",
+      appliedCriteria: [],
+      declaredOutputs: [],
+      findingNodeIds: [],
+      calibrationDecisions: [],
+    };
+
+    expect(() => validateScanState([CODE_QUALITY_PROFILE], [run], { nodes: [finding], edges: [] }))
+      .toThrow("Finding finding-a is not listed by owning scan scan-a");
+    expect(() => validateScanState(
+      [CODE_QUALITY_PROFILE],
+      [{ ...run, findingNodeIds: [finding.id] }],
+      { nodes: [], edges: [] },
+    )).toThrow("Scan scan-a references missing finding: finding-a");
+  });
+
+  it("requires every affected finding node to remain in the active graph", () => {
+    const finding = createFindingNode("scan-a", {
+      id: "finding-a",
+      label: "Dangling affected node",
+      notes: "The affected concept was removed while the finding remained active.",
+      fingerprint: "dangling-affected-node",
+      kind: "architecture-risk",
+      severity: "high",
+      confidence: "high",
+      criterionIds: ["contract-drift"],
+      sources: [{ sourceRef: sourceB, claim: "The finding still references the removed concept." }],
+      affectedNodeIds: ["missing-concept"],
+    });
+    const run: InProgressScanRun = {
+      id: "scan-a",
+      profileId: CODE_QUALITY_PROFILE.id,
+      profileVersion: CODE_QUALITY_PROFILE.version,
+      repository: { root: "index:repo-a", repositoryIndexId: "repo-a", branch: "main", revision: "abc123" },
+      actor: { agentId: "agent-a", tool: "codex" },
+      startedAt: "2026-09-02T10:00:00.000Z",
+      status: "in_progress",
+      appliedCriteria: [],
+      declaredOutputs: [],
+      findingNodeIds: [finding.id],
+      calibrationDecisions: [],
+    };
+
+    expect(() => validateScanState([CODE_QUALITY_PROFILE], [run], { nodes: [finding], edges: [] }))
+      .toThrow("Finding finding-a references missing affected node: missing-concept");
+  });
+
+  it("rejects another finding as an affected node", () => {
+    const findingA = createFindingNode("scan-a", {
+      id: "finding-a",
+      label: "First finding",
+      notes: "The first finding must not become semantic input to another finding.",
+      fingerprint: "first-finding",
+      kind: "architecture-risk",
+      severity: "high",
+      confidence: "high",
+      criterionIds: ["contract-drift"],
+      sources: [{ sourceRef: sourceB, claim: "The first problem exists." }],
+      affectedNodeIds: [],
+    });
+    const findingB = createFindingNode("scan-a", {
+      id: "finding-b",
+      label: "Second finding",
+      notes: "This finding incorrectly treats another finding as an affected concept.",
+      fingerprint: "second-finding",
+      kind: "architecture-risk",
+      severity: "normal",
+      confidence: "medium",
+      criterionIds: ["contract-drift"],
+      sources: [{ sourceRef: sourceB, claim: "The second problem exists." }],
+      affectedNodeIds: [findingA.id],
+    });
+    const run: InProgressScanRun = {
+      id: "scan-a",
+      profileId: CODE_QUALITY_PROFILE.id,
+      profileVersion: CODE_QUALITY_PROFILE.version,
+      repository: { root: "index:repo-a", repositoryIndexId: "repo-a", branch: "main", revision: "abc123" },
+      actor: { agentId: "agent-a", tool: "codex" },
+      startedAt: "2026-09-02T10:00:00.000Z",
+      status: "in_progress",
+      appliedCriteria: [],
+      declaredOutputs: [],
+      findingNodeIds: [findingA.id, findingB.id],
+      calibrationDecisions: [],
+    };
+
+    expect(() => validateScanState([CODE_QUALITY_PROFILE], [run], { nodes: [findingA, findingB], edges: [] }))
+      .toThrow("Finding finding-b cannot reference another finding as an affected node: finding-a");
+  });
+
+  it("validates a typed boundary-map artifact", () => {
+    expect(() =>
+      validateBoundaryMap({
+        boundaries: [
+          {
+            id: "boundary-runtime",
+            label: "Runtime",
+            kind: "module",
+            ownedPaths: ["packages/runtime/**"],
+            ownedSymbolKeys: ["runtime:HiveMapRuntime"],
+            publicEntrypoints: [
+              {
+                id: "runtime-api",
+                label: "HiveMapRuntime API",
+                kind: "export",
+                symbolKey: "runtime:HiveMapRuntime",
+              },
+            ],
+            contractSourceRefs: [{ role: "defines", source: "repo-doc", target: "docs/architecture.md", anchor: "Main Components" }],
+            testSourceRefs: [{ role: "verifies", source: "test", target: "packages/runtime/src/index.test.ts" }],
+            confidence: "high",
+            openQuestions: ["Should runtime expose a narrower public surface?"],
+          },
+        ],
+        relations: [
+          {
+            id: "runtime-depends-on-storage",
+            fromBoundaryId: "boundary-runtime",
+            toBoundaryId: "boundary-runtime",
+            kind: "depends-on",
+            sourceRefs: [{ role: "depends-on", source: "code", target: "packages/runtime/src/index.ts", anchor: "constructor" }],
+          },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
+  it("builds boundary-map config from replaceable overlay fields", () => {
+    const config = createBoundaryMapBuildConfig({
+      formatVersion: 1,
+      profileId: CODE_QUALITY_PROFILE.id,
+      boundaryMapRoots: ["services:service", "shared:library"],
+      boundaryMapContractPathMarkers: ["/contracts/"],
+      boundaryMapContractFileStems: ["Runtime-Policy"],
+      boundaryMapIgnoredTokens: ["Docs", "Generated"],
+      boundaryMapTestDirectoryNames: ["Qa", "Specs"],
+      boundaryMapRoutePathMarkers: ["/endpoints/"],
+      boundaryMapRouteNameSuffixes: ["Flow"],
+      boundaryMapApiPathMarkers: ["/rpc/"],
+      boundaryMapApiNameSuffixes: ["Policy"],
+    });
+
+    expect(config).toEqual({
+      roots: [
+        { pathPrefix: "services", kind: "service" },
+        { pathPrefix: "shared", kind: "library" },
+      ],
+      contractPathMarkers: ["/contracts/"],
+      contractFileStems: ["runtime-policy"],
+      ignoredDocTokens: ["docs", "generated"],
+      testDirectoryNames: ["qa", "specs"],
+      routePathMarkers: ["/endpoints/"],
+      routeNameSuffixes: ["flow"],
+      apiPathMarkers: ["/rpc/"],
+      apiNameSuffixes: ["policy"],
+    });
+  });
+
+  it("replaces repository-specific profile sections through the overlay", () => {
+    const profile = applyScanProfileOverlay(CODE_QUALITY_PROFILE, {
+      formatVersion: 1,
+      profileId: CODE_QUALITY_PROFILE.id,
+      name: "Services code review",
+      description: "Repository-specific service review.",
+      instructions: ["Review services first."],
+      sourceTypes: ["code", "test"],
+      criteria: [{ id: "service-contract-drift", description: "Service behavior differs from the contract." }],
+      duplicateResponsibilityTopLevelSymbolKinds: ["class", "type-alias"],
+      duplicateResponsibilityIgnorePathGlobs: ["**/fixtures/**"],
+      ssotOrder: ["AGENTS.md", "services/**"],
+      requiredOutputs: ["findings", "boundary-map"],
+    });
+
+    expect(profile).toMatchObject({
+      name: "Services code review",
+      description: "Repository-specific service review.",
+      instructions: ["Review services first."],
+      sourceTypes: ["code", "test"],
+      criteria: [{ id: "service-contract-drift", description: "Service behavior differs from the contract." }],
+      duplicateResponsibilityTopLevelSymbolKinds: ["class", "type-alias"],
+      duplicateResponsibilityIgnorePathGlobs: ["**/fixtures/**"],
+      ssotOrder: ["AGENTS.md", "services/**"],
+      requiredOutputs: ["findings", "boundary-map"],
+    });
+  });
+
+  it("replaces documentation evidence recipes through the overlay", () => {
+    const profile = applyScanProfileOverlay(DOCUMENTATION_CONFLICTS_PROFILE, {
+      formatVersion: 1,
+      profileId: DOCUMENTATION_CONFLICTS_PROFILE.id,
+      duplicateAuthorityClaimPatterns: ["source of truth"],
+      duplicateAuthorityIgnoredTopicTokens: ["source", "truth"],
+      duplicateAuthorityGenericTopicTokens: ["runtime"],
+      missingOwnerMaterialPaths: ["docs/index.md"],
+      missingOwnerMaterialFileNames: ["readme.md"],
+      missingOwnerIgnoredPathMarkers: ["docs/history/"],
+      missingOwnerPathKeywords: ["design"],
+      missingOwnerTextKeywords: ["incident"],
+      staleDocumentationMaterialFileNames: ["readme.md"],
+      staleDocumentationIgnoredPathMarkers: ["archive"],
+      staleDocumentationPathKeywords: ["guide"],
+      staleDocumentationTextKeywords: ["supported"],
+      staleDocumentationNonCurrentPathMarkers: ["legacy"],
+      staleDocumentationNonCurrentTextMarkers: ["superseded by"],
+    });
+
+    expect(profile).toMatchObject({
+      duplicateAuthorityClaimPatterns: ["source of truth"],
+      duplicateAuthorityIgnoredTopicTokens: ["source", "truth"],
+      duplicateAuthorityGenericTopicTokens: ["runtime"],
+      missingOwnerMaterialPaths: ["docs/index.md"],
+      missingOwnerMaterialFileNames: ["readme.md"],
+      missingOwnerIgnoredPathMarkers: ["docs/history/"],
+      missingOwnerPathKeywords: ["design"],
+      missingOwnerTextKeywords: ["incident"],
+      staleDocumentationMaterialFileNames: ["readme.md"],
+      staleDocumentationIgnoredPathMarkers: ["archive"],
+      staleDocumentationPathKeywords: ["guide"],
+      staleDocumentationTextKeywords: ["supported"],
+      staleDocumentationNonCurrentPathMarkers: ["legacy"],
+      staleDocumentationNonCurrentTextMarkers: ["superseded by"],
+    });
+  });
+
+  it("requires explicit documentation evidence recipes when the related criteria are active", () => {
+    const {
+      duplicateAuthorityClaimPatterns: _omittedDuplicateAuthorityClaimPatterns,
+      ...profileWithoutDuplicateAuthorityClaimPatterns
+    } = DOCUMENTATION_CONFLICTS_PROFILE;
+    expect(() =>
+      validateScanProfile(profileWithoutDuplicateAuthorityClaimPatterns),
+    ).toThrow("duplicateAuthorityClaimPatterns");
+
+    const {
+      missingOwnerMaterialPaths: _omittedMissingOwnerMaterialPaths,
+      ...profileWithoutMissingOwnerMaterialPaths
+    } = DOCUMENTATION_CONFLICTS_PROFILE;
+    expect(() =>
+      validateScanProfile(profileWithoutMissingOwnerMaterialPaths),
+    ).toThrow("missingOwnerMaterialPaths");
+
+    const {
+      staleDocumentationNonCurrentTextMarkers: _omittedStaleDocumentationNonCurrentTextMarkers,
+      ...profileWithoutStaleDocumentationNonCurrentTextMarkers
+    } = DOCUMENTATION_CONFLICTS_PROFILE;
+    expect(() =>
+      validateScanProfile(profileWithoutStaleDocumentationNonCurrentTextMarkers),
+    ).toThrow("staleDocumentationNonCurrentTextMarkers");
+  });
+
+  it("requires an explicit duplicate-responsibility recipe when that criterion is active", () => {
+    const {
+      duplicateResponsibilityTopLevelSymbolKinds: _omittedTopLevelKinds,
+      ...profileWithoutTopLevelKinds
+    } = CODE_QUALITY_PROFILE;
+    expect(() =>
+      validateScanProfile(profileWithoutTopLevelKinds),
+    ).toThrow("duplicateResponsibilityTopLevelSymbolKinds");
+
+    const {
+      duplicateResponsibilityIgnorePathGlobs: _omittedIgnoreGlobs,
+      ...profileWithoutIgnoreGlobs
+    } = CODE_QUALITY_PROFILE;
+    expect(() =>
+      validateScanProfile(profileWithoutIgnoreGlobs),
+    ).toThrow("duplicateResponsibilityIgnorePathGlobs");
+  });
+
+  it("rejects overlays that produce an invalid effective profile", () => {
+    expect(() =>
+      applyScanProfileOverlay(CODE_QUALITY_PROFILE, {
+        formatVersion: 1,
+        profileId: CODE_QUALITY_PROFILE.id,
+        instructions: [],
+      }),
+    ).toThrow("profile.instructions");
+
+    expect(() =>
+      applyScanProfileOverlay(CODE_QUALITY_PROFILE, {
+        formatVersion: 1,
+        profileId: CODE_QUALITY_PROFILE.id,
+        sourceTypes: [],
+      }),
+    ).toThrow("profile.sourceTypes");
+
+    expect(() =>
+      applyScanProfileOverlay(CODE_QUALITY_PROFILE, {
+        formatVersion: 1,
+        profileId: CODE_QUALITY_PROFILE.id,
+        ssotOrder: [],
+      }),
+    ).toThrow("profile.ssotOrder");
+  });
+
+  it("rejects semantically invalid boundary-map evidence", () => {
+    expect(() =>
+      validateBoundaryMap({
+        boundaries: [
+          {
+            id: "boundary-runtime",
+            label: "Runtime",
+            kind: "module",
+            ownedPaths: ["packages/runtime/src/index.ts"],
+            ownedSymbolKeys: ["runtime:index"],
+            publicEntrypoints: [],
+            contractSourceRefs: [{ role: "defines", source: "repo-doc", target: "docs/architecture.md" }],
+            testSourceRefs: [{ role: "implements", source: "code", target: "packages/runtime/src/index.test.ts" }],
+            confidence: "medium",
+          },
+        ],
+        relations: [],
+      }),
+    ).toThrow("testSourceRefs");
+
+    expect(() =>
+      validateBoundaryMap({
+        boundaries: [
+          {
+            id: "boundary-runtime",
+            label: "Runtime",
+            kind: "module",
+            ownedPaths: ["packages/runtime/src/index.ts"],
+            ownedSymbolKeys: ["runtime:index"],
+            publicEntrypoints: [],
+            contractSourceRefs: [{ role: "defines", source: "repo-doc", target: "docs/architecture.md" }],
+            testSourceRefs: [{ role: "verifies", source: "test", target: "packages/runtime/src/index.test.ts" }],
+            confidence: "medium",
+          },
+          {
+            id: "boundary-shared",
+            label: "Shared",
+            kind: "module",
+            ownedPaths: ["packages/shared/src/index.ts"],
+            ownedSymbolKeys: ["shared:index"],
+            publicEntrypoints: [],
+            contractSourceRefs: [{ role: "defines", source: "repo-doc", target: "docs/shared.md" }],
+            testSourceRefs: [{ role: "verifies", source: "test", target: "packages/shared/src/index.test.ts" }],
+            confidence: "medium",
+          },
+        ],
+        relations: [
+          {
+            id: "runtime-depends-on-shared",
+            fromBoundaryId: "boundary-runtime",
+            toBoundaryId: "boundary-shared",
+            kind: "depends-on",
+            sourceRefs: [{ role: "implements", source: "code", target: "packages/runtime/src/index.ts" }],
+          },
+        ],
+      }),
+    ).toThrow("depends-on");
   });
 
   it("rejects resolved findings without evidence", () => {
@@ -168,6 +547,13 @@ describe("repository scans", () => {
     expect(comparison.items[0]?.status).toBe("unverifiable");
     expect(comparison.verdict).toBe("fail");
   });
+
+  it("requires boundary-map evidence when a completed scan declares the output", () => {
+    const run = completedRun("scan-boundary", [], ["src/a.ts"]);
+    run.declaredOutputs = [...run.declaredOutputs, "boundary-map"];
+
+    expect(() => validateScanRun(run, [DOCUMENTATION_CONFLICTS_PROFILE])).toThrow("boundary-map");
+  });
 });
 
 function completedRun(id: string, findingEvidence: CompletedScanRun["findingEvidence"], discovered: string[]): CompletedScanRun {
@@ -183,6 +569,7 @@ function completedRun(id: string, findingEvidence: CompletedScanRun["findingEvid
     appliedCriteria: DOCUMENTATION_CONFLICTS_PROFILE.criteria.map((criterion) => criterion.id),
     declaredOutputs: [...DOCUMENTATION_CONFLICTS_PROFILE.requiredOutputs],
     findingNodeIds: findingEvidence.map((evidence) => evidence.nodeId),
+    calibrationDecisions: [],
     completedAt: "2026-07-17T10:01:00.000Z",
     graphDigest: id,
     findingEvidence,

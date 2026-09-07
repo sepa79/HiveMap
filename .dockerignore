@@ -1,0 +1,15 @@
+.git
+.github
+.codex
+.agents
+node_modules
+apps/*/node_modules
+packages/*/node_modules
+poc/node_modules
+apps/*/dist
+packages/*/dist
+poc/dist
+.hivemap
+.DS_Store
+coverage
+*.log

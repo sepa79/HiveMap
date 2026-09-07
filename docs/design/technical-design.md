@@ -1,6 +1,6 @@
 # Technical Design First Pass
 
-This is a first technical design, not an implementation plan lock-in.
+This records the first technical design. Package boundaries remain useful design context; the illustrative API and implementation sequence below are historical, not current public contracts. Use [architecture](../architecture.md), [REST](../specs/rest-api.md), and [MCP](../specs/mcp-tools.md) for the current owners.
 
 ## Architecture Shape
 
@@ -62,7 +62,6 @@ Owns:
 - overview projection,
 - dive-in projection,
 - project map projection,
-- snapshot projection,
 - grouping logic.
 
 It reads graph data and produces projection data. It does not mutate graph semantics.
@@ -71,7 +70,9 @@ It reads graph data and produces projection data. It does not mutate graph seman
 
 Owns persistence adapters.
 
-Initial adapter is SQLite, behind explicit interfaces.
+Runtime direction is Postgres behind explicit interfaces.
+
+The historical SQLite alpha is evidence only. Postgres is the implemented runtime backend; no SQLite runtime adapter or migration bridge is supported.
 
 ### `api-contracts`
 
@@ -95,18 +96,17 @@ Browser UI for maps, projections, feedback, and proposal review.
 
 ## Storage First Pass
 
-Use SQLite for first real implementation.
+The runtime uses explicit storage interfaces backed by Postgres, preserving the shared transport and domain behavior.
 
 Reasoning:
 
-- local-first,
-- durable,
-- inspectable,
-- supports graph/projection/event tables,
-- avoids premature service dependency,
-- easier than JSON once proposals/snapshots/events exist.
+- container-friendly runtime,
+- single supported backend instead of parallel SQLite/Postgres paths,
+- durable persistence for graph/projection/event tables,
+- compatible with HiveForge deployment goals,
+- compatible with the protected Streamable HTTP MCP transport now hosted by the shared runtime.
 
-Do not add remote DB, auth, or sync until local workflow is proven.
+Do not block the base runtime/container track on embedding-provider work or future portability. The current runtime has no import/export boundary; a versioned streaming NDJSON full-project snapshot is the deferred direction.
 
 ## Tables / Stores
 
@@ -122,7 +122,6 @@ Initial persistence concerns:
 - `feedback_events`
 - `proposals`
 - `projections`
-- `snapshots`
 
 Exact schema belongs in `docs/specs/storage-format.md` before implementation.
 
@@ -193,7 +192,7 @@ UI tests can come after core contracts stabilize.
 3. Implement `categories` with stable semantic ids and tests.
 4. Implement `capture` event/proposal/policy types with delegated default.
 5. Implement `projections` overview/dive-in logic with tests.
-6. Implement SQLite storage behind explicit interfaces.
+6. Implement Postgres storage behind explicit interfaces.
 7. Implement MCP graph tools.
 8. Implement API command endpoint over the same handlers.
 9. Implement web overview projection.

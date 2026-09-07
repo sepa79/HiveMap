@@ -1,0 +1,22 @@
+kind: component
+component:
+  name: stack
+  project: hivemap
+deployment:
+  adapter: ansible
+  actions:
+    deploy:
+      playbook: ansible/deploy.yml
+    remove:
+      playbook: ansible/remove.yml
+    purge:
+      playbook: ansible/purge.yml
+    update:
+      playbook: ansible/update.yml
+    upgrade:
+      playbook: ansible/upgrade.yml
+requirements:
+  secrets:
+    - hivemap-auth-token
+  environment:
+    - HIVEMAP_IMAGE

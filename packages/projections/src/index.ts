@@ -1,6 +1,6 @@
 import { validateGraph, type SemanticGraph } from "@hivemap/graph-core";
 
-const PROJECTION_TYPES = ["conversation-map", "project-map", "overview", "dive-in", "snapshot"] as const;
+const PROJECTION_TYPES = ["conversation-map", "project-map", "overview", "dive-in"] as const;
 
 export type ProjectionType = (typeof PROJECTION_TYPES)[number];
 
@@ -12,13 +12,17 @@ export type Projection = {
   visibleNodeIds: string[];
   visibleEdgeIds: string[];
   groups?: ProjectionGroup[];
-  layout?: Record<string, unknown>;
+  layout?: ProjectionLayout;
 };
 
 export type ProjectionOrientationNote = {
   title: string;
   purpose: string;
   usage: string[];
+};
+
+export type ProjectionLayout = Record<string, unknown> & {
+  orientationNote?: ProjectionOrientationNote;
 };
 
 export type ProjectionGroup = {

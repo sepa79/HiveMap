@@ -1,0 +1,24 @@
+---
+- name: Deploy HiveMap stack
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    hiveforge_root: /hf
+    hivemap_profile: "{{ lookup('ansible.builtin.env', 'HIVEFORGE_PROFILE') }}"
+    hivemap_compose_template: "{{ playbook_dir }}/templates/docker-compose.yml.j2"
+    hivemap_compose_file: "{{ hiveforge_root }}/stacks/compose.yml"
+    hivemap_state_root: "{{ hiveforge_root }}/state/postgres"
+    hivemap_data_bind_source: "{{ lookup('ansible.builtin.env', 'HIVEMAP_DATA_BIND_SOURCE') }}"
+    hivemap_swarm_placement_constraint: "{{ lookup('ansible.builtin.env', 'HIVEMAP_SWARM_PLACEMENT_CONSTRAINT') }}"
+    hivemap_image: "{{ lookup('ansible.builtin.env', 'HIVEMAP_IMAGE') }}"
+    hivemap_public_test_auth_token: "{{ lookup('ansible.builtin.env', 'HIVEMAP_PUBLIC_TEST_AUTH_TOKEN') }}"
+    hivemap_http_port: "{{ lookup('ansible.builtin.env', 'HIVEMAP_HTTP_PORT') | default('8787', true) }}"
+    hivemap_postgres_db: "{{ lookup('ansible.builtin.env', 'HIVEMAP_POSTGRES_DB') | default('hivemap', true) }}"
+    hivemap_postgres_port: "{{ lookup('ansible.builtin.env', 'HIVEMAP_POSTGRES_PORT') | default('5432', true) }}"
+  tasks:
+    - name: Validate HiveMap profile and inputs
+      ansible.builtin.import_tasks: tasks/validate-profile.yml
+
+    - name: Render HiveMap Compose file
+      ansible.builtin.import_tasks: tasks/render-compose.yml

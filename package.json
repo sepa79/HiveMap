@@ -1,6 +1,6 @@
 {
   "name": "hivemap",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "license": "GPL-3.0-or-later",
   "type": "module",
@@ -16,16 +16,22 @@
   "scripts": {
     "build": "npm run build:packages && npm run build:apps",
     "build:packages": "npm run build -w @hivemap/graph-core && npm run build -w @hivemap/categories && npm run build -w @hivemap/capture && npm run build -w @hivemap/projections && npm run build -w @hivemap/scans && npm run build -w @hivemap/storage && npm run build -w @hivemap/api-contracts && npm run build -w @hivemap/runtime",
-    "build:apps": "npm run build -w @hivemap/api && npm run build -w @hivemap/mcp && npm run build -w @hivemap/web",
+    "build:apps": "npm run build -w @hivemap/mcp && npm run build -w @hivemap/api && npm run build -w @hivemap/web",
     "dev:api": "npm run build && npm exec -w @hivemap/api -- hivemap-api",
     "dev:web": "npm run dev -w @hivemap/web --",
-    "start:mcp": "npm run build && npm exec -w @hivemap/mcp -- hivemap-mcp",
+    "dev:hiveforge": "bash tools/hiveforge-dev-loop.sh",
     "test": "npm run build:packages && npm run test:workspaces",
+    "test:container-scripts": "bash docker/runtime-supervisor.test.sh && bash -n docker/hivemap-entrypoint.sh docker/runtime-supervisor.sh",
     "test:workspaces": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "verify": "npm run build && npm run typecheck && npm run test:workspaces"
+    "verify": "npm run build && npm run typecheck && npm run test:container-scripts && npm run test:workspaces",
+    "verify:postgres": "bash tools/acceptance/real-postgres.sh",
+    "verify:renders": "bash tools/acceptance/render-smoke.sh",
+    "verify:image": "bash tools/acceptance/image-smoke.sh",
+    "verify:acceptance": "npm run verify && npm run verify:postgres && npm run verify:renders && npm exec -- playwright install chromium && npm run verify:image"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/node": "^24.10.1",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"

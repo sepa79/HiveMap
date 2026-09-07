@@ -1,0 +1,47 @@
+- name: Require explicit HIVEFORGE_PROFILE
+  ansible.builtin.assert:
+    that:
+      - hivemap_profile | length > 0
+    fail_msg: "HIVEFORGE_PROFILE must be set explicitly for HiveMap."
+
+- name: Require supported HiveMap profile
+  ansible.builtin.assert:
+    that:
+      - hivemap_profile in ['docker-single', 'docker-swarm']
+    fail_msg: "Unsupported HIVEFORGE_PROFILE for HiveMap: {{ hivemap_profile }}"
+
+- name: Require HiveMap image reference
+  ansible.builtin.assert:
+    that:
+      - hivemap_image | length > 0
+    fail_msg: "HIVEMAP_IMAGE must be set explicitly."
+
+- name: Require HiveMap Postgres bind source for docker-swarm
+  ansible.builtin.assert:
+    that:
+      - hivemap_profile != 'docker-swarm' or hivemap_data_bind_source | length > 0
+    fail_msg: "For docker-swarm, set HIVEMAP_DATA_BIND_SOURCE to an explicit persistent local path."
+
+- name: Require HiveMap swarm placement constraint for docker-swarm
+  ansible.builtin.assert:
+    that:
+      - hivemap_profile != 'docker-swarm' or hivemap_swarm_placement_constraint | length > 0
+    fail_msg: "For docker-swarm, set HIVEMAP_SWARM_PLACEMENT_CONSTRAINT explicitly so the service cannot move away from its local Postgres bind source."
+
+- name: Require HiveMap HTTP port
+  ansible.builtin.assert:
+    that:
+      - hivemap_http_port | length > 0
+    fail_msg: "HIVEMAP_HTTP_PORT must resolve to a non-empty value."
+
+- name: Require HiveMap Postgres database name
+  ansible.builtin.assert:
+    that:
+      - hivemap_postgres_db | length > 0
+    fail_msg: "HIVEMAP_POSTGRES_DB must resolve to a non-empty value."
+
+- name: Require HiveMap Postgres port
+  ansible.builtin.assert:
+    that:
+      - hivemap_postgres_port | length > 0
+    fail_msg: "HIVEMAP_POSTGRES_PORT must resolve to a non-empty value."

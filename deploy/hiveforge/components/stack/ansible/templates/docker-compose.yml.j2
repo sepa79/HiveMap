@@ -1,0 +1,40 @@
+services:
+  hivemap:
+    image: "{{ hivemap_image }}"
+    restart: on-failure
+    environment:
+      HIVEMAP_API_HOST: "0.0.0.0"
+      HIVEMAP_API_PORT: "8787"
+{% if hivemap_public_test_auth_token | length > 0 %}
+      HIVEMAP_AUTH_TOKEN: {{ hivemap_public_test_auth_token | to_json }}
+{% else %}
+      HIVEMAP_AUTH_TOKEN_FILE: "/run/secrets/hivemap-auth-token"
+{% endif %}
+      HIVEMAP_POSTGRES_DB: "{{ hivemap_postgres_db }}"
+      HIVEMAP_POSTGRES_PORT: "{{ hivemap_postgres_port }}"
+      HIVEMAP_DATA_DIR: "/var/lib/hivemap/postgres"
+      HIVEMAP_WEB_DIST: "/app/apps/web/dist"
+    ports:
+      - "{{ hivemap_http_port }}:8787"
+    volumes:
+      - "{{ (hivemap_profile == 'docker-swarm') | ternary(hivemap_data_bind_source, hivemap_state_root ~ '/data') }}:/var/lib/hivemap/postgres"
+{% if hivemap_public_test_auth_token | length == 0 %}
+    secrets:
+      - hivemap-auth-token
+{% endif %}
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+{% if hivemap_profile == 'docker-swarm' %}
+      placement:
+        constraints:
+          - "{{ hivemap_swarm_placement_constraint }}"
+{% endif %}
+
+{% if hivemap_public_test_auth_token | length == 0 %}
+secrets:
+  hivemap-auth-token:
+    external: true
+{% endif %}

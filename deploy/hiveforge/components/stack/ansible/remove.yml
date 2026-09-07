@@ -1,0 +1,9 @@
+---
+- name: Remove HiveMap stack
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Reject remove until HiveForge owns Docker remove execution
+      ansible.builtin.fail:
+        msg: "HiveMap remove requires HiveForge-owned Docker remove execution; project Ansible has no Docker access in contract 0.5."

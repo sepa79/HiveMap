@@ -1,6 +1,6 @@
 {
   "name": "@hivemap/mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -12,18 +12,22 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./http": {
+      "types": "./dist/http.d.ts",
+      "default": "./dist/http.js"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "pretest": "npm run build -w @hivemap/runtime",
+    "pretest": "npm run build -w @hivemap/api-contracts && npm run build -w @hivemap/runtime",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@hivemap/api-contracts": "0.1.0",
-    "@hivemap/runtime": "0.1.0",
-    "@hivemap/storage": "0.1.0",
+    "@hivemap/api-contracts": "0.2.0",
+    "@hivemap/runtime": "0.2.0",
+    "@hivemap/storage": "0.2.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "^4.4.3"
   },

@@ -1,3 +1,8 @@
+/**
+ * Responsibility: Define and validate shared REST/MCP application request and response contracts.
+ * Must not: Execute runtime commands, persist state, or implement transport lifecycle.
+ * Contract: Untyped boundary input is validated once into canonical explicit HiveMap operation shapes.
+ */
 import {
   validateFeedbackEvent,
   validateGraphProposal,
@@ -19,17 +24,24 @@ import {
   type Projection,
 } from "@hivemap/projections";
 import {
+  SCAN_CALIBRATION_DECISION_VALUES,
+  normalizeRepositoryLocation,
+  RepositoryLocationValidationError,
+  validateBoundaryMap,
   validateScanCoverage,
+  type BoundaryMapArtifact,
   type FindingNodeInput,
   type FindingNodeUpdate,
   type InProgressScanRun,
+  type ScanCalibrationDecision,
+  type ScanCalibrationDecisionRecord,
   type ScanComparison,
   type ScanCoverage,
   type ScanProfile,
   type ScanRequiredOutput,
   type ScanRun,
 } from "@hivemap/scans";
-import type { BundleManifest, SnapshotRecord, WorkspaceRecord, WorkspaceState } from "@hivemap/storage";
+import type { WorkspaceRecord, WorkspaceState } from "@hivemap/storage";
 
 export type OperationResult<T> = {
   ok: true;
@@ -98,6 +110,338 @@ export type GetGraphRequest = {
 
 export type GetGraphResponse = {
   graph: SemanticGraph;
+};
+
+export type UpsertConceptEmbeddingRequest = {
+  workspaceId: string;
+  nodeId: string;
+  embedding: {
+    model: string;
+    values: number[];
+    updatedAt: string;
+  };
+};
+
+export type UpsertConceptEmbeddingResponse = {
+  embedding: {
+    workspaceId: string;
+    nodeId: string;
+    model: string;
+    dimensions: number;
+    contentDigest: string;
+    updatedAt: string;
+  };
+};
+
+export type ListSimilarConceptsRequest = {
+  workspaceId: string;
+  nodeId: string;
+  model: string;
+  limit?: number;
+  minScore?: number;
+};
+
+export type ListSimilarConceptsResponse = {
+  sourceNodeId: string;
+  model: string;
+  matches: Array<{
+    nodeId: string;
+    label: string;
+    score: number;
+    updatedAt: string;
+  }>;
+};
+
+export type RepositoryIndexMode = "safe" | "deep";
+
+export type RepositoryIndexStage =
+  | "requested"
+  | "resolving_ref"
+  | "checking_out"
+  | "discovering"
+  | "indexing_syntax"
+  | "running_rules"
+  | "embedding_changed_chunks"
+  | "normalizing"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type RepositoryIndexActor = {
+  agentId: string;
+  tool: string;
+};
+
+export type RepositoryIndexFailure = {
+  code: string;
+  message: string;
+};
+
+export type RepositoryIndexStats = {
+  fileCount: number;
+  chunkCount: number;
+  indexedBytes: number;
+};
+
+export type RepositoryIndexRecord = {
+  id: string;
+  workspaceId: string;
+  repositoryUrl: string;
+  requestedRef?: string;
+  resolvedCommit?: string;
+  mode: RepositoryIndexMode;
+  stage: RepositoryIndexStage;
+  requestedAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  actor: RepositoryIndexActor;
+  failure?: RepositoryIndexFailure;
+  stats?: RepositoryIndexStats;
+};
+
+export type ListRepositoryIndexesRequest = {
+  workspaceId: string;
+};
+
+export type ListRepositoryIndexesResponse = {
+  indexes: RepositoryIndexRecord[];
+};
+
+export type GetRepositoryIndexRequest = {
+  workspaceId: string;
+  indexId: string;
+};
+
+export type GetRepositoryIndexResponse = {
+  index: RepositoryIndexRecord;
+};
+
+export type StartRepositoryIndexRequest = {
+  workspaceId: string;
+  index: Pick<RepositoryIndexRecord, "id" | "repositoryUrl" | "requestedRef" | "mode" | "requestedAt" | "actor">;
+};
+
+export type StartRepositoryIndexResponse = {
+  index: RepositoryIndexRecord;
+};
+
+export type ExecuteRepositoryIndexRequest = {
+  workspaceId: string;
+  indexId: string;
+};
+
+export type ExecuteRepositoryIndexResponse = {
+  index: RepositoryIndexRecord;
+};
+
+export type RepositorySearchHit = {
+  kind: "file" | "chunk";
+  filePath: string;
+  language: string;
+  sourceKind: string;
+  score: number;
+  snippet: string;
+  startLine?: number;
+  endLine?: number;
+};
+
+export type SearchRepositoryIndexRequest = {
+  workspaceId: string;
+  indexId: string;
+  query: string;
+  limit?: number;
+};
+
+export type SearchRepositoryIndexResponse = {
+  indexId: string;
+  query: string;
+  hits: RepositorySearchHit[];
+};
+
+export type RepositoryEvidenceSource = {
+  kind: "file" | "chunk";
+  filePath: string;
+  language: string;
+  sourceKind: string;
+  snippet: string;
+  whySelected: string;
+  startLine?: number;
+  endLine?: number;
+};
+
+export type RepositoryEvidenceCandidate = {
+  id: string;
+  criterionId: string;
+  signal: string;
+  kind: "deterministic" | "requires_interpretation";
+  title: string;
+  summary: string;
+  sources: RepositoryEvidenceSource[];
+};
+
+export type ScanProfileOverlayResolution = {
+  status: "found" | "missing";
+  source: "repo" | "defaults";
+  applied: boolean;
+  overlayPath: string;
+  guidanceTool: "scan_profile_overlay_help";
+  nextActionHint: string;
+  mergedIncludeCount: number;
+  mergedExcludeCount: number;
+};
+
+export type ScanCoverageSummary = {
+  discoveredCount: number;
+  includedCount: number;
+  excludedCount: number;
+  failedCount: number;
+  discoveredCodeFileCount: number;
+  includedCodeFileCount: number;
+  discoveredTopLevelCodeSymbolCount: number;
+  includedTopLevelCodeSymbolCount: number;
+  warnings: string[];
+};
+
+export type ScanCalibrationClassification = "findings-ready" | "profile-gap" | "missing-evidence" | "ambiguous-shape";
+
+export type ScanCalibrationAssessment = {
+  classification: ScanCalibrationClassification;
+  confidence: "low" | "medium" | "high";
+  summary: string;
+  reasons: string[];
+  recommendedActions: string[];
+};
+
+export type ScanFindingValidationClassification =
+  | "likely-real-finding"
+  | "profile-gap"
+  | "missing-evidence"
+  | "ambiguous-shape";
+
+export type ScanFindingValidationAssessment = {
+  classification: ScanFindingValidationClassification;
+  confidence: "low" | "medium" | "high";
+  summary: string;
+  reasons: string[];
+  recommendedActions: string[];
+};
+
+export type ScanCalibrationDecisionGuidance = {
+  decisionRequired: true;
+  availableDecisions: ScanCalibrationDecision[];
+  recommendedDecisions: ScanCalibrationDecision[];
+};
+
+export type ListRepositoryEvidenceCandidatesRequest = {
+  workspaceId: string;
+  indexId: string;
+  profileId: string;
+  profileVersion: number;
+  criterionId: string;
+  limit?: number;
+};
+
+export type ListRepositoryEvidenceCandidatesResponse = {
+  indexId: string;
+  profileId: string;
+  profileVersion: number;
+  criterionId: string;
+  baseProfile: ScanProfile;
+  effectiveProfile: ScanProfile;
+  overlay: ScanProfileOverlayResolution;
+  coverageSummary: ScanCoverageSummary;
+  calibrationAssessment: ScanCalibrationAssessment;
+  decisionGuidance: ScanCalibrationDecisionGuidance;
+  candidates: RepositoryEvidenceCandidate[];
+};
+
+export type BuildScanBoundaryMapRequest = {
+  workspaceId: string;
+  scanId: string;
+};
+
+export type BuildScanBoundaryMapResponse = {
+  scanId: string;
+  profileId: string;
+  profileVersion: number;
+  repositoryIndexId: string;
+  coverageSummary: ScanCoverageSummary;
+  calibrationAssessment: ScanCalibrationAssessment;
+  decisionGuidance: ScanCalibrationDecisionGuidance;
+  boundaryMap: BoundaryMapArtifact;
+};
+
+export type GetScanProfileOverlayHelpRequest = {
+  workspaceId: string;
+  profileId: string;
+  profileVersion: number;
+};
+
+export const SCAN_PROFILE_OVERLAY_SYMPTOM_VALUES = [
+  "scope-roots",
+  "boundary-map-heuristics",
+  "duplicate-responsibility-selection",
+  "duplicate-authority-selection",
+  "missing-owner-materiality",
+  "stale-documentation-currentness",
+  "ssot-order",
+] as const;
+
+export type ScanProfileOverlaySymptomId = (typeof SCAN_PROFILE_OVERLAY_SYMPTOM_VALUES)[number];
+
+export type ScanProfileOverlaySymptomHint = {
+  id: ScanProfileOverlaySymptomId;
+  symptom: string;
+  fields: string[];
+  rationale: string;
+};
+
+export type GetScanProfileOverlayHelpResponse = {
+  profileId: string;
+  profileVersion: number;
+  overlayPath: string;
+  format: "yaml";
+  formatVersion: number;
+  summary: string;
+  defaultsBehavior: string;
+  validationBehavior: string;
+  guidanceTool: "scan_profile_overlay_help";
+  mergeRules: string[];
+  supportedFields: Array<{
+    name: string;
+    required: boolean;
+    description: string;
+  }>;
+  overlayBuildWorkflow: string[];
+  symptomToFieldHints: ScanProfileOverlaySymptomHint[];
+  baseScope: {
+    include: string[];
+    exclude: string[];
+  };
+  template: string;
+  example: string;
+};
+
+export type SuggestScanProfileOverlayRequest = {
+  workspaceId: string;
+  scanId: string;
+  symptomId: ScanProfileOverlaySymptomId;
+};
+
+export type SuggestScanProfileOverlayResponse = {
+  scanId: string;
+  profileId: string;
+  profileVersion: number;
+  overlay: ScanProfileOverlayResolution;
+  recommendedDecision: "refine-overlay";
+  symptom: ScanProfileOverlaySymptomHint;
+  suggestedFields: Array<{
+    name: string;
+    source: "effective-profile" | "boundary-map-config";
+    currentValues: string[];
+  }>;
+  suggestedOverlayPatch: string;
+  nextActions: string[];
 };
 
 export type ApplyGraphCommandsRequest = {
@@ -207,25 +551,6 @@ export type RejectProposalResponse = {
   proposal: GraphProposal;
 };
 
-export type ListSnapshotsRequest = {
-  workspaceId: string;
-};
-
-export type ListSnapshotsResponse = {
-  snapshots: SnapshotRecord[];
-};
-
-export type CreateSnapshotRequest = {
-  workspaceId: string;
-  snapshot: Omit<SnapshotRecord, "graph" | "projection"> & {
-    projectionId: string;
-  };
-};
-
-export type CreateSnapshotResponse = {
-  snapshot: SnapshotRecord;
-};
-
 export type ListScanProfilesRequest = { workspaceId: string };
 export type ListScanProfilesResponse = { profiles: ScanProfile[] };
 export type ListScanRunsRequest = { workspaceId: string };
@@ -233,12 +558,50 @@ export type ListScanRunsResponse = { runs: ScanRun[] };
 
 export type StartScanRequest = {
   workspaceId: string;
-  scan: Pick<InProgressScanRun, "id" | "profileId" | "profileVersion" | "repository" | "actor" | "startedAt">;
+  scan: Pick<InProgressScanRun, "id" | "profileId" | "profileVersion" | "actor" | "startedAt"> & {
+    repositoryIndexId: string;
+  };
 };
-export type StartScanResponse = { run: InProgressScanRun; profile: ScanProfile; instructions: string[] };
+export type StartScanResponse = {
+  run: InProgressScanRun;
+  profile: ScanProfile;
+  baseProfile: ScanProfile;
+  overlay: ScanProfileOverlayResolution;
+  coverageSummary: ScanCoverageSummary;
+  workflowPhase: "calibration";
+  calibrationChecklist: string[];
+  calibrationAssessment: ScanCalibrationAssessment;
+  decisionGuidance: ScanCalibrationDecisionGuidance;
+  instructions: string[];
+};
 
 export type RecordScanCoverageRequest = { workspaceId: string; scanId: string; coverage: ScanCoverage };
 export type RecordScanCoverageResponse = { run: InProgressScanRun };
+
+export type RecordScanCalibrationDecisionRequest = {
+  workspaceId: string;
+  scanId: string;
+  decision: ScanCalibrationDecision;
+  rationale: string;
+  recordedAt: string;
+};
+export type RecordScanCalibrationDecisionResponse = {
+  run: InProgressScanRun;
+  recordedDecision: ScanCalibrationDecisionRecord;
+};
+
+export type ValidateScanFindingRequest = {
+  workspaceId: string;
+  scanId: string;
+  criterionId: string;
+  boundaryMap?: BoundaryMapArtifact;
+};
+
+export type ValidateScanFindingResponse = {
+  scanId: string;
+  criterionId: string;
+  assessment: ScanFindingValidationAssessment;
+};
 
 export type CreateScanFindingRequest = { workspaceId: string; scanId: string; finding: FindingNodeInput };
 export type CreateScanFindingResponse = { node: import("@hivemap/graph-core").GraphNode; run: InProgressScanRun };
@@ -252,21 +615,23 @@ export type CompleteScanRequest = {
   completedAt: string;
   appliedCriteria: string[];
   declaredOutputs: ScanRequiredOutput[];
+  boundaryMap?: BoundaryMapArtifact;
+  calibrationOverrideReason?: string;
 };
 export type CompleteScanResponse = { run: Extract<ScanRun, { status: "completed" }> };
+
+export type DeleteScanRequest = { workspaceId: string; scanId: string };
+export type DeleteScanResponse = {
+  deletedScanId: string;
+  deletedFindingNodeIds: string[];
+  deletedEdgeIds: string[];
+  deletedProjectionIds: string[];
+};
 
 export type CompareScansRequest = { workspaceId: string; beforeScanId: string; afterScanId: string };
 export type CompareScansResponse = { comparison: ScanComparison };
 
-export type ExportWorkspaceRequest = { workspaceId: string; targetPath: string; exportedAt: string };
-export type ExportWorkspaceResponse = { path: string; manifest: BundleManifest };
-export type ImportWorkspaceRequest = { sourcePath: string; mode: "new" | "replace" };
-export type ImportWorkspaceResponse = { workspace: WorkspaceRecord; manifest: BundleManifest };
 export type ListWorkspacesResponse = { workspaces: WorkspaceRecord[] };
-export type ExportWorkspaceBundleRequest = { workspaceId: string; exportedAt: string };
-export type ExportWorkspaceBundleResponse = { bytes: Uint8Array; manifest: BundleManifest };
-export type ImportWorkspaceBundleRequest = { bytes: Uint8Array; mode: "new" | "replace" };
-export type ImportWorkspaceBundleResponse = ImportWorkspaceResponse;
 
 export type McpToolName =
   | "workspace_list"
@@ -274,6 +639,17 @@ export type McpToolName =
   | "workspace_resolve"
   | "project_create"
   | "graph_get"
+  | "repository_index_list"
+  | "repository_index_get"
+  | "repository_index_start"
+  | "repository_index_execute"
+  | "repository_search"
+  | "repository_evidence_candidates"
+  | "scan_boundary_map_build"
+  | "scan_profile_overlay_help"
+  | "scan_profile_overlay_suggest"
+  | "concept_embedding_upsert"
+  | "concept_similar_list"
   | "graph_command"
   | "category_assign"
   | "projection_get"
@@ -286,12 +662,13 @@ export type McpToolName =
   | "scan_list"
   | "scan_start"
   | "scan_record_coverage"
+  | "scan_calibration_decide"
+  | "scan_finding_validate"
   | "scan_finding_create"
   | "finding_update"
   | "scan_complete"
-  | "scan_compare"
-  | "workspace_export_zip"
-  | "workspace_import_zip";
+  | "scan_delete"
+  | "scan_compare";
 
 export type McpToolRequestMap = {
   workspace_list: ListWorkspaceSummariesRequest;
@@ -299,6 +676,17 @@ export type McpToolRequestMap = {
   workspace_resolve: ResolveWorkspaceRequest;
   project_create: CreateWorkspaceRequest;
   graph_get: GetGraphRequest;
+  repository_index_list: ListRepositoryIndexesRequest;
+  repository_index_get: GetRepositoryIndexRequest;
+  repository_index_start: StartRepositoryIndexRequest;
+  repository_index_execute: ExecuteRepositoryIndexRequest;
+  repository_search: SearchRepositoryIndexRequest;
+  repository_evidence_candidates: ListRepositoryEvidenceCandidatesRequest;
+  scan_boundary_map_build: BuildScanBoundaryMapRequest;
+  scan_profile_overlay_help: GetScanProfileOverlayHelpRequest;
+  scan_profile_overlay_suggest: SuggestScanProfileOverlayRequest;
+  concept_embedding_upsert: UpsertConceptEmbeddingRequest;
+  concept_similar_list: ListSimilarConceptsRequest;
   graph_command: ApplyGraphCommandsRequest;
   category_assign: AssignCategoryRequest;
   projection_get: GetProjectionRequest;
@@ -311,42 +699,14 @@ export type McpToolRequestMap = {
   scan_list: ListScanRunsRequest;
   scan_start: StartScanRequest;
   scan_record_coverage: RecordScanCoverageRequest;
+  scan_calibration_decide: RecordScanCalibrationDecisionRequest;
+  scan_finding_validate: ValidateScanFindingRequest;
   scan_finding_create: CreateScanFindingRequest;
   finding_update: UpdateFindingRequest;
   scan_complete: CompleteScanRequest;
+  scan_delete: DeleteScanRequest;
   scan_compare: CompareScansRequest;
-  workspace_export_zip: ExportWorkspaceRequest;
-  workspace_import_zip: ImportWorkspaceRequest;
 };
-
-export type RestEndpointName =
-  | "workspace.create"
-  | "workspace.get"
-  | "graph.get"
-  | "graph.commands.apply"
-  | "categories.get"
-  | "category.assign"
-  | "projection.get"
-  | "projection.create"
-  | "feedback.list"
-  | "feedback.record"
-  | "proposal.list"
-  | "proposal.create"
-  | "proposal.approve"
-  | "proposal.apply"
-  | "proposal.reject"
-  | "snapshot.list"
-  | "snapshot.create"
-  | "scan-profile.list"
-  | "scan.list"
-  | "scan.start"
-  | "scan.coverage.record"
-  | "scan.finding.create"
-  | "finding.update"
-  | "scan.complete"
-  | "scan.compare"
-  | "workspace.export"
-  | "workspace.import";
 
 export class ApiContractValidationError extends Error {
   constructor(message: string) {
@@ -379,6 +739,118 @@ export function validateResolveWorkspaceRequest(request: ResolveWorkspaceRequest
 
 export function validateGetGraphRequest(request: GetGraphRequest): void {
   assertNonEmpty("workspaceId", request.workspaceId);
+}
+
+export function validateListRepositoryIndexesRequest(request: ListRepositoryIndexesRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+}
+
+export function validateGetRepositoryIndexRequest(request: GetRepositoryIndexRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("indexId", request.indexId);
+}
+
+export function validateStartRepositoryIndexRequest(request: StartRepositoryIndexRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("index.id", request.index.id);
+  normalizeRepositoryUrlIdentifier(request.index.repositoryUrl);
+  if (request.index.requestedRef !== undefined) {
+    assertNonEmpty("index.requestedRef", request.index.requestedRef);
+    if (request.index.requestedRef.startsWith("-")) {
+      throw new ApiContractValidationError("index.requestedRef must not begin with '-'");
+    }
+  }
+  assertRepositoryIndexMode("index.mode", request.index.mode);
+  assertDate("index.requestedAt", request.index.requestedAt);
+  assertNonEmpty("index.actor.agentId", request.index.actor.agentId);
+  assertNonEmpty("index.actor.tool", request.index.actor.tool);
+}
+
+export function normalizeRepositoryUrlIdentifier(repositoryUrl: string): string {
+  try {
+    return normalizeRepositoryLocation(repositoryUrl, "index.repositoryUrl");
+  } catch (error) {
+    if (error instanceof RepositoryLocationValidationError) {
+      throw new ApiContractValidationError(error.message);
+    }
+    throw error;
+  }
+}
+
+export function validateExecuteRepositoryIndexRequest(request: ExecuteRepositoryIndexRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("indexId", request.indexId);
+}
+
+export function validateSearchRepositoryIndexRequest(request: SearchRepositoryIndexRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("indexId", request.indexId);
+  assertNonEmpty("query", request.query);
+  if (request.limit !== undefined && (!Number.isInteger(request.limit) || request.limit < 1)) {
+    throw new ApiContractValidationError("limit must be a positive integer");
+  }
+}
+
+export function validateListRepositoryEvidenceCandidatesRequest(request: ListRepositoryEvidenceCandidatesRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("indexId", request.indexId);
+  assertNonEmpty("profileId", request.profileId);
+  if (!Number.isInteger(request.profileVersion) || request.profileVersion < 1) {
+    throw new ApiContractValidationError("profileVersion must be a positive integer");
+  }
+  assertNonEmpty("criterionId", request.criterionId);
+  if (request.limit !== undefined && (!Number.isInteger(request.limit) || request.limit < 1)) {
+    throw new ApiContractValidationError("limit must be a positive integer");
+  }
+}
+
+export function validateBuildScanBoundaryMapRequest(request: BuildScanBoundaryMapRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("scanId", request.scanId);
+}
+
+export function validateGetScanProfileOverlayHelpRequest(request: GetScanProfileOverlayHelpRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("profileId", request.profileId);
+  if (!Number.isInteger(request.profileVersion) || request.profileVersion < 1) {
+    throw new ApiContractValidationError("profileVersion must be a positive integer");
+  }
+}
+
+export function validateSuggestScanProfileOverlayRequest(request: SuggestScanProfileOverlayRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("scanId", request.scanId);
+  assertNonEmpty("symptomId", request.symptomId);
+  if (!SCAN_PROFILE_OVERLAY_SYMPTOM_VALUES.includes(request.symptomId)) {
+    throw new ApiContractValidationError(`Unknown scan profile overlay symptom: ${request.symptomId}`);
+  }
+}
+
+export function validateUpsertConceptEmbeddingRequest(request: UpsertConceptEmbeddingRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("nodeId", request.nodeId);
+  assertNonEmpty("embedding.model", request.embedding.model);
+  assertDate("embedding.updatedAt", request.embedding.updatedAt);
+  if (request.embedding.values.length === 0) {
+    throw new ApiContractValidationError("embedding.values must contain at least one number");
+  }
+  for (const value of request.embedding.values) {
+    if (!Number.isFinite(value)) {
+      throw new ApiContractValidationError("embedding.values must contain only finite numbers");
+    }
+  }
+}
+
+export function validateListSimilarConceptsRequest(request: ListSimilarConceptsRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("nodeId", request.nodeId);
+  assertNonEmpty("model", request.model);
+  if (request.limit !== undefined && (!Number.isInteger(request.limit) || request.limit < 1)) {
+    throw new ApiContractValidationError("limit must be a positive integer");
+  }
+  if (request.minScore !== undefined && (!Number.isFinite(request.minScore) || request.minScore < -1 || request.minScore > 1)) {
+    throw new ApiContractValidationError("minScore must be a finite number between -1 and 1");
+  }
 }
 
 export function validateApplyGraphCommandsRequest(request: ApplyGraphCommandsRequest): void {
@@ -432,17 +904,6 @@ export function validateRejectProposalRequest(request: RejectProposalRequest): v
   assertNonEmpty("proposalId", request.proposalId);
 }
 
-export function validateListSnapshotsRequest(request: ListSnapshotsRequest): void {
-  assertNonEmpty("workspaceId", request.workspaceId);
-}
-
-export function validateCreateSnapshotRequest(request: CreateSnapshotRequest): void {
-  assertNonEmpty("workspaceId", request.workspaceId);
-  assertNonEmpty("snapshot.id", request.snapshot.id);
-  assertDate("snapshot.createdAt", request.snapshot.createdAt);
-  assertNonEmpty("snapshot.projectionId", request.snapshot.projectionId);
-}
-
 export function validateStartScanRequest(request: StartScanRequest): void {
   assertNonEmpty("workspaceId", request.workspaceId);
   assertNonEmpty("scan.id", request.scan.id);
@@ -450,9 +911,7 @@ export function validateStartScanRequest(request: StartScanRequest): void {
   if (!Number.isInteger(request.scan.profileVersion) || request.scan.profileVersion < 1) {
     throw new ApiContractValidationError("scan.profileVersion must be a positive integer");
   }
-  assertNonEmpty("scan.repository.root", request.scan.repository.root);
-  assertNonEmpty("scan.repository.branch", request.scan.repository.branch);
-  assertNonEmpty("scan.repository.revision", request.scan.repository.revision);
+  assertNonEmpty("scan.repositoryIndexId", request.scan.repositoryIndexId);
   assertNonEmpty("scan.actor.agentId", request.scan.actor.agentId);
   assertNonEmpty("scan.actor.tool", request.scan.actor.tool);
   assertDate("scan.startedAt", request.scan.startedAt);
@@ -462,6 +921,26 @@ export function validateRecordScanCoverageRequest(request: RecordScanCoverageReq
   assertNonEmpty("workspaceId", request.workspaceId);
   assertNonEmpty("scanId", request.scanId);
   validateScanCoverage(request.coverage);
+}
+
+export function validateRecordScanCalibrationDecisionRequest(request: RecordScanCalibrationDecisionRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("scanId", request.scanId);
+  assertNonEmpty("decision", request.decision);
+  if (!SCAN_CALIBRATION_DECISION_VALUES.includes(request.decision)) {
+    throw new ApiContractValidationError(`Unknown scan calibration decision: ${request.decision}`);
+  }
+  assertNonEmpty("rationale", request.rationale);
+  assertDate("recordedAt", request.recordedAt);
+}
+
+export function validateValidateScanFindingRequest(request: ValidateScanFindingRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("scanId", request.scanId);
+  assertNonEmpty("criterionId", request.criterionId);
+  if (request.boundaryMap !== undefined) {
+    validateBoundaryMap(request.boundaryMap);
+  }
 }
 
 export function validateCreateScanFindingRequest(request: CreateScanFindingRequest): void {
@@ -482,6 +961,20 @@ export function validateCompleteScanRequest(request: CompleteScanRequest): void 
   assertDate("completedAt", request.completedAt);
   if (request.appliedCriteria.length === 0) throw new ApiContractValidationError("appliedCriteria must not be empty");
   if (request.declaredOutputs.length === 0) throw new ApiContractValidationError("declaredOutputs must not be empty");
+  if (request.calibrationOverrideReason !== undefined) {
+    assertNonEmpty("calibrationOverrideReason", request.calibrationOverrideReason);
+  }
+  if (request.declaredOutputs.includes("boundary-map")) {
+    if (request.boundaryMap === undefined) throw new ApiContractValidationError("boundaryMap is required when declaredOutputs includes boundary-map");
+    validateBoundaryMap(request.boundaryMap);
+  } else if (request.boundaryMap !== undefined) {
+    throw new ApiContractValidationError("boundaryMap requires declaredOutputs to include boundary-map");
+  }
+}
+
+export function validateDeleteScanRequest(request: DeleteScanRequest): void {
+  assertNonEmpty("workspaceId", request.workspaceId);
+  assertNonEmpty("scanId", request.scanId);
 }
 
 export function validateCompareScansRequest(request: CompareScansRequest): void {
@@ -489,29 +982,6 @@ export function validateCompareScansRequest(request: CompareScansRequest): void 
   assertNonEmpty("beforeScanId", request.beforeScanId);
   assertNonEmpty("afterScanId", request.afterScanId);
   if (request.beforeScanId === request.afterScanId) throw new ApiContractValidationError("Scan comparison requires two different runs");
-}
-
-export function validateExportWorkspaceRequest(request: ExportWorkspaceRequest): void {
-  assertNonEmpty("workspaceId", request.workspaceId);
-  assertNonEmpty("targetPath", request.targetPath);
-  assertDate("exportedAt", request.exportedAt);
-}
-
-export function validateImportWorkspaceRequest(request: ImportWorkspaceRequest): void {
-  assertNonEmpty("sourcePath", request.sourcePath);
-  if (request.mode !== "new" && request.mode !== "replace") throw new ApiContractValidationError(`Unknown import mode: ${String(request.mode)}`);
-}
-
-export function validateExportWorkspaceBundleRequest(request: ExportWorkspaceBundleRequest): void {
-  assertNonEmpty("workspaceId", request.workspaceId);
-  assertDate("exportedAt", request.exportedAt);
-}
-
-export function validateImportWorkspaceBundleRequest(request: ImportWorkspaceBundleRequest): void {
-  if (!(request.bytes instanceof Uint8Array) || request.bytes.byteLength === 0) {
-    throw new ApiContractValidationError("bytes must contain a ZIP bundle");
-  }
-  if (request.mode !== "new" && request.mode !== "replace") throw new ApiContractValidationError(`Unknown import mode: ${String(request.mode)}`);
 }
 
 function assertNonEmpty(fieldName: string, value: string): void {
@@ -525,6 +995,12 @@ function assertDate(fieldName: string, value: string): void {
 
   if (Number.isNaN(Date.parse(value))) {
     throw new ApiContractValidationError(`${fieldName} must be a valid date string`);
+  }
+}
+
+function assertRepositoryIndexMode(fieldName: string, value: RepositoryIndexMode): void {
+  if (value !== "safe" && value !== "deep") {
+    throw new ApiContractValidationError(`${fieldName} must be one of: safe, deep`);
   }
 }
 

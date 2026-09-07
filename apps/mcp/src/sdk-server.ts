@@ -1,7 +1,21 @@
+/**
+ * Responsibility: Register HiveMap tool contracts on one MCP SDK server instance.
+ * Must not: Own application state, implement tool semantics, or select a network transport.
+ * Contract: SDK schemas delegate each registered tool to the shared typed tool dispatcher.
+ */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod/v4";
+import packageMetadata from "../package.json" with { type: "json" };
 
+import { SCAN_PROFILE_OVERLAY_SYMPTOM_VALUES } from "@hivemap/api-contracts";
+import { PROJECT_SOURCE_ROLE_VALUES, PROJECT_SOURCE_TYPE_VALUES } from "@hivemap/graph-core";
+import {
+  BOUNDARY_ENTRYPOINT_KIND_VALUES,
+  BOUNDARY_KIND_VALUES,
+  BOUNDARY_RELATION_KIND_VALUES,
+  FINDING_CONFIDENCE_VALUES,
+} from "@hivemap/scans";
 import { HiveMapRuntime } from "@hivemap/runtime";
 
 import { handleMcpTool, type McpToolFailure, type McpToolName, type McpToolResponseMap } from "./index.js";
@@ -12,6 +26,20 @@ const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   workspace_resolve: "Resolve a workspace ref by canonical id, slug, or exact name and return the canonical workspace record.",
   project_create: "Create one explicit HiveMap workspace with built-in repository scan profiles.",
   graph_get: "Read the canonical semantic graph for a workspace.",
+  repository_index_list: "List persisted repository index job records for one workspace.",
+  repository_index_get: "Read one persisted repository index job record by workspace id and index id.",
+  repository_index_start: "Persist one explicit repository index job request for the current safe-mode indexing phase.",
+  repository_index_execute: "Execute one safe-mode repository index job and persist resolved commit, files, and chunks.",
+  repository_search: "Search bounded file and chunk evidence inside one completed repository index.",
+  repository_evidence_candidates:
+    "Return bounded repository evidence packets for one scan profile criterion on one completed repository index, plus the effective scan profile, overlay status, coverage summary, calibration assessment, and a reminder that scan_profile_overlay_help explains per-repo overlays.",
+  scan_boundary_map_build:
+    "Build one candidate boundary-map artifact from the current scan coverage and selected completed repository index facts, and classify whether the result now looks findings-ready, profile-misaligned, evidence-poor, or still structurally ambiguous.",
+  scan_profile_overlay_help: "Explain the optional .hivemap/scan-profiles/<profile>.yaml overlay contract, merge rules, template, defaults behavior, and fail-fast validation for one scan profile.",
+  scan_profile_overlay_suggest:
+    "Return the smallest repo-aware overlay YAML scaffold for one explicit calibration symptom, using the active effective profile and boundary-map config from the current in-progress scan.",
+  concept_embedding_upsert: "Store or refresh one explicit concept embedding for a workspace node and model.",
+  concept_similar_list: "Return bounded read-only similar-concept suggestions for one concept node and model.",
   graph_command: "Apply explicit typed commands to the canonical semantic graph.",
   category_assign: "Assign one validated semantic/visual category overlay.",
   projection_get: "Read one named projection over the semantic graph.",
@@ -22,20 +50,71 @@ const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   proposal_apply: "Apply one approved graph proposal to the canonical graph.",
   scan_profile_list: "List versioned agent scan recipes, discovery rules, criteria, SSOT order, and required outputs.",
   scan_list: "List auditable in-progress and completed repository scan runs for a workspace.",
-  scan_start: "Start an agent-executed scan and receive the resolved profile plus exact discovery and completion instructions.",
-  scan_record_coverage: "Record the complete discovered, included, excluded, and failed source inventory for an in-progress scan.",
+  scan_start:
+    "Start an agent-executed scan from one completed repository index and return a calibration-phase response with derived coverage, effective scan profile, overlay status, coverage warnings, calibration checklist, calibration assessment, and exact completion instructions.",
+  scan_record_coverage: "Replace the derived coverage for an in-progress scan only when one explicit full correction is needed.",
+  scan_calibration_decide:
+    "Record one explicit post-calibration decision for an in-progress scan before correcting coverage, building a boundary map, or proceeding into findings.",
+  scan_finding_validate:
+    "Classify one criterion-level suspected issue as likely-real-finding, profile-gap, missing-evidence, or ambiguous-shape before creating a durable finding node.",
   scan_finding_create: "Create a validated finding node with stable fingerprint, source claims, severity, and origin scan evidence.",
   finding_update: "Update an active finding status or severity; resolved status requires explicit resolution evidence.",
-  scan_complete: "Complete a scan only after coverage, every profile criterion, required output, and finding evidence validate.",
+  scan_complete:
+    "Complete a scan only after coverage, every profile criterion, required output, and finding evidence validate. Findings-bearing completion from a non-ready calibration state requires an explicit calibrationOverrideReason.",
+  scan_delete: "Hard-delete one scan and atomically remove its owned finding nodes, incident edges, affected projection membership, and category assignments.",
   scan_compare: "Compare two completed runs of the same profile and return resolved, open, changed, new, regressed, or unverifiable evidence.",
-  workspace_export_zip: "Export a deterministic checksummed .hivemap.zip with canonical workspace state and repeat-scan instructions.",
-  workspace_import_zip: "Import a validated .hivemap.zip in explicit new or replace mode without silent merge or id rewriting.",
 };
+
+const projectSourceRefSchema = z.object({
+  role: z.enum(PROJECT_SOURCE_ROLE_VALUES),
+  source: z.enum(PROJECT_SOURCE_TYPE_VALUES),
+  target: z.string(),
+  anchor: z.string().optional(),
+  revision: z.string().optional(),
+  label: z.string().optional(),
+});
+
+const boundaryMapEntrypointSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  kind: z.enum(BOUNDARY_ENTRYPOINT_KIND_VALUES),
+  filePath: z.string().optional(),
+  symbolKey: z.string().optional(),
+  sourceRefs: z.array(projectSourceRefSchema).optional(),
+});
+
+const boundaryMapBoundarySchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  kind: z.enum(BOUNDARY_KIND_VALUES),
+  ownedPaths: z.array(z.string()),
+  ownedSymbolKeys: z.array(z.string()),
+  publicEntrypoints: z.array(boundaryMapEntrypointSchema),
+  contractSourceRefs: z.array(projectSourceRefSchema),
+  testSourceRefs: z.array(projectSourceRefSchema),
+  confidence: z.enum(FINDING_CONFIDENCE_VALUES),
+  openQuestions: z.array(z.string()).optional(),
+  notes: z.string().optional(),
+});
+
+const boundaryMapRelationSchema = z.object({
+  id: z.string(),
+  fromBoundaryId: z.string(),
+  toBoundaryId: z.string(),
+  kind: z.enum(BOUNDARY_RELATION_KIND_VALUES),
+  sourceRefs: z.array(projectSourceRefSchema),
+  notes: z.string().optional(),
+});
+
+const boundaryMapArtifactSchema = z.object({
+  boundaries: z.array(boundaryMapBoundarySchema),
+  relations: z.array(boundaryMapRelationSchema),
+});
 
 export function createHiveMapMcpServer(runtime: HiveMapRuntime): McpServer {
   const server = new McpServer({
     name: "hivemap",
-    version: "0.1.0",
+    version: packageMetadata.version,
   });
 
   registerTool(server, runtime, "workspace_list", {
@@ -65,6 +144,86 @@ export function createHiveMapMcpServer(runtime: HiveMapRuntime): McpServer {
 
   registerTool(server, runtime, "graph_get", {
     workspaceId: z.string(),
+  });
+
+  registerTool(server, runtime, "repository_index_list", {
+    workspaceId: z.string(),
+  });
+
+  registerTool(server, runtime, "repository_index_get", {
+    workspaceId: z.string(),
+    indexId: z.string(),
+  });
+
+  registerTool(server, runtime, "repository_index_start", {
+    workspaceId: z.string(),
+    index: z.object({
+      id: z.string(),
+      repositoryUrl: z.string(),
+      requestedRef: z.string().optional(),
+      mode: z.enum(["safe", "deep"]),
+      requestedAt: z.string(),
+      actor: z.object({
+        agentId: z.string(),
+        tool: z.string(),
+      }),
+    }),
+  });
+
+  registerTool(server, runtime, "repository_index_execute", {
+    workspaceId: z.string(),
+    indexId: z.string(),
+  });
+
+  registerTool(server, runtime, "repository_search", {
+    workspaceId: z.string(),
+    indexId: z.string(),
+    query: z.string(),
+    limit: z.number().int().positive().optional(),
+  });
+
+  registerTool(server, runtime, "repository_evidence_candidates", {
+    workspaceId: z.string(),
+    indexId: z.string(),
+    profileId: z.string(),
+    profileVersion: z.number().int().positive(),
+    criterionId: z.string(),
+    limit: z.number().int().positive().optional(),
+  });
+
+  registerTool(server, runtime, "scan_boundary_map_build", {
+    workspaceId: z.string(),
+    scanId: z.string(),
+  });
+
+  registerTool(server, runtime, "scan_profile_overlay_help", {
+    workspaceId: z.string(),
+    profileId: z.string(),
+    profileVersion: z.number().int().positive(),
+  });
+
+  registerTool(server, runtime, "scan_profile_overlay_suggest", {
+    workspaceId: z.string(),
+    scanId: z.string(),
+    symptomId: z.enum(SCAN_PROFILE_OVERLAY_SYMPTOM_VALUES),
+  });
+
+  registerTool(server, runtime, "concept_embedding_upsert", {
+    workspaceId: z.string(),
+    nodeId: z.string(),
+    embedding: z.object({
+      model: z.string(),
+      values: z.array(z.number()),
+      updatedAt: z.string(),
+    }),
+  });
+
+  registerTool(server, runtime, "concept_similar_list", {
+    workspaceId: z.string(),
+    nodeId: z.string(),
+    model: z.string(),
+    limit: z.number().int().positive().optional(),
+    minScore: z.number().optional(),
   });
 
   registerTool(server, runtime, "graph_command", {
@@ -120,13 +279,7 @@ export function createHiveMapMcpServer(runtime: HiveMapRuntime): McpServer {
       id: z.string(),
       profileId: z.string(),
       profileVersion: z.number().int().positive(),
-      repository: z.object({
-        root: z.string(),
-        repositoryUrl: z.string().optional(),
-        branch: z.string(),
-        revision: z.string(),
-        worktreeDigest: z.string().optional(),
-      }),
+      repositoryIndexId: z.string(),
       actor: z.object({ agentId: z.string(), tool: z.string() }),
       startedAt: z.string(),
     }),
@@ -141,6 +294,21 @@ export function createHiveMapMcpServer(runtime: HiveMapRuntime): McpServer {
       excluded: z.array(z.object({ target: z.string(), reason: z.string() })),
       failed: z.array(z.object({ target: z.string(), reason: z.string() })),
     }),
+  });
+
+  registerTool(server, runtime, "scan_calibration_decide", {
+    workspaceId: z.string(),
+    scanId: z.string(),
+    decision: z.enum(["continue", "refine-overlay", "correct-coverage", "build-boundary-map", "restart-scan"]),
+    rationale: z.string(),
+    recordedAt: z.string(),
+  });
+
+  registerTool(server, runtime, "scan_finding_validate", {
+    workspaceId: z.string(),
+    scanId: z.string(),
+    criterionId: z.string(),
+    boundaryMap: boundaryMapArtifactSchema.optional(),
   });
 
   registerTool(server, runtime, "scan_finding_create", {
@@ -160,24 +328,20 @@ export function createHiveMapMcpServer(runtime: HiveMapRuntime): McpServer {
     scanId: z.string(),
     completedAt: z.string(),
     appliedCriteria: z.array(z.string()),
-    declaredOutputs: z.array(z.enum(["document-inventory", "concept-map", "findings", "coverage-report"])),
+    declaredOutputs: z.array(z.enum(["document-inventory", "concept-map", "findings", "coverage-report", "boundary-map"])),
+    boundaryMap: boundaryMapArtifactSchema.optional(),
+    calibrationOverrideReason: z.string().optional(),
+  });
+
+  registerTool(server, runtime, "scan_delete", {
+    workspaceId: z.string(),
+    scanId: z.string(),
   });
 
   registerTool(server, runtime, "scan_compare", {
     workspaceId: z.string(),
     beforeScanId: z.string(),
     afterScanId: z.string(),
-  });
-
-  registerTool(server, runtime, "workspace_export_zip", {
-    workspaceId: z.string(),
-    targetPath: z.string(),
-    exportedAt: z.string(),
-  });
-
-  registerTool(server, runtime, "workspace_import_zip", {
-    sourcePath: z.string(),
-    mode: z.enum(["new", "replace"]),
   });
 
   return server;
@@ -202,7 +366,7 @@ function registerTool(
       inputSchema,
     },
     async (args) => {
-      const result = handleMcpTool(runtime, toolName, args as never);
+      const result = await handleMcpTool(runtime, toolName, args as never);
 
       if (!result.ok) {
         return toolFailureToMcpResult(result);
