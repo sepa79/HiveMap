@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-07
 
-Status: base runtime/container/HiveForge milestone complete. The unchecked embedding and post-base calibration items below are deferred feature work, not blockers for `0.2.0-alpha.1`. The original implementation checklist remains delivery history.
+Status: base runtime/container/HiveForge milestone complete. The unchecked embedding and post-base calibration items below are deferred feature work, not blockers for `0.2.0`. The original implementation checklist remains delivery history.
 
 Portability amendment: the former ZIP implementation and all current import/export surfaces were removed. Full-project portability is deferred to a separately specified streaming NDJSON contract and is not an active deliverable in this plan.
 

@@ -59,6 +59,7 @@ summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .brand-mark { color: var(--cyan); }
 .brand-wordmark { font-size: 28px; font-weight: 760; letter-spacing: -.7px; }
 .brand-wordmark strong { color: var(--yellow); }
+.brand-version { color: #aeb6c1; font-size: 12px; white-space: nowrap; }
 .workspace-breadcrumb { display: flex; align-items: center; min-width: 0; gap: 18px; color: #aeb6c1; font-size: 16px; }
 .workspace-breadcrumb span, .workspace-breadcrumb strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-breadcrumb strong { color: var(--text); }

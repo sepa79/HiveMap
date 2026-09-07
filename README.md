@@ -6,7 +6,7 @@ HiveMap is a local, AI-assisted workspace for turning conversations, projects, i
 
 Repository review is one supported workflow, not the definition of the product. In that workflow an agent scans a repository; HiveMap supplies repeatable scan instructions, validates evidence, stores findings, and renders review projections. The same graph and projection model can also map an AI conversation, explore an idea, explain a system, or maintain a project knowledge map.
 
-Version `0.2.0-alpha.1` is intended for local, single-operator evaluation on real repositories. It is not a hosted multi-user service. See [CHANGELOG.md](CHANGELOG.md) for changes and compatibility limits.
+Version `0.2.0` is intended for local, single-operator evaluation on real repositories. It is not a hosted multi-user service. See [CHANGELOG.md](CHANGELOG.md) for changes and compatibility limits.
 
 The base runtime is implemented and validated locally in Docker and through HiveForge: one image contains Postgres, the API, protected Streamable HTTP MCP, the built web UI, and repository indexing/scan handlers. REST and MCP share the same typed runtime operations.
 

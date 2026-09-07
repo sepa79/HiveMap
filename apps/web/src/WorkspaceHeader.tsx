@@ -1,9 +1,10 @@
 /**
  * Responsibility: Render global HiveMap identity, current workspace/projection context, and operation status.
  * Must not: Fetch data, own navigation, or mutate workspace state.
- * Contract: Presents explicit labels and one bounded busy/error/ready status.
+ * Contract: Presents the package-owned release version, explicit labels, and one bounded busy/error/ready status.
  */
 import { AlertCircle, CheckCircle2, ChevronRight, GitBranchPlus, Loader2 } from "lucide-react";
+import packageMetadata from "../package.json" with { type: "json" };
 
 export function WorkspaceHeader(props: {
   workspaceName?: string | undefined;
@@ -16,6 +17,7 @@ export function WorkspaceHeader(props: {
       <div className="brand" aria-label="HiveMap">
         <GitBranchPlus className="brand-mark" size={27} />
         <span className="brand-wordmark"><span>Hive</span><strong>Map</strong></span>
+        <span className="brand-version" aria-label={`Version ${packageMetadata.version}`}>{packageMetadata.version}</span>
       </div>
       <div className="workspace-breadcrumb">
         <span>{props.workspaceName ?? "AI-assisted concept graph"}</span>

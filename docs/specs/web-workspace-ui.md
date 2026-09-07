@@ -2,6 +2,10 @@
 
 The browser workspace is a human review surface over the semantic graph and its persisted projections. It is not an administrative form stack or a second source of graph truth.
 
+## Application Identity
+
+The global header displays the application version beside the HiveMap wordmark, before and after authentication. The displayed value comes from `apps/web/package.json` at build time; it must not be maintained as a separate UI literal or stored in graph state.
+
 ## Desktop Information Architecture
 
 The authenticated desktop workspace uses four fixed surfaces that fit within the viewport:

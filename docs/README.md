@@ -38,6 +38,7 @@ Design HiveMap 1.0 around:
 - `specs/`: contracts that implementation must follow.
 - `evidence/`: bounded visual and interaction-review artifacts for changed UI behavior.
 - `evidence/release-0.2.0-alpha.1-acceptance.md`: release-candidate identity and local/HiveForge acceptance results.
+- `evidence/release-0.2.0-acceptance.md`: visible release version and controlled HiveForge update verification.
 - `ai/`: command, review, Jester, and HiveMind workflow rules.
 - `ai/KNOWLEDGE_MAP_WORKFLOW.md`: repeatable workflow for correlating concepts with docs, code, tests, assets, and HiveMind.
 - `specs/repository-scan.md`: repeatable agent scans, finding evidence, and before/after comparison.

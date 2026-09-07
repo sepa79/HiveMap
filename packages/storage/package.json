@@ -1,6 +1,6 @@
 {
   "name": "@hivemap/storage",
-  "version": "0.2.0-alpha.1",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -17,11 +17,11 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@hivemap/capture": "0.2.0-alpha.1",
-    "@hivemap/categories": "0.2.0-alpha.1",
-    "@hivemap/graph-core": "0.2.0-alpha.1",
-    "@hivemap/projections": "0.2.0-alpha.1",
-    "@hivemap/scans": "0.2.0-alpha.1",
+    "@hivemap/capture": "0.2.0",
+    "@hivemap/categories": "0.2.0",
+    "@hivemap/graph-core": "0.2.0",
+    "@hivemap/projections": "0.2.0",
+    "@hivemap/scans": "0.2.0",
     "pg": "^8.23.0"
   },
   "devDependencies": {

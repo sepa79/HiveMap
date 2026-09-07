@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0 - 2026-09-07
+
+- Display the build's package version beside the HiveMap wordmark, including before authentication.
+- Align root/workspace versions, internal dependency pins, and MCP server identity to `0.2.0`.
+- Retain the single-operator scope and first released Postgres schema `1` from the alpha candidate below; this version change requires no database migration.
+- See [0.2.0 acceptance evidence](docs/evidence/release-0.2.0-acceptance.md) for verification and the controlled HiveForge update.
+
 ## 0.2.0-alpha.1 - 2026-09-07
 
 Single-operator alpha for local evaluation, packaged as one Postgres-backed container. See [local and HiveForge acceptance evidence](docs/evidence/release-0.2.0-alpha.1-acceptance.md) for the tested candidate; GitHub publication is a separate gate.
