@@ -4,6 +4,8 @@ Draft MCP surface for agents. MCP is the primary HiveMap agent interface for alp
 
 The MCP initialization response identifies the server as `hivemap` and reads its version from `apps/mcp/package.json`. The package metadata owns the release version; the SDK adapter must not maintain a separate version literal.
 
+The initialization response also supplies agent instructions reflecting [Automated Scan Limits And Agent Enrichment](repository-scan.md#automated-scan-limits-and-agent-enrichment): automated results are a starting point; agents may always investigate independently and enrich maps, and must investigate when doubts or suspected omissions arise. Instructions explain explicit MCP evidence writes, revision/coverage discipline, the current finding-validator limitation, and the need for executed tests or observed effects before claiming behavior works. Tool descriptions for scan start and evidence candidates reinforce these limits.
+
 ## Required Tools
 
 - `workspace_list`

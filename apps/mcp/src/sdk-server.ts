@@ -1,7 +1,7 @@
 /**
  * Responsibility: Register HiveMap tool contracts on one MCP SDK server instance.
  * Must not: Own application state, implement tool semantics, or select a network transport.
- * Contract: SDK schemas delegate each registered tool to the shared typed tool dispatcher.
+ * Contract: docs/specs/mcp-tools.md; SDK schemas delegate tools to the shared typed dispatcher.
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -32,7 +32,7 @@ const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   repository_index_execute: "Execute one safe-mode repository index job and persist resolved commit, files, and chunks.",
   repository_search: "Search bounded file and chunk evidence inside one completed repository index.",
   repository_evidence_candidates:
-    "Return bounded repository evidence packets for one scan profile criterion on one completed repository index, plus the effective scan profile, overlay status, coverage summary, calibration assessment, and a reminder that scan_profile_overlay_help explains per-repo overlays.",
+    "Return bounded, heuristic evidence packets for one criterion, plus effective profile, overlay status, coverage summary, and calibration assessment. This is not an exhaustive review: no candidates does not mean no problems. Agents may always investigate independently and enrich the map, and must investigate suspected omissions. scan_profile_overlay_help explains per-repo overlays.",
   scan_boundary_map_build:
     "Build one candidate boundary-map artifact from the current scan coverage and selected completed repository index facts, and classify whether the result now looks findings-ready, profile-misaligned, evidence-poor, or still structurally ambiguous.",
   scan_profile_overlay_help: "Explain the optional .hivemap/scan-profiles/<profile>.yaml overlay contract, merge rules, template, defaults behavior, and fail-fast validation for one scan profile.",
@@ -51,7 +51,7 @@ const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   scan_profile_list: "List versioned agent scan recipes, discovery rules, criteria, SSOT order, and required outputs.",
   scan_list: "List auditable in-progress and completed repository scan runs for a workspace.",
   scan_start:
-    "Start an agent-executed scan from one completed repository index and return a calibration-phase response with derived coverage, effective scan profile, overlay status, coverage warnings, calibration checklist, calibration assessment, and exact completion instructions.",
+    "Start an agent-executed scan from one completed repository index and return a calibration-phase response with derived coverage, effective scan profile, overlay status, coverage warnings, calibration checklist, calibration assessment, and completion instructions. Automated results are a starting point; independent analysis and explicit MCP map enrichment remain available. Scan completion is not proof that behavior works.",
   scan_record_coverage: "Replace the derived coverage for an in-progress scan only when one explicit full correction is needed.",
   scan_calibration_decide:
     "Record one explicit post-calibration decision for an in-progress scan before correcting coverage, building a boundary map, or proceeding into findings.",
@@ -115,6 +115,15 @@ export function createHiveMapMcpServer(runtime: HiveMapRuntime): McpServer {
   const server = new McpServer({
     name: "hivemap",
     version: packageMetadata.version,
+  }, {
+    instructions: [
+      "HiveMap automated indexing, evidence candidates, and derived maps are bounded starting points, not exhaustive semantic reviews. Results depend on the indexed revision, supported syntax, profile scope, heuristics, and result limits. No candidates does not mean no problems.",
+      "You may always perform your own repository analysis and enrich maps through MCP, even when candidates exist or calibration is findings-ready. You must investigate beyond automated packets when user feedback or your reasoning raises doubts or suggests missed issues. For example, Java uses Tree-sitter syntax facts, while duplicate-responsibility candidates group matching normalized public/exported top-level symbol names and can miss differently named implementations. Compare actual responsibilities, callers, contracts, and tests.",
+      "Use repository_search and direct source inspection at the recorded revision. For scan evidence outside included coverage, record correct-coverage with scan_calibration_decide before scan_record_coverage; refine the overlay and restart when scope is wrong. Use a new index/run for a changed revision and a new run after completion. Broader map enrichment must retain explicit source scope and revision instead of silently expanding a scan.",
+      "Enrich concepts, relationships, and typed metadata.sourceRefs through graph_command under the active capture policy, or use the proposal/approval flow where required. Mark agent interpretation as inferred. Call scan_finding_validate before scan_finding_create; create findings only when validation is likely-real-finding, the actual source claims support the issue, and continue is recorded.",
+      "scan_finding_validate assesses criterion-level prepared packets; it does not accept agent-supplied source claims. If validation remains missing-evidence, profile-gap, or ambiguous-shape, preserve your investigation as a bounded open question node with source references and the validation limitation. Do not bypass validation or present suspicion as confirmed truth.",
+      "A completed scan, index, map, or test-source link does not prove that behavior works. Such claims require relevant executed tests or observed runtime effects; report the revision, scope, commands/scenarios, results, and remaining gaps.",
+    ].join("\n\n"),
   });
 
   registerTool(server, runtime, "workspace_list", {

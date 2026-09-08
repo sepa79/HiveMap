@@ -40,10 +40,23 @@ Use the same repeatable process for any repository:
 ## Retrieve Evidence Packets
 
 1. For each profile criterion, call `repository_evidence_candidates` first when the selected profile/index combination exposes bounded candidates.
-2. Treat each returned candidate as the primary review unit for that criterion.
+2. Treat each returned candidate as a starting review unit for that criterion, not the complete set of possible issues.
 3. Use `candidate.kind` to separate machine-proven evidence from interpretation work.
-4. Read beyond the returned packets only when the candidate itself points to a missing or ambiguous source that must be verified.
-5. If a criterion currently returns no evidence candidates, fall back to the derived included coverage for that criterion and record the gap as workflow feedback when it materially increases agent discovery work.
+4. The agent may always perform its own analysis beyond the returned packets. It must do so when user feedback or its own reasoning raises doubts or suggests a missed problem, even if a candidate does not point to it.
+5. If a criterion currently returns no evidence candidates, inspect the derived included coverage for that criterion. An empty list is not evidence that the criterion has no problems. Record material discovery gaps and follow the enrichment procedure below.
+
+## Agent-Led Analysis And Map Enrichment
+
+Follow the [automated scan limits contract](../specs/repository-scan.md#automated-scan-limits-and-agent-enrichment). Independent analysis is available at any time; automated results do not limit what the agent may investigate or map.
+
+1. State the question and scope being investigated. Use `repository_search` for indexed evidence and direct repository search/reading at the recorded commit to investigate beyond candidate packets. For suspected duplication, compare responsibilities, callers, data flow, side effects, contracts, and tests across differently named implementations. Tree-sitter syntax facts and name-based selection do not establish semantic equivalence or completeness.
+2. Keep scan evidence within the recorded revision and included coverage. If relevant sources are outside coverage, record `correct-coverage` and submit the full corrected inventory through `scan_record_coverage`; refine the overlay and restart when the profile scope is wrong. Use a new index/run for changed source content and a new run after completion. Broader map enrichment can be recorded separately with explicit source scope and revision.
+3. Enrich bounded concepts and relationships through `graph_command`, attaching typed `metadata.sourceRefs` with paths, anchors, and revisions. Follow the active capture policy and [knowledge-map workflow](KNOWLEDGE_MAP_WORKFLOW.md); use proposals where approval is required. Keep agent interpretation marked as inferred and detailed contracts in their owning sources.
+4. For a suspected finding, call `scan_finding_validate`. If it returns `likely-real-finding` and the actual evidence supports the claim, record `continue` and use `scan_finding_create` with exact source claims, criterion ids, confidence, and a stable fingerprint. Independently discovered evidence belongs in those claims; there is no candidate-upload tool.
+5. The current `scan_finding_validate` accepts a criterion and optional boundary map, not additional source claims. If it still reports `missing-evidence`, `profile-gap`, or `ambiguous-shape`, preserve the investigation through a bounded open `question` node with source references, what was checked, and the validation limitation. Address calibration where applicable; do not force a finding, inflate confidence, or discard the evidence because automation missed it.
+6. Report the reviewed scope, supporting evidence, unresolved questions, and remaining gaps. Say that behavior works only when relevant tests were executed or runtime effects observed; name the commands/scenarios, revision, and results. A completed scan or a link to test code alone does not prove that behavior works.
+
+## Evidence Packet Calibration
 
 The current documentation/SSOT slice is intentionally selective:
 
@@ -60,7 +73,7 @@ The current documentation/SSOT slice is intentionally selective:
 ## Review Derived Coverage
 
 1. Use the derived `coverage` returned by `scan_start` as the normal bounded inventory for the run.
-2. Review only `coverage.included` sources during normal scan execution, and prefer evidence-candidate packets over broad file-by-file reading when they are available.
+2. Use `coverage.included` as the evidence scope for the current run, with candidate packets as the starting point. Independent investigation may reveal sources outside it; correct scope before counting those sources as scan evidence.
 3. Call `scan_record_coverage` only when the derived inventory needs one explicit full correction, and record `correct-coverage` first.
 4. If corrected coverage is recorded, replace the entire discovered, included, excluded, and failed inventory in one operation.
 

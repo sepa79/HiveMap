@@ -140,7 +140,7 @@ Coverage records discovered source targets, included source targets, excluded ta
 
 The next scan repeats profile discovery against the selected completed repository index. Prior coverage is evidence and a comparison baseline, not the current inventory.
 
-When HiveMap can pre-select bounded evidence candidates for a criterion, the candidate packets are the preferred review unit. Coverage remains the bounded repository inventory and last-resort source set, not a mandate that the agent must reread every included file on every run.
+When HiveMap can pre-select bounded evidence candidates for a criterion, the candidate packets are the preferred starting review unit. Coverage remains the bounded repository inventory, not a mandate that the agent must reread every included file on every run or a restriction to candidate packets alone.
 
 `scan_start` and `repository_evidence_candidates` also return overlay resolution metadata and a coverage summary so the agent can tell whether built-in defaults or repository-local overrides were applied before interpreting results.
 
@@ -152,6 +152,20 @@ When the agent has one suspected bounded issue, `scan_finding_validate` should c
 - `profile-gap`: the active profile, overlay, or explicit coverage still looks wrong for the repository, so the scan should be tuned instead of frozen into a finding;
 - `missing-evidence`: the current calibrated scope still lacks bounded packets strong enough to support a durable finding for that criterion;
 - `ambiguous-shape`: repository structure still looks too unclear to separate a real defect from scan interpretation noise.
+
+## Automated Scan Limits And Agent Enrichment
+
+Automated indexing, evidence selection, and boundary-map derivation provide a bounded starting point, not an exhaustive semantic review. Results depend on the indexed revision, supported syntax, profile scope, selection heuristics, and result limits. Empty candidate lists, `findings-ready` calibration, and successful scan completion do not prove that a repository has no defects or that its behavior works.
+
+For example, Java syntax facts come from Tree-sitter. The current `duplicate-responsibility` selector groups allowed top-level exported/public symbols by normalized name across covered code files; dependency facts help rank and explain those groups. Differently named implementations of the same responsibility, private or nested implementations, and excluded sources can be missed. Repeated names also require interpretation before claiming duplicated ownership.
+
+The agent may always perform its own repository analysis and enrich the map through explicit MCP operations, even when automated candidates exist or calibration is ready. It must investigate beyond candidate packets when user feedback, code, documentation, or its own reasoning raises doubts about completeness, ownership, duplication, or behavior. Compare implementations, callers, contracts, and relevant tests by responsibility and observed effects, not only symbol names.
+
+Evidence added to a scan must match its recorded revision and explicit coverage. Correct coverage through the calibration workflow when needed; use a new index/run for a changed revision and a new run for a completed baseline. Broader map enrichment remains possible outside the current scan, with explicit source revisions and scope; do not silently count it as evidence covered by that run.
+
+Use `graph_command` to enrich concepts, relationships, and source references under the active capture policy, or the proposal/approval flow where required. Findings follow `scan_finding_validate` and `scan_finding_create`. The current validator assesses criterion-level prepared packets; it does not accept agent-supplied evidence as input. If independent analysis remains `missing-evidence`, `profile-gap`, or `ambiguous-shape`, retain the bounded investigation as an open `question` with source references and the validation limitation, rather than bypassing finding validation or presenting a suspicion as confirmed. See [the operational workflow](../ai/REPOSITORY_SCAN_WORKFLOW.md#agent-led-analysis-and-map-enrichment).
+
+Claims that behavior works require relevant executed tests or observed runtime effects, with their revision, scope, results, and remaining gaps stated explicitly. An index, map, test-source link, or completed scan alone is not execution evidence.
 
 ## Boundary Map Artifact
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1 - 2026-09-08
+
+- Explain automated scan limitations and make independent agent analysis and MCP map enrichment an explicit part of the repository review workflow.
+- Supply this guidance during MCP initialization and in scan tool descriptions, including the obligation to investigate suspected omissions beyond generated evidence candidates.
+- Document name-based duplicate-responsibility selection limits, the current finding-validator evidence limitation, and how to preserve additional investigation as sourced open questions.
+- Require relevant executed tests or observed runtime effects before claiming that behavior works; scan completion alone is not proof.
+- Align root/workspace versions and internal dependency pins to `0.2.1`. Postgres schema remains `1`; no database migration is required.
+
 ## 0.2.0 - 2026-09-07
 
 - Display the build's package version beside the HiveMap wordmark, including before authentication.

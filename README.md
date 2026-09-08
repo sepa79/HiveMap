@@ -6,7 +6,7 @@ HiveMap is a local, AI-assisted workspace for turning conversations, projects, i
 
 Repository review is one supported workflow, not the definition of the product. In that workflow an agent scans a repository; HiveMap supplies repeatable scan instructions, validates evidence, stores findings, and renders review projections. The same graph and projection model can also map an AI conversation, explore an idea, explain a system, or maintain a project knowledge map.
 
-Version `0.2.0` is intended for local, single-operator evaluation on real repositories. It is not a hosted multi-user service. See [CHANGELOG.md](CHANGELOG.md) for changes and compatibility limits.
+Version `0.2.1` is intended for local, single-operator evaluation on real repositories. It is not a hosted multi-user service. See [CHANGELOG.md](CHANGELOG.md) for changes and compatibility limits.
 
 The base runtime is implemented and validated locally in Docker and through HiveForge: one image contains Postgres, the API, protected Streamable HTTP MCP, the built web UI, and repository indexing/scan handlers. REST and MCP share the same typed runtime operations.
 
@@ -160,6 +160,14 @@ When the agent does not already know the canonical `workspaceId`, the intended d
 1. call `workspace_list` with an optional search query;
 2. call `workspace_resolve` with the selected id, slug, or exact name;
 3. use the returned canonical `workspaceId` for `graph_get`, scan tools, and the rest of the session.
+
+## Scan Limits And Agent Enrichment
+
+Automated scans provide a starting point, not an exhaustive review or proof that the system works. Indexing, evidence candidates, and derived maps are limited by the indexed revision, supported syntax, profile scope, heuristics, and result limits. No candidates does not mean no problems.
+
+The agent can always perform its own repository analysis and use MCP tools to enrich the map with concepts, relationships, source references, and evidence-backed findings. When it has doubts or suspects a missed issue, it must investigate beyond automated results. For example, Java parsing uses Tree-sitter, but current duplicate-responsibility candidates rely on matching normalized public/exported top-level symbol names; differently named implementations of the same responsibility can be missed.
+
+Use explicit graph operations and the scan validation workflow to record the additional evidence, keeping scope, revision, and uncertainty visible. If current finding validation cannot accept the evidence, retain it as a sourced open question. Claims that behavior works must cite relevant executed tests or observed runtime effects. See [Agent-Led Analysis And Map Enrichment](docs/ai/REPOSITORY_SCAN_WORKFLOW.md#agent-led-analysis-and-map-enrichment).
 
 ## Run a Documentation Review
 
