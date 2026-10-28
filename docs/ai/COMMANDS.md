@@ -46,6 +46,16 @@ npm run verify:image
 
 Remote HiveForge/Swarm acceptance remains an operator step because it changes a shared test environment and uses an existing external Docker secret. Build/push with `npm run dev:hiveforge`, set the printed immutable `HIVEMAP_IMAGE` (prefer `tag@sha256` after resolving the registry digest), validate requirements, run HiveForge `update`, then verify the recorded compose, `1/1` runtime state, health/UI/auth boundaries, authorized REST/MCP/indexing, and persistence after a forced task replacement.
 
+## Release Container CI
+
+The [Release container workflow](../../.github/workflows/release-image.yml) publishes the image selected by `project.vars.imageRepository.project` in `hiveforge.yaml`. It runs for pushed stable release tags and accepts an existing tag through manual dispatch:
+
+```bash
+gh workflow run release-image.yml --ref main -f tag=v0.2.2
+```
+
+The workflow checks out that tag, rejects a tag/package-version mismatch, installs dependencies, audits them, and runs the canonical full local acceptance gate above on an isolated GitHub runner. Only the exact image that passed acceptance is pushed, under the package-version tag and its `v`-prefixed alias. It verifies both registry digests and records the immutable image reference and source revision in the run summary. It does not update a shared deployment or move an existing Git tag. The job's repository-scoped `GITHUB_TOKEN` supplies registry publication rights; no personal registry secret is required.
+
 ## Local Runtime
 
 These commands describe the current local Postgres-first runtime. A working single-image local Docker runtime now exists for the API, built web UI, and bundled Postgres.

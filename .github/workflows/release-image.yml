@@ -1,0 +1,118 @@
+# Responsibility: Publish the exact release image that passed canonical local acceptance.
+# Must not: Deploy shared environments or rebuild an image after its acceptance checks.
+# Contract: docs/ai/COMMANDS.md#release-container-ci.
+name: Release container
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable release tag (vX.Y.Z)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-container-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Verify and publish release image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Select explicit release tag
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_TAG: ${{ inputs.tag }}
+          PUSHED_TAG: ${{ github.ref_name }}
+        run: |
+          case "$EVENT_NAME" in
+            push) tag="$PUSHED_TAG" ;;
+            workflow_dispatch) tag="$REQUESTED_TAG" ;;
+            *) printf 'Unsupported event: %s\n' "$EVENT_NAME" >&2; exit 1 ;;
+          esac
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            printf 'Expected a stable release tag vX.Y.Z, got: %s\n' "$tag" >&2
+            exit 1
+          fi
+          printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ steps.release.outputs.tag }}
+          persist-credentials: false
+
+      - name: Install acceptance prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ansible-core jq
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Resolve canonical release image
+        id: image
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [[ "$RELEASE_TAG" != "v$version" ]]; then
+            printf 'Release tag %s disagrees with package version %s\n' "$RELEASE_TAG" "$version" >&2
+            exit 1
+          fi
+          repository="$(python3 -c 'import yaml; print(yaml.safe_load(open("hiveforge.yaml"))["project"]["vars"]["imageRepository.project"])')"
+          if [[ "$repository" != ghcr.io/* ]]; then
+            printf 'The canonical image repository must use ghcr.io: %s\n' "$repository" >&2
+            exit 1
+          fi
+          printf 'repository=%s\nversion=%s\n' "$repository" "$version" >> "$GITHUB_OUTPUT"
+          printf 'revision=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+      - name: Verify complete release image
+        env:
+          HIVEMAP_ACCEPTANCE_IMAGE: ${{ steps.image.outputs.repository }}:${{ steps.image.outputs.version }}
+        run: npm run verify:acceptance
+
+      - name: Publish verified image
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_REPOSITORY: ${{ steps.image.outputs.repository }}
+          IMAGE_VERSION: ${{ steps.image.outputs.version }}
+          SOURCE_REVISION: ${{ steps.image.outputs.revision }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker tag "$IMAGE_REPOSITORY:$IMAGE_VERSION" "$IMAGE_REPOSITORY:v$IMAGE_VERSION"
+          docker push "$IMAGE_REPOSITORY:$IMAGE_VERSION"
+          docker push "$IMAGE_REPOSITORY:v$IMAGE_VERSION"
+          digest="$(docker buildx imagetools inspect "$IMAGE_REPOSITORY:$IMAGE_VERSION" --format '{{.Manifest.Digest}}')"
+          alias_digest="$(docker buildx imagetools inspect "$IMAGE_REPOSITORY:v$IMAGE_VERSION" --format '{{.Manifest.Digest}}')"
+          if [[ "$digest" != sha256:* || "$digest" != "$alias_digest" ]]; then
+            printf 'Published release tags do not resolve to the same image digest\n' >&2
+            exit 1
+          fi
+          {
+            printf 'Published image: `%s:%s@%s`\n\n' "$IMAGE_REPOSITORY" "$IMAGE_VERSION" "$digest"
+            printf 'Source revision: `%s`\n' "$SOURCE_REVISION"
+          } >> "$GITHUB_STEP_SUMMARY"
