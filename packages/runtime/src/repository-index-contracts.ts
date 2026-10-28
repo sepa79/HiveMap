@@ -11,7 +11,7 @@ export const SAFE_REPOSITORY_INDEX_LIMITS = {
   maxFileBytes: 5 * 1024 * 1024,
   maxTotalBytes: 250 * 1024 * 1024,
   maxChunks: 100_000,
-  maxFacts: 100_000,
+  maxFacts: 500_000,
   gitTimeoutMs: 120_000,
   gitOutputBytes: 32 * 1024 * 1024,
   gitFileWriteBytes: 300 * 1024 * 1024,

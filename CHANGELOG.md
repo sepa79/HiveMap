@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.2 - 2026-10-28
+
+- Fix repository acquisition by fetching all blobs for the requested shallow revision in one bounded Git command. Inventory and checkout no longer trigger lazy remote downloads.
+- Preserve the failed Git subcommand, wall-clock limit, process message, exit code, signal, and killed status in repository-index errors.
+- Raise the incremental generated-fact budget to 500,000 so PocketHive-sized repositories can be indexed; retain the existing chunk, file, byte, and Git-process limits.
+- Add regression coverage for offline inventory/checkout after acquisition and Git process failure diagnostics.
+- Update MCP SDK, Zod, Vite, Vitest, and affected transitive dependencies to address dependency security advisories.
+- Align root/workspace versions and internal dependency pins to `0.2.2`. Postgres schema remains `1`; no database migration is required.
+
 ## 0.2.1 - 2026-09-08
 
 - Explain automated scan limitations and make independent agent analysis and MCP map enrichment an explicit part of the repository review workflow.

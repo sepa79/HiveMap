@@ -1,6 +1,6 @@
 {
   "name": "@hivemap/web",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,13 +10,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@hivemap/api-contracts": "0.2.1",
-    "@hivemap/capture": "0.2.1",
-    "@hivemap/categories": "0.2.1",
-    "@hivemap/graph-core": "0.2.1",
-    "@hivemap/projections": "0.2.1",
-    "@hivemap/scans": "0.2.1",
-    "@hivemap/storage": "0.2.1",
+    "@hivemap/api-contracts": "0.2.2",
+    "@hivemap/capture": "0.2.2",
+    "@hivemap/categories": "0.2.2",
+    "@hivemap/graph-core": "0.2.2",
+    "@hivemap/projections": "0.2.2",
+    "@hivemap/scans": "0.2.2",
+    "@hivemap/storage": "0.2.2",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
@@ -25,8 +25,8 @@
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "typescript": "^5.9.3",
-    "vite": "^7.2.7",
-    "vitest": "^3.2.4"
+    "vite": "^7.3.7",
+    "vitest": "^4.1.11"
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.0",

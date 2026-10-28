@@ -1,6 +1,6 @@
 {
   "name": "@hivemap/categories",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -18,6 +18,6 @@
   },
   "devDependencies": {
     "typescript": "^5.9.3",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.11"
   }
 }

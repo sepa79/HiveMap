@@ -1,6 +1,6 @@
 {
   "name": "@hivemap/api",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -22,19 +22,19 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@hivemap/api-contracts": "0.2.1",
-    "@hivemap/capture": "0.2.1",
-    "@hivemap/categories": "0.2.1",
-    "@hivemap/graph-core": "0.2.1",
-    "@hivemap/mcp": "0.2.1",
-    "@hivemap/projections": "0.2.1",
-    "@hivemap/runtime": "0.2.1",
-    "@hivemap/storage": "0.2.1"
+    "@hivemap/api-contracts": "0.2.2",
+    "@hivemap/capture": "0.2.2",
+    "@hivemap/categories": "0.2.2",
+    "@hivemap/graph-core": "0.2.2",
+    "@hivemap/mcp": "0.2.2",
+    "@hivemap/projections": "0.2.2",
+    "@hivemap/runtime": "0.2.2",
+    "@hivemap/storage": "0.2.2"
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@types/node": "^24.10.1",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.11"
   }
 }

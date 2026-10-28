@@ -1,6 +1,6 @@
 {
   "name": "@hivemap/api-contracts",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -17,15 +17,15 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@hivemap/capture": "0.2.1",
-    "@hivemap/categories": "0.2.1",
-    "@hivemap/graph-core": "0.2.1",
-    "@hivemap/projections": "0.2.1",
-    "@hivemap/scans": "0.2.1",
-    "@hivemap/storage": "0.2.1"
+    "@hivemap/capture": "0.2.2",
+    "@hivemap/categories": "0.2.2",
+    "@hivemap/graph-core": "0.2.2",
+    "@hivemap/projections": "0.2.2",
+    "@hivemap/scans": "0.2.2",
+    "@hivemap/storage": "0.2.2"
   },
   "devDependencies": {
     "typescript": "^5.9.3",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.11"
   }
 }

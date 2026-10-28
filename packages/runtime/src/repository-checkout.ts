@@ -3,20 +3,17 @@
  * Must not: Interpret repository content, construct semantic facts, persist state, or execute repository code.
  * Contract: Implements checkout isolation and acquisition limits in docs/specs/repository-indexing.md.
  */
-import { execFile } from "node:child_process";
 import { lstat, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { promisify } from "node:util";
 
 import {
   SAFE_REPOSITORY_INDEX_LIMITS,
   type RepositorySourcePolicy,
 } from "./repository-index-contracts.js";
 import { RepositoryIndexExecutionError } from "./repository-index-execution-error.js";
+import { runRepositoryGit } from "./repository-git-command.js";
 import { assertSafeGitRevision, normalizeRepositorySource } from "./repository-source.js";
-
-const execFileAsync = promisify(execFile);
 
 export type SafeRepositoryCheckout = {
   resolvedCommit: string;
@@ -37,14 +34,14 @@ export async function withSafeRepositoryCheckout<T>(
   const checkoutRoot = await mkdtemp(join(tmpdir(), "hivemap-repository-index-"));
   const checkoutDir = join(checkoutRoot, "checkout");
   try {
-    await runGit(["init", "--quiet", checkoutDir]);
-    await runGit(["-C", checkoutDir, "remote", "add", "origin", source]);
-    await runGit(["-C", checkoutDir, "fetch", "--quiet", "--depth=1", "--no-tags", "--filter=blob:none", "origin", options.requestedRef]);
-    const resolvedCommit = (await runGit(["-C", checkoutDir, "rev-parse", "FETCH_HEAD"])).trim();
+    await runRepositoryGit(checkoutRoot, "init", ["--quiet", checkoutDir]);
+    await runRepositoryGit(checkoutDir, "remote", ["add", "origin", source]);
+    await runRepositoryGit(checkoutDir, "fetch", ["--quiet", "--depth=1", "--no-tags", "origin", options.requestedRef]);
+    const resolvedCommit = (await runRepositoryGit(checkoutDir, "rev-parse", ["FETCH_HEAD"])).trim();
     const trackedFiles = parseAndValidateRepositoryTree(
-      await runGit(["-C", checkoutDir, "ls-tree", "-r", "-l", "-z", "FETCH_HEAD"]),
+      await runRepositoryGit(checkoutDir, "ls-tree", ["-r", "-l", "-z", "FETCH_HEAD"]),
     );
-    await runGit(["-C", checkoutDir, "checkout", "--quiet", "--detach", "FETCH_HEAD"]);
+    await runRepositoryGit(checkoutDir, "checkout", ["--quiet", "--detach", "FETCH_HEAD"]);
 
     return await consume({
       resolvedCommit,
@@ -53,50 +50,6 @@ export async function withSafeRepositoryCheckout<T>(
     });
   } finally {
     await rm(checkoutRoot, { recursive: true, force: true });
-  }
-}
-
-async function runGit(args: string[]): Promise<string> {
-  try {
-    const { stdout } = await execFileAsync("prlimit", [
-      `--fsize=${SAFE_REPOSITORY_INDEX_LIMITS.gitFileWriteBytes}`,
-      `--as=${SAFE_REPOSITORY_INDEX_LIMITS.gitAddressSpaceBytes}`,
-      `--cpu=${SAFE_REPOSITORY_INDEX_LIMITS.gitCpuSeconds}`,
-      "--",
-      "git",
-      ...args,
-    ], {
-      env: {
-        PATH: process.env.PATH,
-        TMPDIR: process.env.TMPDIR,
-        TEMP: process.env.TEMP,
-        TMP: process.env.TMP,
-        HTTPS_PROXY: process.env.HTTPS_PROXY,
-        HTTP_PROXY: process.env.HTTP_PROXY,
-        NO_PROXY: process.env.NO_PROXY,
-        https_proxy: process.env.https_proxy,
-        http_proxy: process.env.http_proxy,
-        no_proxy: process.env.no_proxy,
-        SSL_CERT_FILE: process.env.SSL_CERT_FILE,
-        SSL_CERT_DIR: process.env.SSL_CERT_DIR,
-        GIT_CONFIG_GLOBAL: "/dev/null",
-        GIT_CONFIG_SYSTEM: "/dev/null",
-        GIT_CONFIG_NOSYSTEM: "1",
-        GIT_TERMINAL_PROMPT: "0",
-        LC_ALL: "C",
-      },
-      maxBuffer: SAFE_REPOSITORY_INDEX_LIMITS.gitOutputBytes,
-      timeout: SAFE_REPOSITORY_INDEX_LIMITS.gitTimeoutMs,
-    });
-    return stdout;
-  } catch (error) {
-    const message =
-      error instanceof Error && "stderr" in error && typeof error.stderr === "string"
-        ? error.stderr.trim() || error.message
-        : error instanceof Error
-          ? error.message
-          : "Unknown git error";
-    throw new RepositoryIndexExecutionError("GIT_COMMAND_FAILED", message);
   }
 }
 

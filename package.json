@@ -1,6 +1,6 @@
 {
   "name": "hivemap",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "license": "GPL-3.0-or-later",
   "type": "module",
@@ -34,6 +34,7 @@
     "@playwright/test": "^1.62.1",
     "@types/node": "^24.10.1",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.11",
+    "vite": "^7.3.7"
   }
 }
